@@ -42,6 +42,35 @@ test("broad phase preserves arc-edge hits for both combos in every direction", (
   }
 });
 
+test("attacking preserves normal movement in every swing phase and leaves dash unchanged", () => {
+  for (const initialSpeed of [0, CONFIG.PLAYER.SPEED, CONFIG.DASH.SPEED]) {
+    for (const move of [{ moveX: 0, moveY: 0 }, { moveX: 1, moveY: 0 }, { moveX: 1, moveY: 1 }, { moveX: -1, moveY: 0 }]) {
+      const w = sandbox();
+      const running = sandbox();
+      w.player.vx = running.player.vx = initialSpeed;
+      const input = { ...idle, ...move };
+      w.player.tick({ ...input, attack: true }, w);
+      running.player.tick(input, running);
+      const phases = new Set<string>();
+      while (w.player.swing !== null) {
+        phases.add(w.player.swing.phase);
+        assert.deepEqual(
+          [w.player.x, w.player.y, w.player.vx, w.player.vy],
+          [running.player.x, running.player.y, running.player.vx, running.player.vy],
+          `initialSpeed=${initialSpeed} phase=${w.player.swing.phase}`
+        );
+        w.player.tick(input, w);
+        running.player.tick(input, running);
+      }
+      assert.deepEqual([...phases], ["startup", "active", "recover"]);
+    }
+  }
+  const w = sandbox();
+  w.player.tick({ ...idle, attack: true }, w);
+  w.player.tick({ ...idle, dash: true, moveX: 1 }, w);
+  assert.equal(Math.hypot(w.player.vx, w.player.vy), CONFIG.DASH.SPEED);
+});
+
 test("startup press survives until the original recovery chain window", () => {
   const w = sandbox();
   const source = new IntentSource();

@@ -241,7 +241,7 @@ export class Player implements Unit {
       return;
     }
 
-    const control = this.state === PLAYER_STATE.HURT ? 0 : this.swing !== null ? 0.35 : 1;
+    const control = this.state === PLAYER_STATE.HURT ? 0 : 1;
     if (this.state === PLAYER_STATE.HURT) {
       this.hurtTicks--;
       if (this.hurtTicks <= 0) this.setState(PLAYER_STATE.IDLE);
@@ -261,7 +261,7 @@ export class Player implements Unit {
       if (Math.abs(this.vy) < 1) this.vy = 0;
     }
 
-    if (control === 1) {
+    if (control > 0) {
       const speed = Math.hypot(this.vx, this.vy);
       if (speed > p.SPEED) {
         this.vx = (this.vx / speed) * p.SPEED;

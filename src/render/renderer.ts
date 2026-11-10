@@ -341,9 +341,11 @@ export class Renderer {
       g.globalAlpha = 1;
     }
     if (flags.hitStop && this.world.hitStopTicks > 0) {
+      g.globalAlpha = 0.25;
       g.strokeStyle = P.SLASH;
       g.lineWidth = 1;
       g.strokeRect(1.5, 1.5, iw - 3, ih - 3);
+      g.globalAlpha = 1;
     }
   }
 }
