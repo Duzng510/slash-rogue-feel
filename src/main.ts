@@ -84,7 +84,7 @@ const desk = new DesktopInput(intent, {
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
-if (!autoplay) desk.attach();
+let touch: TouchInput | undefined;
 
 const touchLayer = document.getElementById("touch") as HTMLDivElement | null;
 if (touchLayer !== null) {
@@ -93,7 +93,7 @@ if (touchLayer !== null) {
   if (coarse || forced) {
     document.body.classList.add("touch");
     if (!autoplay) {
-      const touch = new TouchInput(
+      touch = new TouchInput(
         intent,
         () => world.tickCount,
         document.getElementById("stick") as HTMLElement,
@@ -101,7 +101,6 @@ if (touchLayer !== null) {
         document.getElementById("btn-attack") as HTMLElement,
         document.getElementById("btn-dash") as HTMLElement
       );
-      touch.attach();
     }
   }
 }
@@ -149,20 +148,6 @@ window.addEventListener("keydown", () => sfx.unlock());
 window.addEventListener("resize", onViewport);
 window.addEventListener("orientationchange", onViewport);
 document.addEventListener("fullscreenchange", onViewport);
-if (document.body.classList.contains("touch")) {
-  // the first tap is the only user gesture available, and fullscreen requires one
-  window.addEventListener(
-    "pointerdown",
-    () => {
-      void tryImmersive(document.documentElement, screen.orientation as unknown as OrientationLike)
-        .then((r) => {
-          immersiveNote = r.reason;
-          onViewport();
-        });
-    },
-    { once: true }
-  );
-}
 
 function botIntent(): Intent {
   const p = world.player;
@@ -237,7 +222,30 @@ const diag = startDiag(qs.get("diag") === "1", () => ({
 }));
 
 const loop = new GameLoop(sim, frame);
-if (qs.get("manual") !== "1") loop.start();
+const startScreen = document.getElementById("start-screen") as HTMLDivElement;
+const startButton = document.getElementById("btn-start") as HTMLButtonElement;
+function startGame(): void {
+  startScreen.hidden = true;
+  document.body.classList.remove("starting");
+  if (!autoplay) {
+    desk.attach();
+    touch?.attach();
+  }
+  if (qs.get("manual") !== "1") loop.start();
+}
+if (autoplay || qs.get("manual") === "1") {
+  startGame();
+} else {
+  startButton.addEventListener("click", () => {
+    sfx.unlock();
+    void tryImmersive(document.documentElement, screen.orientation as unknown as OrientationLike)
+      .then((r) => {
+        immersiveNote = r.reason;
+        onViewport();
+      });
+    startGame();
+  }, { once: true });
+}
 
 type Harness = {
   ready: true;

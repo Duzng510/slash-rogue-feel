@@ -17,6 +17,18 @@
         overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
       }
       #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+      #start-screen { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: var(--bg); }
+      #start-screen[hidden] { display: none; }
+      #btn-start {
+        padding: 24px 40px; border: 0; background: transparent; color: var(--ink);
+        font: bold clamp(28px, 6vw, 48px)/1.2 ui-monospace, Consolas, monospace;
+        letter-spacing: 0.18em; cursor: pointer; touch-action: manipulation;
+        text-shadow: 0 0 20px rgba(77, 163, 255, 0.35);
+      }
+      #btn-start:hover, #btn-start:focus-visible { color: #9fd0ff; }
+      #btn-start:focus-visible { outline: 2px solid #4da3ff; outline-offset: 4px; }
+      #btn-start:active { transform: scale(0.96); }
+      body.starting.touch #touch, body.starting #keys, body.starting #panel { display: none; }
       /* landscape fallback: the whole app becomes a 16:10-ish landscape box rotated inside a portrait viewport */
       #app { position: fixed; inset: 0; }
       body.rot90 #app {
@@ -73,8 +85,9 @@
       .tbtn.press { background: rgba(77, 163, 255, 0.4); transform: scale(0.94); }
     </style>
   </head>
-  <body>
+  <body class="starting">
     <div id="app">
+    <div id="start-screen"><button id="btn-start" type="button">START</button></div>
     <div id="stage">
       <canvas id="game"></canvas>
       <canvas id="overlay"></canvas>
