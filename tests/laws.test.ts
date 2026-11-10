@@ -12,6 +12,7 @@ import { requestHitStop } from "../src/systems/feelSim.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
 import { makeRng } from "../src/mathx.ts";
 import { fitAxes, rotateVec, tryImmersive } from "../src/ui/immersive.ts";
+import { stalled } from "../src/ui/diag.ts";
 import type { Intent } from "../src/sim/types.ts";
 
 let pass = 0;
@@ -514,18 +515,33 @@ heading("Mobile landscape");
 
   const order: string[] = [];
   const noApi = await tryImmersive({}, { lock: async () => { order.push("lock"); } });
-  ok("a browser without fullscreen is skipped, not thrown", !noApi);
+  ok("a browser without fullscreen is skipped, not thrown", !noApi.fullscreen);
+  ok("the skip is reported as unsupported instead of swallowed", noApi.reason === "unsupported", noApi.reason);
   ok("no fullscreen means no orientation lock attempt", order.length === 0, order.join(","));
   const granted = await tryImmersive(
     { requestFullscreen: async () => { order.push("fs"); } },
     { lock: async () => { order.push("lock"); } }
   );
-  ok("the lock runs only after fullscreen is granted", granted && order.join(",") === "fs,lock", order.join(","));
+  ok("the lock runs only after fullscreen is granted", granted.fullscreen && order.join(",") === "fs,lock", order.join(","));
+  ok("a clean run says so", granted.reason === "ok", granted.reason);
   const denied = await tryImmersive(
-    { requestFullscreen: async () => { throw new Error("user denied"); } },
+    { requestFullscreen: async () => { throw new DOMException("denied", "NotAllowedError"); } },
     { lock: async () => { order.push("denied-lock"); } }
   );
-  ok("a denied fullscreen stops there", !denied && !order.includes("denied-lock"));
+  ok("a denied fullscreen stops there", !denied.fullscreen && !order.includes("denied-lock"));
+  ok("the denial reason survives for the on-screen diagnostic", denied.reason === "fs:NotAllowedError", denied.reason);
+  const lockFailed = await tryImmersive(
+    { requestFullscreen: async () => {} },
+    { lock: async () => { throw new DOMException("nope", "NotSupportedError"); } }
+  );
+  ok("a fullscreen that works without a lock is still immersive", lockFailed.fullscreen, lockFailed.reason);
+  ok("the refused lock is named, not hidden", lockFailed.reason === "lock:NotSupportedError", lockFailed.reason);
+
+  ok("the watchdog fires only past the limit", stalled(1000, 400, 500) && !stalled(1000, 600, 500) && !stalled(1000, 1000, 500));
+
+  const entry = readFileSync("src/main.ts", "utf8");
+  ok("the diagnostic is gated on exactly one query check", entry.includes('startDiag(qs.get("diag") === "1",'), "gate changed");
+  ok("the diagnostic never auto-enables from device detection", !readFileSync("src/ui/diag.ts", "utf8").includes("matchMedia"));
 
   const html = readFileSync("index.html", "utf8");
   const open = html.indexOf('<div id="app">');

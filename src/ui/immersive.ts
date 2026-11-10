@@ -32,23 +32,29 @@ export function syncOrientation(): boolean {
 export type FullscreenRoot = { requestFullscreen?(opts?: { navigationUI?: string }): Promise<void> };
 /** lib.dom has no ScreenOrientation.lock (it is a Chrome-only API), so the shape is declared here */
 export type OrientationLike = { lock?(o: string): Promise<void> } | undefined;
+export type ImmersiveResult = { fullscreen: boolean; reason: string };
+
+function why(e: unknown): string {
+  return e instanceof Error ? e.name : String(e);
+}
 
 /**
  * Fullscreen is the only way to drop the browser bar, and screen.orientation.lock only works
  * while fullscreen is granted, so the lock is attempted strictly after a successful request.
- * iOS supports neither: both are skipped silently, the CSS rotation covers landscape there.
+ * iOS supports neither. Failures are reported instead of swallowed: on a real phone the reason
+ * string is the only evidence of which of the two APIs the browser actually refused.
  */
-export async function tryImmersive(root: FullscreenRoot | null, orientation: OrientationLike | undefined): Promise<boolean> {
-  if (root === null || typeof root.requestFullscreen !== "function") return false;
+export async function tryImmersive(root: FullscreenRoot | null, orientation: OrientationLike | undefined): Promise<ImmersiveResult> {
+  if (root === null || typeof root.requestFullscreen !== "function") return { fullscreen: false, reason: "unsupported" };
   try {
     await root.requestFullscreen({ navigationUI: "hide" });
-  } catch {
-    return false;
+  } catch (e) {
+    return { fullscreen: false, reason: `fs:${why(e)}` };
   }
   try {
     await orientation?.lock?.("landscape");
-  } catch {
-    /* lock is Android-only */
+  } catch (e) {
+    return { fullscreen: true, reason: `lock:${why(e)}` };
   }
-  return true;
+  return { fullscreen: true, reason: "ok" };
 }

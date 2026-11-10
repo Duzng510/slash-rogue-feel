@@ -12,6 +12,7 @@ import { buildSprites } from "./render/pixelart.ts";
 import { Hud } from "./ui/hud.ts";
 import { syncOrientation, tryImmersive } from "./ui/immersive.ts";
 import type { OrientationLike } from "./ui/immersive.ts";
+import { startDiag } from "./ui/diag.ts";
 import { DebugHud, type DebugFlags } from "./ui/debug.ts";
 import { Sfx } from "./audio/sfx.ts";
 import { createSwing } from "./systems/combat.ts";
@@ -141,6 +142,8 @@ for (const s of SLIDERS) {
 }
 syncSliderLabels();
 
+let immersiveNote = "not tried";
+
 window.addEventListener("pointerdown", () => sfx.unlock());
 window.addEventListener("keydown", () => sfx.unlock());
 window.addEventListener("resize", onViewport);
@@ -151,7 +154,11 @@ if (document.body.classList.contains("touch")) {
   window.addEventListener(
     "pointerdown",
     () => {
-      void tryImmersive(document.documentElement, screen.orientation as unknown as OrientationLike).then(onViewport);
+      void tryImmersive(document.documentElement, screen.orientation as unknown as OrientationLike)
+        .then((r) => {
+          immersiveNote = r.reason;
+          onViewport();
+        });
     },
     { once: true }
   );
@@ -202,6 +209,7 @@ function sim(): void {
 }
 
 function frame(dtReal: number): void {
+  diag.frame();
   const dtSim = dtReal * CONFIG.SLIDERS.timescale;
   world.particles.update(dtSim);
   const aim = intent.aim ?? { x: world.player.x, y: world.player.y };
@@ -218,6 +226,15 @@ function frame(dtReal: number): void {
   debug.measure(dtReal);
   debug.draw(o, renderer.scale, world, renderer, flags);
 }
+
+const diag = startDiag(qs.get("diag") === "1", () => ({
+  fs: document.fullscreenElement !== null,
+  orient: screen.orientation ? `${screen.orientation.type}/${screen.orientation.angle}` : "n/a",
+  fserr: immersiveNote,
+  tick: world.tickCount,
+  stop: world.hitStopTicks,
+  alive: world.aliveEnemies(),
+}));
 
 const loop = new GameLoop(sim, frame);
 if (qs.get("manual") !== "1") loop.start();
