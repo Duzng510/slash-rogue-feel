@@ -161,8 +161,22 @@ export class Room {
     }
 
     if (!this.hasStart) {
-      this.start.x = this.w * 0.25 * CONFIG.WORLD.TILE;
-      this.start.y = this.h * 0.5 * CONFIG.WORLD.TILE;
+      const fallbackX = this.w * 0.25 * CONFIG.WORLD.TILE;
+      const fallbackY = this.h * 0.5 * CONFIG.WORLD.TILE;
+      let nearest = Infinity;
+      for (let ty = 1; ty < this.h - 1; ty++) {
+        for (let tx = 1; tx < this.w - 1; tx++) {
+          if (this.isSolid(tx, ty)) continue;
+          const x = (tx + 0.5) * CONFIG.WORLD.TILE;
+          const y = (ty + 0.75) * CONFIG.WORLD.TILE;
+          const distance = (x - fallbackX) ** 2 + (y - fallbackY) ** 2;
+          if (distance >= nearest) continue;
+          nearest = distance;
+          this.start.x = x;
+          this.start.y = y;
+        }
+      }
+      if (!Number.isFinite(nearest)) throw new Error(`Room ${this.name} has no walkable start`);
     }
 
     const midY = Math.floor(this.h / 2);

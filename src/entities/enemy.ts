@@ -247,7 +247,7 @@ export class Enemy implements Unit {
       combo: 1,
       dir: this.telegraphDir,
       ox: this.x,
-      oy: this.y,
+      oy: this.y - (e.RADIAL ? e.BODY_H * 0.5 : 0),
       reach: e.ATTACK_REACH,
       deg: e.ATTACK_ARC_DEG,
       dmg: e.DMG,

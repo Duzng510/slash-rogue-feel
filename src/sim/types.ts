@@ -18,7 +18,7 @@ export type Swing = {
   phase: SwingPhase;
   ticksLeft: number;
   fd: FrameData;
-  /** feet-anchored origin, captured at swing start so movement cannot stretch the arc */
+  /** captured at swing start so movement cannot stretch the arc */
   ox: number;
   oy: number;
   reach: number;

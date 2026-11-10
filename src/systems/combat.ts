@@ -75,16 +75,14 @@ export function stepSwing(sw: Swing): boolean {
   return true;
 }
 
+function hitReach(sw: Swing): number {
+  return sw.reach * (sw.side === "enemy" && sw.deg === 360 ? 1 : 1.15);
+}
+
 export function hitboxOf(sw: Swing): Rect | null {
   if (sw.phase !== "active") return null;
-  const r = sw.reach * 1.15;
-  if (sw.deg >= 320) {
-    return { x: sw.ox - r, y: sw.oy - r, w: r * 2, h: r * 2 };
-  }
-  const half = sw.reach * 0.6;
-  const cx = sw.ox + Math.cos(sw.dir) * sw.reach * 0.5;
-  const cy = sw.oy + Math.sin(sw.dir) * sw.reach * 0.5;
-  return { x: cx - half, y: cy - half, w: half * 2, h: half * 2 };
+  const r = hitReach(sw);
+  return { x: sw.ox - r, y: sw.oy - r, w: r * 2, h: r * 2 };
 }
 
 export function resolveHits(src: Sim): void {
@@ -101,7 +99,7 @@ export function resolveHits(src: Sim): void {
       if (!rectsOverlap(box, hb)) continue;
       const cx = hb.x + hb.w / 2;
       const cy = hb.y + hb.h / 2;
-      if (!pointInArc(cx, cy, sw.ox, sw.oy, sw.dir, sw.reach * 1.15, sw.deg, 0)) continue;
+      if (!pointInArc(cx, cy, sw.ox, sw.oy, sw.dir, hitReach(sw), sw.deg, 0)) continue;
       if (sw.seen.has(target.id)) continue;
 
       sw.seen.add(target.id);

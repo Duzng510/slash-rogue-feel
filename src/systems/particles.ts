@@ -47,6 +47,7 @@ function makeSlot(): Slot {
 export class ParticlePool {
   private slots: Slot[];
   private cursor = 0;
+  private liveCount = 0;
   readonly cap: number;
 
   constructor(cap: number = CONFIG.READABILITY.PARTICLE_CAP) {
@@ -56,9 +57,7 @@ export class ParticlePool {
   }
 
   get alive(): number {
-    let n = 0;
-    for (const s of this.slots) if (s.live) n++;
-    return n;
+    return this.liveCount;
   }
 
   /** Ring allocation: reuse a free slot, else evict at cursor (newest impact wins over stale spray). */
@@ -91,6 +90,7 @@ export class ParticlePool {
     }
 
     const downscale = load >= rd.DOWNSCALE_AT;
+    if (!slot.live) this.liveCount++;
     slot.live = true;
     slot.kind = kind;
     slot.tier = spec.tier;
@@ -153,6 +153,7 @@ export class ParticlePool {
       s.life -= dt;
       if (s.life <= 0) {
         s.live = false;
+        this.liveCount--;
         continue;
       }
       s.vy += s.gravity * dt;
@@ -167,6 +168,7 @@ export class ParticlePool {
   reset(): void {
     for (const s of this.slots) s.live = false;
     this.cursor = 0;
+    this.liveCount = 0;
   }
 
   visit(fn: (s: Readonly<Slot>) => void): void {

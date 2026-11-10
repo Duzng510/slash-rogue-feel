@@ -60,6 +60,7 @@ export class Player implements Unit {
   animTicks = 0;
   ghostTick = 0;
   autoTargetId = -1;
+  private queuedAttackTicks = 0;
 
   reset(x: number, y: number): void {
     this.x = x;
@@ -72,6 +73,7 @@ export class Player implements Unit {
     this.state = PLAYER_STATE.IDLE;
     this.swing = null;
     this.combo = 0;
+    this.queuedAttackTicks = 0;
     this.iframeTicks = 0;
     this.dashIframeTicks = 0;
     this.dashCd = 0;
@@ -102,6 +104,8 @@ export class Player implements Unit {
     const p = CONFIG.PLAYER;
     this.hp -= sw.dmg;
     this.swing = null;
+    this.combo = 0;
+    this.queuedAttackTicks = 0;
     knockback(this, sw.dir, p.HURT_KNOCKBACK);
     src.particles.burstBlood(cx, cy, sw.dir, CONFIG.FEEL.PLAYER_BLOOD, src.rng);
     shake(src.queue, this.x, this.y, sw.dir, CONFIG.FEEL.SHAKE_PLAYER_HURT_MULT);
@@ -150,21 +154,25 @@ export class Player implements Unit {
 
     // TRANSITIONS forbids hurt -> attack, so an unguarded request would throw and stop the loop
     const attackAllowed = this.state !== PLAYER_STATE.HURT;
-    const chainRequest = intent.attack && attackAllowed && this.swing !== null;
     const freshRequest = intent.attack && attackAllowed && this.swing === null;
+    if (this.queuedAttackTicks > 0) this.queuedAttackTicks--;
+    if (intent.attack && attackAllowed && this.swing !== null && this.combo < CONFIG.ATTACK.COMBOS.length) {
+      this.queuedAttackTicks = CONFIG.INPUT.PRESS_BUFFER_TICKS;
+    }
 
-    if (this.swing !== null) {
+    if (intent.dash && this.dashCd <= 0 && this.state !== PLAYER_STATE.HURT) {
+      this.startDash(intent, src);
+    } else if (this.swing !== null) {
       const done = stepSwing(this.swing);
-      if (chainRequest && this.canChain()) this.startSwing(src, this.combo + 1, intent, this.swing.dir);
+      if (this.queuedAttackTicks > 0 && this.canChain()) this.startSwing(src, this.combo + 1, intent, this.swing.dir);
       else if (done) {
         this.swing = null;
         this.combo = 0;
+        this.queuedAttackTicks = 0;
       }
     } else if (freshRequest) {
       this.startSwing(src, 1, intent, null);
     }
-
-    if (intent.dash && this.dashCd <= 0 && this.state !== PLAYER_STATE.HURT) this.startDash(intent, src);
 
     this.integrate(intent, src, dt);
     moveBody(this, src.room, dt);
@@ -189,6 +197,7 @@ export class Player implements Unit {
     init.oy = this.y;
     this.swing = createSwing(src, init);
     this.combo = combo;
+    this.queuedAttackTicks = 0;
     this.autoTargetId = aim.targetId;
     this.setState(PLAYER_STATE.ATTACK);
     sfx(src.queue, "slash_air", 0.7, combo === 2 ? 1.12 : 1);
@@ -210,6 +219,7 @@ export class Player implements Unit {
     const dir = intent.moveX !== 0 || intent.moveY !== 0 ? Math.atan2(intent.moveY, intent.moveX) : this.facing;
     this.swing = null;
     this.combo = 0;
+    this.queuedAttackTicks = 0;
     this.setState(PLAYER_STATE.DASH);
     this.dashTicks = d.TICKS;
     this.dashDir = dir;

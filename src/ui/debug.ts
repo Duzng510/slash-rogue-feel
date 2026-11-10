@@ -59,17 +59,21 @@ export class DebugHud {
       const pl = world.player;
       o.font = `${Math.max(10, Math.round(5.5 * scale))}px ui-monospace, monospace`;
       o.textBaseline = "top";
-      o.fillStyle = P.VOID;
-      o.globalAlpha = 0.72;
-      o.fillRect(4, o.canvas.height - (Math.round(11 * scale) + 6), 210, Math.round(11 * scale) + 4);
-      o.globalAlpha = 1;
-      o.fillStyle = P.TEXT;
       const lines = [
         `fps ${this.fps}  tick ${world.tickCount}  ts ${CONFIG.SLIDERS.timescale.toFixed(2)}`,
         `parts ${world.particles.alive}/${world.particles.cap}  alive ${world.aliveEnemies()}  stop ${world.hitStopTicks}`,
         `you ${pl.state}${pl.swing !== null ? `/${pl.swing.phase}:${pl.swing.ticksLeft}` : ""} c${pl.combo} ifr${pl.iframeTicks}`,
       ];
-      lines.forEach((t, i) => o.fillText(t, 8, o.canvas.height - (Math.round(11 * scale) + 2) + i * Math.round(9 * scale)));
+      const lineHeight = Math.max(12, Math.round(9 * scale));
+      const height = lines.length * lineHeight + 8;
+      const top = o.canvas.height - height - 2;
+      const width = Math.min(o.canvas.width - 8, Math.ceil(Math.max(...lines.map(t => o.measureText(t).width))) + 8);
+      o.fillStyle = P.VOID;
+      o.globalAlpha = 0.72;
+      o.fillRect(4, top, width, height);
+      o.globalAlpha = 1;
+      o.fillStyle = P.TEXT;
+      lines.forEach((t, i) => o.fillText(t, 8, top + 4 + i * lineHeight, width - 8));
 
       if (flags.boxes) {
         o.fillStyle = P.DBG_ARC;
