@@ -10,17 +10,18 @@ import { Camera } from "./render/camera.ts";
 import { Renderer } from "./render/renderer.ts";
 import { buildSprites } from "./render/pixelart.ts";
 import { Hud } from "./ui/hud.ts";
-import { syncOrientation, tryImmersive } from "./ui/immersive.ts";
+import { isRotated, syncOrientation, tryImmersive } from "./ui/immersive.ts";
 import type { OrientationLike } from "./ui/immersive.ts";
 import { startDiag } from "./ui/diag.ts";
 import { DebugHud, type DebugFlags } from "./ui/debug.ts";
 import { Sfx } from "./audio/sfx.ts";
 import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
+import type { BoonId } from "./systems/boons.ts";
 
 const qs = new URLSearchParams(location.search);
 const autoplay = qs.get("autoplay") === "1";
-const seed = Number(qs.get("seed") ?? CONFIG.SEED);
+const seed = Number(qs.get("seed") ?? Math.floor(Math.random() * 0x100000000));
 
 const game = document.getElementById("game") as HTMLCanvasElement;
 const overlay = document.getElementById("overlay") as HTMLCanvasElement;
@@ -45,6 +46,7 @@ const flags: DebugFlags = {
 };
 
 function applyHotkey(k: Hotkey): void {
+  if (world.boonChoices.length > 0) return;
   switch (k) {
     case "panel":
       panel.classList.toggle("on");
@@ -81,6 +83,7 @@ function applyHotkey(k: Hotkey): void {
 
 const desk = new DesktopInput(intent, {
   tick: () => world.tickCount,
+  blocked: () => world.boonChoices.length > 0,
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
@@ -103,6 +106,63 @@ if (touchLayer !== null) {
       );
     }
   }
+}
+
+let modalOpen = false;
+function resetInput(): void {
+  desk.reset();
+  touch?.reset();
+}
+function syncBoonModal(): boolean {
+  const open = world.boonChoices.length > 0;
+  if (open !== modalOpen) {
+    resetInput();
+    modalOpen = open;
+    document.body.classList.toggle("boon-modal", open);
+  }
+  if (open) resetInput();
+  return open;
+}
+function chooseBoon(id: BoonId): boolean {
+  const chosen = world.chooseBoon(id);
+  if (chosen) resetInput();
+  syncBoonModal();
+  return chosen;
+}
+function boonFromClient(x: number, y: number): BoonId | null {
+  const r = overlay.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const u = (x - r.left) / r.width;
+  const v = (y - r.top) / r.height;
+  return isRotated() ? hud.boonAt(v * 320, (1 - u) * 180) : hud.boonAt(u * 320, v * 180);
+}
+const modalPointers = new Map<number, BoonId | null>();
+let suppressModalClick = false;
+window.addEventListener("pointerdown", (e) => {
+  suppressModalClick = world.boonChoices.length > 0;
+  if (!suppressModalClick) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  sfx.unlock();
+  syncBoonModal();
+  modalPointers.set(e.pointerId, e.button === 0 ? boonFromClient(e.clientX, e.clientY) : null);
+}, { capture: true });
+for (const type of ["pointerup", "pointercancel"] as const) {
+  window.addEventListener(type, (e) => {
+    if (!modalPointers.has(e.pointerId) && world.boonChoices.length === 0) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const id = modalPointers.get(e.pointerId);
+    modalPointers.delete(e.pointerId);
+    if (type === "pointerup" && id != null && id === boonFromClient(e.clientX, e.clientY)) chooseBoon(id);
+  }, { capture: true });
+}
+for (const type of ["mousedown", "mouseup", "click", "dblclick", "contextmenu"] as const) {
+  window.addEventListener(type, (e) => {
+    if (!suppressModalClick && world.boonChoices.length === 0) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, { capture: true });
 }
 
 // rotation decides which axes the fit uses, so the two always change together
@@ -177,6 +237,7 @@ function botIntent(): Intent {
 }
 
 function sim(): void {
+  if (syncBoonModal()) return;
   /** hit-stop must not swallow presses: read(live=false) leaves them queued for the first tick after the freeze */
   const live = world.hitStopTicks === 0;
   if (!autoplay) {
@@ -194,6 +255,7 @@ function sim(): void {
 }
 
 function frame(dtReal: number): void {
+  syncBoonModal();
   diag.frame();
   const dtSim = dtReal * CONFIG.SLIDERS.timescale;
   world.particles.update(dtSim);
@@ -210,6 +272,7 @@ function frame(dtReal: number): void {
   hud.draw(o, renderer.scale);
   debug.measure(dtReal);
   debug.draw(o, renderer.scale, world, renderer, flags);
+  hud.drawBoons(o, renderer.scale);
 }
 
 const diag = startDiag(qs.get("diag") === "1", () => ({
@@ -258,11 +321,14 @@ type Harness = {
   clearEnemies: () => void;
   damageEnemy: (id: number, dmg: number) => boolean;
   gotoRoom: (i: number) => void;
+  chooseBoon: (id: BoonId) => boolean;
   state: () => {
     tick: number;
     hitStop: number;
     player: { x: number; y: number; hp: number; state: string; swing: string | null; invuln: boolean };
     roomIndex: number;
+    boons: BoonId[];
+    boonChoices: BoonId[];
     enemies: {
       id: number;
       x: number;
@@ -314,7 +380,8 @@ const harness: Harness = {
     );
     return true;
   },
-  gotoRoom: (i) => world.loadRoom(i),
+  gotoRoom: (i) => { world.loadRoom(i); syncBoonModal(); },
+  chooseBoon,
   state: () => ({
     tick: world.tickCount,
     hitStop: world.hitStopTicks,
@@ -327,6 +394,8 @@ const harness: Harness = {
       invuln: !world.player.canBeHit(),
     },
     roomIndex: world.roomIndex,
+    boons: [...world.boons],
+    boonChoices: world.boonChoices.map((boon) => boon.id),
     enemies: world.enemies.map((e) => ({
       id: e.id,
       x: e.x,

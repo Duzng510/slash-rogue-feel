@@ -1,4 +1,5 @@
 import type { Rect, Rng } from "../mathx.ts";
+import type { BoonId, FireTrail } from "../systems/boons.ts";
 import type { EventQueue } from "../events.ts";
 import type { ParticlePool } from "../systems/particles.ts";
 import type { Enemy } from "../entities/enemy.ts";
@@ -27,6 +28,7 @@ export type Swing = {
   knockback: number;
   /** per-swing-instance: a swing can never hit the same unit twice, whatever hit-stop does */
   seen: Set<number>;
+  aftershockDone?: boolean;
 };
 
 export interface Unit {
@@ -61,6 +63,8 @@ export type Intent = {
 };
 
 export type Sim = {
+  boons: Set<BoonId>;
+  fireTrails: FireTrail[];
   units: Unit[];
   enemies: Enemy[];
   player: Player;

@@ -2,7 +2,8 @@ import { CONFIG, type EnemyKind } from "../config.ts";
 import { makeRng } from "../mathx.ts";
 import { EventQueue, sfx } from "../events.ts";
 import { ParticlePool } from "../systems/particles.ts";
-import { resolveHits } from "../systems/combat.ts";
+import { resolveHits, resolveFire } from "../systems/combat.ts";
+import { BOONS, type Boon, type BoonId, type FireTrail } from "../systems/boons.ts";
 import { Player } from "../entities/player.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
 import { Room, TEMPLATES, type SpawnMark } from "../world/rooms.ts";
@@ -26,10 +27,16 @@ export class World implements Sim {
   playerDeadTicks = 0;
   tickCount = 0;
 
+  readonly boons = new Set<BoonId>();
+  boonChoices: Boon[] = [];
+  fireTrails: FireTrail[] = [];
+  private rewardedRooms = new Set<number>();
+  private boonRng = makeRng(CONFIG.SEED);
   private swingSeq = 1;
 
   constructor(seed: number = CONFIG.SEED) {
     this.rng = makeRng(seed);
+    this.boonRng = makeRng(seed ^ 0xb001);
     this.room = new Room(TEMPLATES[0], 0);
     this.loadRoom(0, false);
   }
@@ -61,6 +68,8 @@ export class World implements Sim {
     this.room = new Room(TEMPLATES[this.roomIndex], this.roomIndex);
     resetEnemyIds();
     this.enemies = [];
+    this.fireTrails = [];
+    this.boonChoices = [];
     for (const s of this.waveSpawns(this.roomIndex)) this.spawnEnemy(s.x, s.y, s.kind);
     this.syncUnits();
     this.player.reset(this.room.start.x, this.room.start.y);
@@ -86,7 +95,19 @@ export class World implements Sim {
     return n;
   }
 
+  chooseBoon(id: BoonId): boolean {
+    if (!this.boonChoices.some(b => b.id === id) || this.boons.has(id)) return false;
+    this.boons.add(id);
+    this.rewardedRooms.add(this.roomIndex);
+    this.boonChoices = [];
+    this.room.openDoors();
+    sfx(this.queue, "door");
+    this.banner(`${BOONS.find(b => b.id === id)!.name} — cửa mở`);
+    return true;
+  }
+
   tick(input: Intent): void {
+    if (this.boonChoices.length > 0) return;
     this.tickCount++;
     if (this.bannerTicks > 0) this.bannerTicks--;
 
@@ -101,6 +122,7 @@ export class World implements Sim {
     this.syncUnits();
 
     resolveHits(this);
+    resolveFire(this);
     this.progress(input);
   }
 
@@ -116,6 +138,15 @@ export class World implements Sim {
     }
 
     if (this.aliveEnemies() === 0 && !this.room.doorOpen) {
+      if (!this.rewardedRooms.has(this.roomIndex)) {
+        const pool = BOONS.filter(b => !this.boons.has(b.id));
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(this.boonRng.next() * (i + 1));
+          [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        this.boonChoices = pool.slice(0, 3);
+        if (this.boonChoices.length > 0) return;
+      }
       this.room.openDoors();
       sfx(this.queue, "door");
       this.banner(this.roomIndex === this.roomTotal - 1 ? "Sạch quái — hết prototype" : "Sạch quái — cửa mở");
@@ -124,6 +155,10 @@ export class World implements Sim {
     if (this.room.exitsAt(this.player.x, this.player.y)) {
       const last = this.roomIndex === this.roomTotal - 1;
       this.victory = last;
+      if (last) {
+        this.boons.clear();
+        this.rewardedRooms.clear();
+      }
       this.loadRoom(last ? 0 : this.roomIndex + 1);
       sfx(this.queue, "door", 0.8, 1.2);
     }

@@ -42,6 +42,7 @@ function sandbox(): World {
   w.enemies = [];
   w.syncUnits();
   w.player.reset(w.room.start.x, w.room.start.y);
+  w.room.openDoors();
   return w;
 }
 
@@ -285,11 +286,13 @@ heading("Sim purity (tick() must stay testable in node)");
 
 heading("Room loop");
 {
-  const w = sandbox();
+  const w = new World();
   ok("room starts with the door locked", !w.room.doorOpen);
   for (const e of w.enemies) e.die();
   w.tick(intent());
-  ok("clearing the room opens the door", w.room.doorOpen);
+  ok("clearing the room offers three artifacts before opening the door", !w.room.doorOpen && w.boonChoices.length === 3);
+  w.chooseBoon(w.boonChoices[0].id);
+  ok("choosing an artifact opens the door", w.room.doorOpen);
   const before = w.roomIndex;
   w.player.x = w.room.widthPx - 8;
   w.player.y = w.room.heightPx / 2;

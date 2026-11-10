@@ -1,6 +1,7 @@
 import { CONFIG } from "../config.ts";
 import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
+import type { BoonId } from "../systems/boons.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -9,6 +10,57 @@ export class Hud {
     private readonly world: World,
     private readonly sprites: Record<string, Sprite>
   ) {}
+
+  boonAt(x: number, y: number): BoonId | null {
+    if (x < 16 || x > 304) return null;
+    const i = Math.floor((y - 40) / 43);
+    if (i < 0 || i > 2 || y > 40 + i * 43 + 38) return null;
+    const boon = this.world.boonChoices[i];
+    return boon && !this.world.boons.has(boon.id) ? boon.id : null;
+  }
+
+  drawBoons(o: CanvasRenderingContext2D, scale: number): void {
+    if (this.world.boonChoices.length === 0) return;
+    o.save();
+    o.scale(scale, scale);
+    o.globalAlpha = 1;
+    o.fillStyle = "rgba(8, 9, 13, 0.94)";
+    o.fillRect(0, 0, 320, 180);
+    o.textBaseline = "top";
+    o.textAlign = "center";
+    o.fillStyle = "#e4ebf7";
+    o.font = "bold 11px sans-serif";
+    o.fillText("CHỌN MỘT CỔ VẬT", 160, 10);
+    o.font = "7px sans-serif";
+    o.fillStyle = "#a7b4c9";
+    o.fillText("Đã sạch phòng · Chạm để chọn và tiếp tục", 160, 26);
+    o.textAlign = "left";
+    this.world.boonChoices.slice(0, 3).forEach((boon, i) => {
+      const y = 40 + i * 43;
+      o.fillStyle = "#172233";
+      o.fillRect(16, y, 288, 38);
+      o.strokeStyle = "#537da6";
+      o.lineWidth = 1;
+      o.strokeRect(16.5, y + 0.5, 287, 37);
+      o.font = "bold 9px sans-serif";
+      o.fillStyle = "#d2e8ff";
+      o.fillText(boon.name, 24, y + 5, 272);
+      o.font = "8px sans-serif";
+      o.fillStyle = "#c3cddd";
+      const lines: string[] = [];
+      let line = "";
+      for (const word of boon.desc.split(/\s+/)) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && o.measureText(next).width > 272) {
+          lines.push(line);
+          line = word;
+        } else line = next;
+      }
+      lines.push(line);
+      lines.forEach((text, j) => o.fillText(text, 24, y + 18 + j * 9, 272));
+    });
+    o.restore();
+  }
 
   draw(o: CanvasRenderingContext2D, scale: number): void {
     const w = this.world;

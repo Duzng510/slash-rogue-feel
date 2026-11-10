@@ -131,6 +131,16 @@ export class Renderer {
     g.fillRect(0, 0, CONFIG.WORLD.INTERNAL_W, CONFIG.WORLD.INTERNAL_H);
 
     this.drawTiles(g, ox, oy);
+    for (const trail of w.fireTrails) for (const p of trail.points) {
+      const x = Math.round(p.x - ox), y = Math.round(p.y - oy);
+      g.globalAlpha = Math.min(0.45, p.ticks / 60);
+      g.fillStyle = "#d84b20";
+      g.fillRect(x - 6, y - 6, 12, 12);
+      g.globalAlpha = Math.min(1, p.ticks / 15);
+      g.fillStyle = "#ffc35a";
+      g.fillRect(x - 1, y - 2 - (p.ticks % 3), 2, 4);
+    }
+    g.globalAlpha = 1;
     this.drawTelegraphs(g, ox, oy);
     this.drawShadows(g, ox, oy);
     this.drawArcs(g, ox, oy);

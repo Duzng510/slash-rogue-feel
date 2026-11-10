@@ -44,6 +44,20 @@ export class TouchInput {
     this.dashBtn.removeEventListener("pointerup", this.releaseDash);
   }
 
+  reset(): void {
+    if (this.stickId !== -1 && this.stick.hasPointerCapture(this.stickId)) {
+      this.stick.releasePointerCapture(this.stickId);
+    }
+    this.stickId = -1;
+    this.intent.moveX = 0;
+    this.intent.moveY = 0;
+    this.intent.aim = null;
+    this.intent.clearPresses();
+    this.knob.style.transform = "translate(-50%, -50%)";
+    this.releaseAttack();
+    this.releaseDash();
+  }
+
   private onStickDown = (e: PointerEvent): void => {
     this.radius = this.stick.clientWidth * 0.28;
     const r = this.stick.getBoundingClientRect();

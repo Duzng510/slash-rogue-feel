@@ -119,6 +119,7 @@ export class Enemy implements Unit {
       this.hp = 0;
       this.die();
       this.split(src);
+      if (sw.side === "player" && src.boons.has("pursuit")) src.player.dashCd = Math.max(0, src.player.dashCd - 18);
       return true;
     }
     if (e.ENRAGE_FRACTION > 0 && !this.enraged && this.hp <= this.maxHp * e.ENRAGE_FRACTION) this.enraged = true;

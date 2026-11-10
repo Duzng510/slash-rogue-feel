@@ -59,6 +59,8 @@ export class Player implements Unit {
   deadTicks = 0;
   animTicks = 0;
   ghostTick = 0;
+  impulseTicks = 0;
+  reprisalTicks = 0;
   autoTargetId = -1;
   private queuedAttackTicks = 0;
 
@@ -78,6 +80,8 @@ export class Player implements Unit {
     this.dashIframeTicks = 0;
     this.dashCd = 0;
     this.dashTicks = 0;
+    this.impulseTicks = 0;
+    this.reprisalTicks = 0;
     this.hurtTicks = 0;
     this.deadTicks = 0;
     this.autoTargetId = -1;
@@ -115,6 +119,7 @@ export class Player implements Unit {
       this.die(src);
       return true;
     }
+    this.reprisalTicks = src.boons.has("reprisal") ? 120 : 0;
     this.iframeTicks = p.IFRAMES;
     this.hurtTicks = p.HURT_TICKS;
     this.setState(PLAYER_STATE.HURT);
@@ -136,6 +141,8 @@ export class Player implements Unit {
     if (this.iframeTicks > 0) this.iframeTicks--;
     if (this.dashIframeTicks > 0) this.dashIframeTicks--;
     if (this.dashCd > 0) this.dashCd--;
+    if (this.impulseTicks > 0) this.impulseTicks--;
+    if (this.reprisalTicks > 0) this.reprisalTicks--;
     this.animTicks++;
 
     if (this.dead) {
@@ -174,8 +181,12 @@ export class Player implements Unit {
       this.startSwing(src, 1, intent, null);
     }
 
+    const dashing = this.state === PLAYER_STATE.DASH;
     this.integrate(intent, src, dt);
     moveBody(this, src.room, dt);
+    if (dashing && src.boons.has("fire")) {
+      src.fireTrails.at(-1)?.points.push({ x: this.x, y: this.y - 3, ticks: 60 });
+    }
 
     if (this.swing === null && this.state !== PLAYER_STATE.DASH && this.state !== PLAYER_STATE.HURT) {
       const moving = Math.abs(intent.moveX) + Math.abs(intent.moveY) > 0.1;
@@ -196,6 +207,8 @@ export class Player implements Unit {
     init.ox = this.x;
     init.oy = this.y;
     this.swing = createSwing(src, init);
+    this.impulseTicks = 0;
+    this.reprisalTicks = 0;
     this.combo = combo;
     this.queuedAttackTicks = 0;
     this.autoTargetId = aim.targetId;
@@ -223,6 +236,8 @@ export class Player implements Unit {
     this.setState(PLAYER_STATE.DASH);
     this.dashTicks = d.TICKS;
     this.dashDir = dir;
+    this.impulseTicks = src.boons.has("impulse") ? 120 : 0;
+    if (src.boons.has("fire")) src.fireTrails.push({ points: [{ x: this.x, y: this.y - 3, ticks: 60 }], seen: new Set() });
     this.dashCd = d.COOLDOWN;
     this.dashIframeTicks = d.IFRAME_TICKS;
     this.facing = dir;
@@ -263,9 +278,10 @@ export class Player implements Unit {
 
     if (control > 0) {
       const speed = Math.hypot(this.vx, this.vy);
-      if (speed > p.SPEED) {
-        this.vx = (this.vx / speed) * p.SPEED;
-        this.vy = (this.vy / speed) * p.SPEED;
+      const maxSpeed = p.SPEED * (src.boons.has("desperate") && this.hp <= 2 ? 1.2 : 1);
+      if (speed > maxSpeed) {
+        this.vx = (this.vx / speed) * maxSpeed;
+        this.vy = (this.vy / speed) * maxSpeed;
       }
     }
   }

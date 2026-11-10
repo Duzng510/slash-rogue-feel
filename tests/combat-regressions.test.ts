@@ -168,6 +168,131 @@ test("being hit clears combo immediately", () => {
   assert.equal(w.player.combo, 0);
 });
 
+test("artifacts gate doors, pause combat, survive death and cannot be farmed", () => {
+  const w = sandbox();
+  w.tick(idle);
+  assert.equal(w.room.doorOpen, false);
+  assert.equal(w.boonChoices.length, 3);
+  assert.equal(new Set(w.boonChoices.map(b => b.id)).size, 3);
+  const offered = w.boonChoices.map(b => b.id);
+  const tick = w.tickCount;
+  w.tick({ ...idle, attack: true, moveX: 1 });
+  assert.equal(w.tickCount, tick);
+  assert.equal(w.player.swing, null);
+  assert.equal(w.chooseBoon("invalid" as never), false);
+  assert.equal(w.chooseBoon(offered[0]), true);
+  assert.equal(w.chooseBoon(offered[0]), false);
+  assert.equal(w.room.doorOpen, true);
+  w.player.die(w);
+  for (let i = 0; i < CONFIG.ROOMS.RESPAWN_DELAY; i++) w.tick(idle);
+  assert.ok(w.boons.has(offered[0]));
+  w.clearEnemies();
+  w.tick(idle);
+  assert.equal(w.boonChoices.length, 0);
+  assert.equal(w.room.doorOpen, true);
+  for (let room = 1; room < w.roomTotal; room++) {
+    w.loadRoom(room);
+    w.clearEnemies();
+    w.tick(idle);
+    assert.equal(w.boonChoices.length, 3);
+    assert.ok(w.boonChoices.every(b => !w.boons.has(b.id)));
+    w.chooseBoon(w.boonChoices[0].id);
+  }
+  w.player.x = (w.room.w - 0.5) * 16;
+  w.player.y = Math.floor(w.room.h / 2) * 16;
+  w.tick(idle);
+  assert.equal(w.roomIndex, 0);
+  assert.equal(w.boons.size, 0);
+  w.clearEnemies();
+  w.tick(idle);
+  assert.equal(w.boonChoices.length, 3);
+});
+
+test("artifact melee modifiers apply once without changing the base config", () => {
+  const w = sandbox();
+  w.boons.add("heavy");
+  w.boons.add("pursuit");
+  const enemy = makeEnemy(175, 103);
+  enemy.hp = 1.5;
+  w.enemies = [enemy];
+  w.syncUnits();
+  w.player.dashCd = 40;
+  w.player.swing = createSwing(w, playerSwingInit(w, 1, 0));
+  w.player.swing.phase = "active";
+  resolveHits(w);
+  assert.equal(enemy.hp, 0);
+  assert.equal(w.player.dashCd, 22);
+  assert.equal(w.hitStopTicks, CONFIG.FEEL.HIT_STOP_KILL * 2);
+  assert.equal(playerSwingInit(sandbox(), 1, 0).dmg, 1);
+  w.boons.add("desperate");
+  for (const hp of [2, 3]) {
+    w.player.reset(160, 100);
+    w.player.hp = hp;
+    w.player.vx = 200;
+    w.player.tick({ ...idle, moveX: 1 }, w);
+    assert.equal(w.player.vx, hp === 2 ? 124.8 : 104);
+  }
+  w.boons.add("impulse");
+  w.player.reset(160, 100);
+  w.player.tick({ ...idle, dash: true }, w);
+  for (let i = 0; i < 7; i++) w.player.tick(idle, w);
+  w.player.tick({ ...idle, attack: true }, w);
+  assert.equal(w.player.swing!.knockback, 190);
+  for (let i = 0; i < 20; i++) w.player.tick(idle, w);
+  w.player.tick({ ...idle, attack: true }, w);
+  assert.equal(w.player.swing!.knockback, 95);
+});
+
+test("reprisal empowers only the next slash after surviving a hit, with a two-second limit", () => {
+  for (const wait of [12, 121]) {
+    const w = sandbox();
+    w.boons.add("reprisal");
+    w.player.onHit(createSwing(w, playerSwingInit(w, 1, 0)), 160, 100, w);
+    for (let i = 0; i < wait; i++) w.player.tick(idle, w);
+    w.player.tick({ ...idle, attack: true }, w);
+    assert.equal(w.player.swing!.dmg, wait === 12 ? 2 : 1);
+    for (let i = 0; i < 20; i++) w.player.tick(idle, w);
+    w.player.tick({ ...idle, attack: true }, w);
+    assert.equal(w.player.swing!.dmg, 1);
+  }
+});
+
+test("aftershock triggers once per second slash with a strict 40px radius", () => {
+  const w = sandbox();
+  w.boons.add("aftershock");
+  const enemies = [makeEnemy(175, 103), makeEnemy(214.9, 103), makeEnemy(215.1, 103)];
+  for (const e of enemies) e.hp = 10;
+  w.enemies = enemies;
+  w.syncUnits();
+  w.player.swing = createSwing(w, playerSwingInit(w, 2, 0));
+  w.player.swing.phase = "active";
+  resolveHits(w);
+  resolveHits(w);
+  assert.deepEqual(enemies.map(e => e.hp), [8, 9, 10]);
+});
+
+test("fire trail damages once per dash and expires, including respawn cleanup", () => {
+  const w = sandbox();
+  w.boons.add("fire");
+  const e = makeEnemy(160, 103);
+  e.hp = 10;
+  e.restTicks = 1000;
+  w.enemies = [e];
+  w.syncUnits();
+  w.tick({ ...idle, dash: true, moveX: 1 });
+  assert.equal(e.hp, 9);
+  for (let i = 0; i < 8; i++) w.tick(idle);
+  assert.equal(e.hp, 9);
+  assert.ok(w.fireTrails.length > 0);
+  for (let i = 0; i < 70; i++) w.tick(idle);
+  assert.equal(w.fireTrails.length, 0);
+  w.player.dashCd = 0;
+  w.tick({ ...idle, dash: true });
+  w.loadRoom(0);
+  assert.equal(w.fireTrails.length, 0);
+  assert.ok(w.boons.has("fire"));
+});
+
 test("missing or truncated start selects a walkable tile; solid rooms reject", () => {
   for (const rows of [["OOOO", "OO.O", "OOOO"], ["OOOO", "OO.OS", "OOOO"]]) {
     const room = new Room({ name: "fallback", rows }, 0);

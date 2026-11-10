@@ -39,6 +39,7 @@ const DASH = new Set(["space", "shiftleft", "shiftright"]);
 
 export type DesktopOpts = {
   tick: () => number;
+  blocked?: () => boolean;
   onHotkey: (k: Hotkey) => void;
   aimFromClient: (clientX: number, clientY: number) => { x: number; y: number } | null;
 };
@@ -74,7 +75,7 @@ export class DesktopInput {
   private onKeyDown = (e: KeyboardEvent): void => {
     const code = e.code.toLowerCase();
     if (MOVE[code] || ATTACK.has(code) || DASH.has(code) || HOTKEYS[code]) e.preventDefault();
-    if (this.down.has(code)) return;
+    if (this.opts.blocked?.() || e.repeat || this.down.has(code)) return;
     this.down.add(code);
 
     if (ATTACK.has(code)) this.intent.pressAttack(this.opts.tick());
@@ -96,17 +97,22 @@ export class DesktopInput {
   };
 
   private onDown = (e: MouseEvent): void => {
-    if (e.button !== 0) return;
+    if (this.opts.blocked?.() || e.button !== 0) return;
     this.lastX = e.clientX;
     this.lastY = e.clientY;
     this.hasPointer = true;
     this.intent.pressAttack(this.opts.tick());
   };
 
-  private onBlur = (): void => {
+  reset(): void {
     this.down.clear();
+    this.hasPointer = false;
+    this.intent.aim = null;
+    this.intent.clearPresses();
     this.syncAxes();
-  };
+  }
+
+  private onBlur = (): void => this.reset();
 
   private syncAxes(): void {
     let x = 0;
