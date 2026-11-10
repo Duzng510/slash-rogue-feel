@@ -1,0 +1,193 @@
+import { CONFIG } from "../config.ts";
+import { clamp, makeRng } from "../mathx.ts";
+
+export const TILE = {
+  FLOOR: 0,
+  ACCENT: 1,
+  WALL: 2,
+  CRATE: 3,
+  DOOR: 4,
+  DOOR_OPEN: 5,
+} as const;
+
+export type Tile = (typeof TILE)[keyof typeof TILE];
+
+export type Template = {
+  name: string;
+  /** interior rows only; a wall border is added automatically, short rows are padded with floor */
+  rows: string[];
+};
+
+const FLOOR_ROW = ".".repeat(22);
+
+export const TEMPLATES: Template[] = [
+  {
+    name: "Sảnh vào",
+    rows: [
+      "......................",
+      "..O..............O....",
+      FLOOR_ROW,
+      "....E.........E.........",
+      FLOOR_ROW,
+      "......OO................",
+      "S.......................",
+      "..........E.............",
+      FLOOR_ROW,
+      "....O..........O........",
+      FLOOR_ROW,
+      "......................",
+    ],
+  },
+  {
+    name: "Kho nứt",
+    rows: [
+      "......................",
+      "...OO.......OO........",
+      "....E..........E......",
+      "......................",
+      ".........OO...........",
+      "S......E....E.........",
+      ".........OO...........",
+      "......................",
+      "....O...........O.....",
+      "......................",
+      ".........E............",
+      "......................",
+    ],
+  },
+  {
+    name: "Sân cột",
+    rows: [
+      "....O....O....O....O..",
+      "..E..............E....",
+      "......................",
+      "....O....O....O....O..",
+      "S.....................",
+      "..E......E......E.....",
+      "....O....O....O....O..",
+      "......................",
+      "..E..............E....",
+      "....O....O....O....O..",
+      "......................",
+      ".........E............",
+    ],
+  },
+  {
+    name: "Lò đúc",
+    rows: [
+      "OOOO..............OOOO",
+      "O..................O..",
+      "..E...E....E...E......",
+      "O..................O..",
+      "OOO....OOOO....OOO....",
+      "S.....................",
+      "..E...E....E...E......",
+      "OOO....OOOO....OOO....",
+      "O..................O..",
+      "..E.........E.........",
+      "O..................O..",
+      "OOOO..............OOOO",
+    ],
+  },
+];
+
+export class Room {
+  readonly w: number;
+  readonly h: number;
+  readonly index: number;
+  readonly name: string;
+  readonly tiles: Uint8Array;
+  readonly spawns: { x: number; y: number }[] = [];
+  readonly start: { x: number; y: number } = { x: 0, y: 0 };
+  private readonly doorTiles: number[] = [];
+  private hasStart = false;
+  doorOpen = false;
+
+  constructor(template: Template, index: number) {
+    const rows = template.rows;
+    const innerW = rows[0].length;
+    const innerH = rows.length;
+    this.w = innerW + 2;
+    this.h = innerH + 2;
+    this.index = index;
+    this.name = template.name;
+    this.tiles = new Uint8Array(this.w * this.h);
+
+    const rng = makeRng(0x9e37 + index * 7919);
+    for (let ty = 0; ty < this.h; ty++) {
+      for (let tx = 0; tx < this.w; tx++) {
+        const edge = tx === 0 || ty === 0 || tx === this.w - 1 || ty === this.h - 1;
+        let t: Tile = edge ? TILE.WALL : TILE.FLOOR;
+        if (!edge) {
+          const line = (rows[ty - 1] ?? "").padEnd(innerW, ".").slice(0, innerW);
+          const ch = line[tx - 1];
+          if (ch === "O") t = TILE.CRATE;
+          else if (rng.next() < 0.14) t = TILE.ACCENT;
+          const cx = tx * CONFIG.WORLD.TILE;
+          const cy = ty * CONFIG.WORLD.TILE;
+          if (ch === "E") this.spawns.push({ x: cx + CONFIG.WORLD.TILE / 2, y: cy + CONFIG.WORLD.TILE * 0.75 });
+          if (ch === "S") {
+            this.start.x = cx + CONFIG.WORLD.TILE / 2;
+            this.start.y = cy + CONFIG.WORLD.TILE * 0.75;
+            this.hasStart = true;
+          }
+        }
+        this.tiles[ty * this.w + tx] = t;
+      }
+    }
+
+    if (!this.hasStart) {
+      this.start.x = this.w * 0.25 * CONFIG.WORLD.TILE;
+      this.start.y = this.h * 0.5 * CONFIG.WORLD.TILE;
+    }
+
+    const midY = Math.floor(this.h / 2);
+    for (const ty of [midY - 1, midY]) {
+      const idx = ty * this.w + (this.w - 1);
+      this.tiles[idx] = TILE.DOOR;
+      this.doorTiles.push(idx);
+    }
+  }
+
+  at(tx: number, ty: number): Tile {
+    if (tx < 0 || ty < 0 || tx >= this.w || ty >= this.h) return TILE.WALL;
+    return this.tiles[ty * this.w + tx] as Tile;
+  }
+
+  isSolid(tx: number, ty: number): boolean {
+    const t = this.at(tx, ty);
+    return t === TILE.WALL || t === TILE.CRATE || t === TILE.DOOR;
+  }
+
+  solidAtPx(px: number, py: number): boolean {
+    return this.isSolid(Math.floor(px / CONFIG.WORLD.TILE), Math.floor(py / CONFIG.WORLD.TILE));
+  }
+
+  openDoors(): void {
+    if (this.doorOpen) return;
+    this.doorOpen = true;
+    for (const i of this.doorTiles) this.tiles[i] = TILE.DOOR_OPEN;
+  }
+
+  exitsAt(px: number, py: number): boolean {
+    if (!this.doorOpen) return false;
+    const t = this.at(Math.floor(px / CONFIG.WORLD.TILE), Math.floor(py / CONFIG.WORLD.TILE));
+    return t === TILE.DOOR_OPEN;
+  }
+
+  get widthPx(): number {
+    return this.w * CONFIG.WORLD.TILE;
+  }
+
+  get heightPx(): number {
+    return this.h * CONFIG.WORLD.TILE;
+  }
+
+  clampCamera(cx: number, cy: number): { x: number; y: number } {
+    const viewW = CONFIG.WORLD.INTERNAL_W * 0.5;
+    const viewH = CONFIG.WORLD.INTERNAL_H * 0.5;
+    const x = this.widthPx <= viewW * 2 ? this.widthPx / 2 : clamp(cx, viewW, this.widthPx - viewW);
+    const y = this.heightPx <= viewH * 2 ? this.heightPx / 2 : clamp(cy, viewH, this.heightPx - viewH);
+    return { x, y };
+  }
+}

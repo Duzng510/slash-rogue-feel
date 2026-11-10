@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <title>slash-rogue-feel</title>
+    <style>
+      :root {
+        --bg: #08090d;
+        --ink: #d7dbe4;
+        --dim: #6b7280;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+        font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+        overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
+      }
+      #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+      #game, #overlay {
+        position: absolute; image-rendering: pixelated;
+      }
+      #overlay { pointer-events: none; }
+      #panel {
+        position: fixed; left: 8px; top: 8px; z-index: 5; width: 236px;
+        background: rgba(12, 14, 20, 0.92); border: 1px solid #232838;
+        padding: 8px 10px; display: none;
+      }
+      #panel.on { display: block; }
+      #panel h1 { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase; }
+      .row { display: grid; grid-template-columns: 74px 1fr 34px; gap: 6px; align-items: center; margin: 3px 0; }
+      .row span { color: var(--dim); }
+      .row b { font-weight: 400; text-align: right; }
+      input[type="range"] { width: 100%; accent-color: #4da3ff; }
+      #keys { position: fixed; right: 8px; bottom: 8px; z-index: 5; color: var(--dim); text-align: right; }
+      #keys u { text-decoration: none; color: var(--ink); }
+
+      /* touch controls: hidden until body.touch is set (coarse pointer or ?touch=1) */
+      #touch { position: fixed; inset: 0; z-index: 6; display: none; pointer-events: none; }
+      body.touch #touch { display: block; }
+      body.touch #keys { display: none; }
+      #stick {
+        position: absolute; left: 20px; bottom: 20px; width: 148px; height: 148px;
+        border-radius: 50%; background: rgba(77, 163, 255, 0.08);
+        border: 2px solid rgba(77, 163, 255, 0.28); pointer-events: auto; touch-action: none;
+      }
+      #knob {
+        position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: 0;
+        transform: translate(-50%, -50%); border-radius: 50%;
+        background: rgba(77, 163, 255, 0.55); border: 2px solid #9fd0ff;
+        box-shadow: 0 0 12px rgba(77, 163, 255, 0.45);
+      }
+      .tbtn {
+        position: absolute; right: 24px; width: 92px; height: 92px; border-radius: 50%;
+        display: grid; place-items: center; pointer-events: auto; touch-action: none;
+        font-size: 13px; letter-spacing: 0.06em; color: var(--ink);
+        background: rgba(20, 24, 34, 0.72); border: 2px solid #3a4256;
+      }
+      #btn-attack { bottom: 34px; border-color: rgba(77, 163, 255, 0.6); color: #cfe6ff; }
+      #btn-dash { bottom: 140px; right: 44px; width: 74px; height: 74px; border-color: rgba(255, 255, 255, 0.35); }
+      .tbtn.press { background: rgba(77, 163, 255, 0.4); transform: scale(0.94); }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <canvas id="game"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div id="panel">
+      <h1>Feel tuning</h1>
+      <div class="row"><span>Shake</span><input id="s-shake" type="range" min="0" max="2" step="0.05" value="1" /><b id="v-shake">1.00</b></div>
+      <div class="row"><span>Volume</span><input id="s-volume" type="range" min="0" max="1" step="0.05" value="0.35" /><b id="v-volume">0.35</b></div>
+      <div class="row"><span>Particles</span><input id="s-particles" type="range" min="0" max="1" step="0.05" value="1" /><b id="v-particles">1.00</b></div>
+      <div class="row"><span>Game speed</span><input id="s-timescale" type="range" min="0.25" max="1.5" step="0.05" value="1" /><b id="v-timescale">1.00</b></div>
+      <div class="row"><span>Hit-stop</span><input id="s-hitstop" type="range" min="0" max="8" step="1" value="3" /><b id="v-hitstop">3</b></div>
+      <div class="row"><span>Dmg numbers</span><input id="s-dmgnum" type="range" min="0" max="1" step="1" value="0" /><b id="v-dmgnum">off</b></div>
+    </div>
+
+    <div id="touch">
+      <div id="stick"><div id="knob"></div></div>
+      <div id="btn-attack" class="tbtn">CHÉM</div>
+      <div id="btn-dash" class="tbtn">DASH</div>
+    </div>
+
+    <div id="keys">
+      <u>WASD</u> di chuyển &middot; <u>chuột trái / J</u> chém &middot; <u>SPACE / SHIFT</u> dash<br />
+      <u>1</u> panel &middot; <u>2</u> fps &middot; <u>3</u> hitbox &middot; <u>4</u> hit-stop &middot; <u>5</u> slow-mo<br />
+      <u>6</u> spawn +4 &middot; <u>7</u> sạch phòng &middot; <u>R</u> lại phòng &middot; <u>N</u> phòng sau
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

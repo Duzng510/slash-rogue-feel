@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+.yarn/
+
+# Production / Build output
+dist/
+dist-ssr/
+build/
+
+# Vite & Cache
+.vite/
+.cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+tools/dev.log
+
+# Tool-generated artifacts (Ảnh chụp màn hình tạo bởi tools/)
+tools/shot-*.png
+
+# Environment variables & secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# IDE & Editor settings
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+
+# Testing & Coverage
+coverage/
+.nyc_output/
