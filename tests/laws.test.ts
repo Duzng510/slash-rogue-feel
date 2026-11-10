@@ -13,6 +13,7 @@ import { ParticlePool } from "../src/systems/particles.ts";
 import { makeRng } from "../src/mathx.ts";
 import { fitAxes, rotateVec, tryImmersive } from "../src/ui/immersive.ts";
 import { stalled } from "../src/ui/diag.ts";
+import { GameLoop } from "../src/loop.ts";
 import type { Intent } from "../src/sim/types.ts";
 
 let pass = 0;
@@ -550,6 +551,94 @@ heading("Mobile landscape");
   const outside = ["stage", "panel", "touch", "keys"].filter((id) => !inside.includes(`id="${id}"`));
   ok("every overlay lives inside the rotated wrapper", outside.length === 0, `outside: ${outside.join(",")}`);
   ok("rot90 transforms that wrapper by a quarter turn", html.includes("body.rot90 #app") && html.includes("rotate(90deg)"));
+}
+
+heading("Hurt lockout: no input may throw the sim");
+{
+  const inputs: Array<{ name: string; value: Intent }> = [
+    { name: "attack", value: intent({ attack: true }) },
+    { name: "dash", value: intent({ dash: true }) },
+    { name: "attack+dash", value: intent({ attack: true, dash: true }) },
+    { name: "move", value: intent({ moveX: 1, moveY: 1 }) },
+    { name: "idle", value: intent() },
+  ];
+  const offenders: string[] = [];
+  for (const input of inputs) {
+    const w = sandbox();
+    duel(w, 10);
+    let hurt = false;
+    for (let i = 0; i < 200 && !hurt; i++) {
+      w.tick(intent());
+      hurt = w.player.state === PLAYER_STATE.HURT;
+    }
+    if (!hurt) {
+      offenders.push(`${input.name}: no hit landed in 200 ticks`);
+      continue;
+    }
+    for (let k = 0; k < 12; k++) {
+      try {
+        w.tick(input.value);
+        w.tick(intent());
+      } catch (err) {
+        offenders.push(`${input.name} at live tick ${k}: ${(err as Error).message}`);
+        break;
+      }
+    }
+  }
+  ok("every input inside the hurt window is legal", offenders.length === 0, offenders.join(" | "));
+
+  const w = sandbox();
+  duel(w, 10);
+  for (let i = 0; i < 200 && w.player.state !== PLAYER_STATE.HURT; i++) w.tick(intent());
+  w.hitStopTicks = 0;
+  w.tick(intent({ attack: true }));
+  ok("hurt locks attack out instead of cancelling the stagger", w.player.state === PLAYER_STATE.HURT && w.player.swing === null, w.player.state);
+  for (let i = 0; i < 20; i++) w.tick(intent());
+  ok("the lockout ends by itself", w.player.state !== PLAYER_STATE.HURT, w.player.state);
+}
+
+heading("A sim throw must not kill the frame loop");
+{
+  const queue: Array<(t: number) => void> = [];
+  const raf = globalThis.requestAnimationFrame;
+  const cancel = globalThis.cancelAnimationFrame;
+  globalThis.requestAnimationFrame = ((cb: (t: number) => void) => queue.push(cb)) as unknown as typeof globalThis.requestAnimationFrame;
+  globalThis.cancelAnimationFrame = (() => {}) as unknown as typeof globalThis.cancelAnimationFrame;
+
+  let ticks = 0;
+  const loop = new GameLoop(
+    () => {
+      ticks++;
+      if (ticks === 1) throw new Error("synthetic sim throw");
+    },
+    () => {}
+  );
+  const t0 = performance.now();
+  loop.start();
+  ok("starting schedules one frame", queue.length === 1, `queue ${queue.length}`);
+  let thrown = "";
+  try {
+    queue[0](t0 + 100);
+  } catch (err) {
+    thrown = (err as Error).message;
+  }
+  ok("the throw still escapes so the on-screen diagnostic can name it", thrown === "synthetic sim throw", thrown);
+  ok("the next frame is scheduled before the throwing one runs", queue.length === 2, `queue ${queue.length}`);
+  queue[1](t0 + 200);
+  ok("the loop is still simulating after the throw", ticks > 1, `ticks ${ticks}`);
+
+  loop.stop();
+  globalThis.requestAnimationFrame = raf;
+  globalThis.cancelAnimationFrame = cancel;
+}
+
+heading("The player is never absent while alive");
+{
+  const src = readFileSync("src/render/renderer.ts", "utf8");
+  ok("the i-frame blink dims the sprite instead of skipping it", !/if \(blinkOut\) return/.test(src) && src.includes("CONFIG.READABILITY.IFRAME_ALPHA"), "drawPlayer still returns early");
+  const a = CONFIG.READABILITY.IFRAME_ALPHA;
+  ok("the dim reads as i-frames, not as a solid body", a > 0.1 && a < 0.9, `alpha ${a}`);
+  ok("a corpse is still hidden", src.includes("pl.deadTicks > 12"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

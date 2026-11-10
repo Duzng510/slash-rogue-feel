@@ -14,10 +14,13 @@ export class GameLoop {
   private running = false;
   maxSubSteps = 5;
 
-  constructor(
-    private readonly sim: () => void,
-    private readonly frame: FrameFn
-  ) {}
+  private readonly sim: () => void;
+  private readonly frame: FrameFn;
+
+  constructor(sim: () => void, frame: FrameFn) {
+    this.sim = sim;
+    this.frame = frame;
+  }
 
   /** advance by real seconds; returns how many sim ticks ran */
   advance(dtReal: number): number {
@@ -40,10 +43,11 @@ export class GameLoop {
     this.last = performance.now();
     const pump = (now: number) => {
       if (!this.running) return;
+      // re-arm before running: a throw from sim or frame must cost one frame, not the whole loop
+      this.raf = requestAnimationFrame(pump);
       const dt = Math.min(0.05, (now - this.last) / 1000);
       this.last = now;
       this.advance(dt);
-      this.raf = requestAnimationFrame(pump);
     };
     this.raf = requestAnimationFrame(pump);
   }

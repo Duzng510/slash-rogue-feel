@@ -21,7 +21,7 @@ tools/dev.log
 
 # Tool-generated artifacts (Ảnh chụp màn hình tạo bởi tools/)
 tools/shot-*.png
-tools/cdp2/
+tools/cdp*/
 
 # Environment variables & secrets
 .env

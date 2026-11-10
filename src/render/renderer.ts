@@ -293,18 +293,19 @@ export class Renderer {
     if (pl.dead && pl.deadTicks > 12) return;
 
     const blinkOut = pl.iframeTicks > 0 && Math.floor(pl.iframeTicks / 3) % 2 === 0;
-    if (blinkOut) return;
 
     const sp = this.sprites.player;
     const x = Math.round(pl.x - sp.ax - ox);
     const y = Math.round(pl.y - sp.ay - oy);
     const flashing = (this.flash.get(pl.id) ?? 0) > 0;
 
+    g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
     g.drawImage(flashing ? this.white.player : sp.c, x, y);
 
     const f = facingOffsets(pl.state === PLAYER_STATE.DASH ? pl.dashDir : pl.facing);
     g.fillStyle = P.PLAYER_RIM;
     g.fillRect(x + sp.ax - 1 + f.x, y + sp.ay - 8 + f.y, 2, 2);
+    g.globalAlpha = 1;
   }
 
   private drawParticles(g: CanvasRenderingContext2D, ox: number, oy: number): void {

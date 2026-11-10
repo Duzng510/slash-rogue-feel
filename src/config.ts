@@ -282,6 +282,7 @@ export const CONFIG = {
     SLASH_ALPHA: 0.5,
     TELEGRAPH_FILL: 0.34,
     SHADOW_ALPHA: 0.35,
+    IFRAME_ALPHA: 0.35,
   },
 
   CAMERA: {

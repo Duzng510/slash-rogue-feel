@@ -148,8 +148,10 @@ export class Player implements Unit {
       this.facing = angleLerp(this.facing, Math.atan2(intent.moveY, intent.moveX), 0.55);
     }
 
-    const chainRequest = intent.attack && this.swing !== null;
-    const freshRequest = intent.attack && this.swing === null;
+    // TRANSITIONS forbids hurt -> attack, so an unguarded request would throw and stop the loop
+    const attackAllowed = this.state !== PLAYER_STATE.HURT;
+    const chainRequest = intent.attack && attackAllowed && this.swing !== null;
+    const freshRequest = intent.attack && attackAllowed && this.swing === null;
 
     if (this.swing !== null) {
       const done = stepSwing(this.swing);
