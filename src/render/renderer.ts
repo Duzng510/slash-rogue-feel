@@ -40,6 +40,7 @@ export class Renderer {
   private flash = new Map<number, number>();
   private vignette = 0;
   private white: Record<string, HTMLCanvasElement> = {};
+  private statusSprites: Record<string, HTMLCanvasElement[]> = {};
   private tileOf: Record<number, Sprite> = {};
 
   constructor(
@@ -57,7 +58,10 @@ export class Renderer {
     this.o.imageSmoothingEnabled = false;
     this.white.player = tinted(sprites.player.c, P.FLASH);
     for (const key of Object.keys(sprites)) {
-      if (key.startsWith("enemy")) this.white[key] = tinted(sprites[key].c, P.FLASH);
+      if (key.startsWith("enemy")) {
+        this.white[key] = tinted(sprites[key].c, P.FLASH);
+        this.statusSprites[key] = ["#ff963f", "#58caff", "#ffe66b"].map(color => tinted(sprites[key].c, color));
+      }
     }
     this.tileOf[TILE.FLOOR] = sprites.floor;
     this.tileOf[TILE.ACCENT] = sprites.accent;
@@ -272,7 +276,28 @@ export class Renderer {
       }
 
       if (flashing) g.drawImage(white, x, y);
-      else g.drawImage(sp.c, x, y);
+      else {
+        g.drawImage(sp.c, x, y);
+        const status = en.shockTicks > 0 ? 2 : en.wetTicks > 0 ? 1 : en.burnTicks > 0 ? 0 : -1;
+        if (status >= 0) {
+          g.globalAlpha = 0.55;
+          g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y);
+          g.globalAlpha = 1;
+        }
+      }
+      const active = [en.burnTicks, en.wetTicks, en.shockTicks];
+      const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100"];
+      let iconX = Math.round(en.x - ox - (active.filter(t => t > 0).length * 7 - 2) / 2);
+      for (let i = 0; i < active.length; i++) {
+        if (active[i] <= 0) continue;
+        g.fillStyle = P.VOID;
+        g.fillRect(iconX - 1, y - 9, 7, 7);
+        g.fillStyle = ["#ff963f", "#58caff", "#ffe66b"][i];
+        icons[i].split("/").forEach((row, iy) => {
+          for (let ix = 0; ix < row.length; ix++) if (row[ix] === "1") g.fillRect(iconX + ix, y - 8 + iy, 1, 1);
+        });
+        iconX += 7;
+      }
 
       if (en.blink()) {
         g.globalAlpha = 0.5;

@@ -320,6 +320,7 @@ type Harness = {
   addEnemies: (n: number, kinds?: EnemyKind[]) => void;
   clearEnemies: () => void;
   damageEnemy: (id: number, dmg: number) => boolean;
+  applyStatus: (id: number, status: "burn" | "wet" | "shock") => boolean;
   gotoRoom: (i: number) => void;
   chooseBoon: (id: BoonId) => boolean;
   state: () => {
@@ -378,6 +379,12 @@ const harness: Harness = {
       e.y,
       world
     );
+    return true;
+  },
+  applyStatus: (id, status) => {
+    const e = world.enemies.find((x) => x.id === id);
+    if (e === undefined || e.dead) return false;
+    e.applyStatus(status, world);
     return true;
   },
   gotoRoom: (i) => { world.loadRoom(i); syncBoonModal(); },

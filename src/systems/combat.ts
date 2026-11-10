@@ -17,6 +17,7 @@ export type SwingInit = {
   dmg: number;
   knockback: number;
   fd: FrameData;
+  status?: Swing["status"];
 };
 
 export function createSwing(src: Sim, init: SwingInit): Swing {
@@ -28,6 +29,7 @@ export function createSwing(src: Sim, init: SwingInit): Swing {
     phase: "startup",
     ticksLeft: init.fd.startup,
     fd: init.fd,
+    status: init.status,
     ox: init.ox,
     oy: init.oy,
     reach: init.reach,
@@ -44,6 +46,7 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
   const scale = second ? a.COMBO2_REACH_SCALE : 1;
   return {
     side: "player",
+    status: combo === 1 && src.boons.has("water") ? "wet" : combo === 2 && src.boons.has("lightning") ? "shock" : undefined,
     combo,
     dir,
     ox: src.player.x,
@@ -113,7 +116,7 @@ export function resolveHits(src: Sim): void {
     }
     if (blast !== null) {
       src.queue.push({ t: "slashArc", x: blast.x, y: blast.y, dir: 0, reach: 40, deg: 360, combo: 2, ticks: 12 });
-      const shock = { ...sw, dmg: 1, knockback: 0 };
+      const shock = { ...sw, dmg: 1, knockback: 0, status: undefined };
       for (const enemy of src.enemies.slice()) {
         const hb = enemy.hurtRect();
         const cx = hb.x + hb.w / 2, cy = hb.y + hb.h / 2;
@@ -134,7 +137,7 @@ export function resolveFire(src: Sim): void {
       const hb = enemy.hurtRect();
       if (!trail.points.some(p => rectsOverlap({ x: p.x - 6, y: p.y - 6, w: 12, h: 12 }, hb))) continue;
       trail.seen.add(enemy.id);
-      const fire = createSwing(src, { side: "player", combo: 0, dir: 0, ox: enemy.x, oy: enemy.y, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+      const fire = createSwing(src, { side: "player", status: "burn", combo: 0, dir: 0, ox: enemy.x, oy: enemy.y, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
       const killed = enemy.onHit(fire, enemy.x, enemy.y, src);
       hitFeedback(src, enemy, fire, enemy.x, enemy.y, killed, false);
     }

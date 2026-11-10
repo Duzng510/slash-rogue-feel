@@ -60,6 +60,10 @@ export class Enemy implements Unit {
   hurtTicks = 0;
   corpseTicks: number;
   animTicks = 0;
+  burnTicks = 0;
+  wetTicks = 0;
+  shockTicks = 0;
+  private burnPulse = 0;
 
   /** boss only: never reverts, and shortens the telegraph / commits a second ring */
   enraged = false;
@@ -113,20 +117,45 @@ export class Enemy implements Unit {
 
   onHit(sw: Swing, _cx: number, _cy: number, src: Sim): boolean {
     const e = this.def;
-    this.hp -= sw.dmg;
+    if (this.dead) return false;
     knockback(this, sw.dir, sw.knockback);
-    if (this.hp <= 0) {
-      this.hp = 0;
-      this.die();
-      this.split(src);
-      if (sw.side === "player" && src.boons.has("pursuit")) src.player.dashCd = Math.max(0, src.player.dashCd - 18);
-      return true;
-    }
-    if (e.ENRAGE_FRACTION > 0 && !this.enraged && this.hp <= this.maxHp * e.ENRAGE_FRACTION) this.enraged = true;
+    this.takeDamage(sw.dmg, src, sw.side === "player");
+    if (!this.dead && sw.status) this.applyStatus(sw.status, src);
+    if (this.dead) return true;
     this.swing = null;
     this.hurtTicks = e.HURT_TICKS;
     this.setState(ENEMY_STATE.HURT);
     return false;
+  }
+
+  private takeDamage(dmg: number, src: Sim, playerOwned = true): void {
+    this.hp = Math.max(0, this.hp - dmg);
+    if (this.hp === 0) {
+      this.die();
+      this.split(src);
+      if (playerOwned && src.boons.has("pursuit")) src.player.dashCd = Math.max(0, src.player.dashCd - 18);
+    } else if (this.def.ENRAGE_FRACTION > 0 && this.hp <= this.maxHp * this.def.ENRAGE_FRACTION) this.enraged = true;
+  }
+
+  applyStatus(status: "burn" | "wet" | "shock", src: Sim): void {
+    if (this.dead) return;
+    if (status === "burn" && this.wetTicks > 0 || status === "wet" && this.burnTicks > 0) {
+      this.burnTicks = this.wetTicks = this.burnPulse = 0;
+      this.takeDamage(2, src);
+      src.particles.burstSpark(this.x, this.y - 5, 6, src.rng);
+      src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 2 });
+    } else if (status === "burn") {
+      if (this.burnTicks === 0) this.burnPulse = 60;
+      this.burnTicks = 120;
+    } else if (status === "wet") this.wetTicks = 180;
+    else if (this.shockTicks === 0) {
+      this.shockTicks = this.wetTicks > 0 ? 48 : 15;
+      this.wetTicks = 0;
+      this.swing = null;
+      this.followUps = 0;
+      this.hurtTicks = this.def.HURT_TICKS;
+      this.setState(ENEMY_STATE.HURT);
+    }
   }
 
   die(): void {
@@ -158,6 +187,23 @@ export class Enemy implements Unit {
       return;
     }
 
+    if (this.burnTicks > 0) {
+      this.burnTicks--;
+      if (--this.burnPulse === 0) {
+        this.burnPulse = 60;
+        this.takeDamage(1, src);
+        src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
+        if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 1 });
+        if (this.dead) return;
+      }
+    }
+    const speedScale = this.wetTicks > 0 ? 0.7 : 1;
+    if (this.wetTicks > 0) this.wetTicks--;
+    if (this.shockTicks > 0) {
+      this.shockTicks--;
+      this.vx = this.vy = 0;
+      return;
+    }
     this.ticksInState++;
     if (this.restTicks > 0) this.restTicks--;
 
@@ -179,7 +225,7 @@ export class Enemy implements Unit {
         this.separate(src);
         this.vx += Math.cos(toPlayer) * e.ACCEL * dt;
         this.vy += Math.sin(toPlayer) * e.ACCEL * dt;
-        this.capSpeed(e.SPEED);
+        this.capSpeed(e.SPEED * speedScale);
         break;
       }
 
@@ -198,8 +244,8 @@ export class Enemy implements Unit {
       case ENEMY_STATE.ATTACK: {
         const lunging = this.swing !== null && this.swing.phase === "active" && e.LUNGE_SPEED > 0;
         if (lunging) {
-          this.vx = Math.cos(this.telegraphDir) * e.LUNGE_SPEED;
-          this.vy = Math.sin(this.telegraphDir) * e.LUNGE_SPEED;
+          this.vx = Math.cos(this.telegraphDir) * e.LUNGE_SPEED * speedScale;
+          this.vy = Math.sin(this.telegraphDir) * e.LUNGE_SPEED * speedScale;
         } else {
           this.brake(dt);
         }

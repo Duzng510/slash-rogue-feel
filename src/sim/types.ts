@@ -29,6 +29,7 @@ export type Swing = {
   /** per-swing-instance: a swing can never hit the same unit twice, whatever hit-stop does */
   seen: Set<number>;
   aftershockDone?: boolean;
+  status?: "burn" | "wet" | "shock";
 };
 
 export interface Unit {

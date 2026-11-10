@@ -293,6 +293,77 @@ test("fire trail damages once per dash and expires, including respawn cleanup", 
   assert.ok(w.boons.has("fire"));
 });
 
+test("status artifacts apply wet then extended shock without refreshing an active stun", () => {
+  const w = sandbox();
+  w.boons.add("water");
+  w.boons.add("lightning");
+  const e = makeEnemy(175, 103, "boss");
+  w.enemies = [e];
+  w.syncUnits();
+  for (const combo of [1, 2, 2]) {
+    w.player.swing = createSwing(w, playerSwingInit(w, combo, 0));
+    w.player.swing.phase = "active";
+    resolveHits(w);
+    if (combo === 1) assert.equal(e.wetTicks, 180);
+    else assert.deepEqual([e.wetTicks, e.shockTicks], [0, 48]);
+  }
+});
+
+test("status slow expires and shock blocks movement without extending on reapplication", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  e.state = ENEMY_STATE.CHASE;
+  e.vx = e.def.SPEED;
+  e.applyStatus("wet", w);
+  e.tick(w);
+  assert.ok(Math.abs(Math.hypot(e.vx, e.vy) - e.def.SPEED * 0.7) < 1e-9);
+  e.wetTicks = 1;
+  e.tick(w);
+  assert.equal(e.wetTicks, 0);
+  e.applyStatus("shock", w);
+  assert.equal(e.shockTicks, 15);
+  const x = e.x, y = e.y;
+  for (let i = 0; i < 15; i++) {
+    e.applyStatus("shock", w);
+    e.tick(w);
+    assert.deepEqual([e.x, e.y, e.shockTicks], [x, y, 14 - i]);
+  }
+  e.applyStatus("burn", w);
+  for (let i = 0; i < 30; i++) e.tick(w);
+  e.applyStatus("burn", w);
+  for (let i = 0; i < 30; i++) e.tick(w);
+  assert.equal(e.hp, 2);
+});
+
+test("status burn ticks without interrupting, expires and steam consumes both orders", () => {
+  const w = sandbox();
+  const e = makeEnemy(175, 103, "boss");
+  e.restTicks = 1000;
+  e.applyStatus("burn", w);
+  for (let i = 0; i < 59; i++) e.tick(w);
+  assert.equal(e.hp, 24);
+  e.tick(w);
+  assert.equal(e.hp, 23);
+  assert.equal(e.state, "idle");
+  assert.equal(w.hitStopTicks, 0);
+  for (let i = 0; i < 60; i++) e.tick(w);
+  assert.deepEqual([e.hp, e.burnTicks], [22, 0]);
+  for (const order of [["burn", "wet"], ["wet", "burn"]] as const) {
+    const hp: number = e.hp;
+    for (const status of order) e.applyStatus(status, w);
+    assert.deepEqual([e.hp, e.burnTicks, e.wetTicks], [hp - 2, 0, 0]);
+  }
+  const splitter = makeEnemy(175, 103, "splitter");
+  splitter.hp = 1;
+  w.boons.add("pursuit");
+  w.player.dashCd = 40;
+  splitter.applyStatus("burn", w);
+  for (let i = 0; i < 60; i++) splitter.tick(w);
+  assert.equal(splitter.dead, true);
+  assert.equal(w.enemies.length, 2);
+  assert.equal(w.player.dashCd, 22);
+});
+
 test("missing or truncated start selects a walkable tile; solid rooms reject", () => {
   for (const rows of [["OOOO", "OO.O", "OOOO"], ["OOOO", "OO.OS", "OOOO"]]) {
     const room = new Room({ name: "fallback", rows }, 0);
