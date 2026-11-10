@@ -11,7 +11,7 @@ export class TouchInput {
   private stickId = -1;
   private baseX = 0;
   private baseY = 0;
-  private readonly radius: number;
+  private radius = 0;
 
   constructor(
     private readonly intent: IntentSource,
@@ -20,9 +20,7 @@ export class TouchInput {
     private readonly knob: HTMLElement,
     private readonly attackBtn: HTMLElement,
     private readonly dashBtn: HTMLElement
-  ) {
-    this.radius = this.stick.clientWidth * 0.28;
-  }
+  ) {}
 
   attach(): void {
     this.stick.addEventListener("pointerdown", this.onStickDown);
@@ -47,6 +45,7 @@ export class TouchInput {
   }
 
   private onStickDown = (e: PointerEvent): void => {
+    this.radius = this.stick.clientWidth * 0.28;
     const r = this.stick.getBoundingClientRect();
     this.baseX = r.left + r.width / 2;
     this.baseY = r.top + r.height / 2;
