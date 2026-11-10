@@ -1,4 +1,5 @@
 import type { IntentSource } from "./intent.ts";
+import { isRotated, rotateVec } from "../ui/immersive.ts";
 
 /**
  * On-screen controls for touch devices: a left virtual stick for 8-way-ish movement and two
@@ -68,8 +69,9 @@ export class TouchInput {
   };
 
   private applyStick(clientX: number, clientY: number): void {
-    let dx = clientX - this.baseX;
-    let dy = clientY - this.baseY;
+    const v = rotateVec(clientX - this.baseX, clientY - this.baseY, isRotated());
+    let dx = v.x;
+    let dy = v.y;
     const len = Math.hypot(dx, dy);
     const clamped = Math.min(len, this.radius);
     if (len > 0) {

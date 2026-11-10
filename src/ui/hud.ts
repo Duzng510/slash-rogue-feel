@@ -20,6 +20,20 @@ export class Hud {
       o.drawImage(s.c, Math.round((6 + i * step) * scale), Math.round(6 * scale), s.w * scale, s.h * scale);
     }
 
+    let boss: World["enemies"][number] | null = null;
+    for (const e of w.enemies) if (e.def.HP_BAR && !e.dead) boss = e;
+    if (boss !== null) {
+      const bw = 68;
+      const x = Math.round((o.canvas.width / scale - bw) / 2);
+      const fill = Math.round((bw * boss.hp) / boss.maxHp);
+      o.fillStyle = P.VOID;
+      o.fillRect(x - 1, 5, bw + 2, 6);
+      o.fillStyle = P.HP_EMPTY;
+      o.fillRect(x, 6, bw, 4);
+      o.fillStyle = boss.enraged ? P.ENEMY_CHARGER : P.ENEMY_BOSS;
+      o.fillRect(x, 6, fill, 4);
+    }
+
     o.font = `${Math.round(6 * scale)}px ui-monospace, monospace`;
     o.textBaseline = "top";
     o.fillStyle = P.TEXT;

@@ -17,6 +17,13 @@
         overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
       }
       #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+      /* landscape fallback: the whole app becomes a 16:10-ish landscape box rotated inside a portrait viewport */
+      #app { position: fixed; inset: 0; }
+      body.rot90 #app {
+        inset: auto; left: 0; top: 0; width: 100vh; height: 100vw;
+        width: 100dvh; height: 100dvw;
+        transform: rotate(90deg) translateY(-100%); transform-origin: top left;
+      }
       #game, #overlay {
         position: absolute; image-rendering: pixelated;
       }
@@ -40,7 +47,8 @@
       body.touch #touch { display: block; }
       body.touch #keys { display: none; }
       #stick {
-        position: absolute; left: 20px; bottom: 20px; width: 148px; height: 148px;
+        position: absolute; left: max(20px, env(safe-area-inset-left), env(safe-area-inset-top));
+        bottom: 20px; width: 148px; height: 148px;
         border-radius: 50%; background: rgba(77, 163, 255, 0.08);
         border: 2px solid rgba(77, 163, 255, 0.28); pointer-events: auto; touch-action: none;
       }
@@ -51,17 +59,22 @@
         box-shadow: 0 0 12px rgba(77, 163, 255, 0.45);
       }
       .tbtn {
-        position: absolute; right: 24px; width: 92px; height: 92px; border-radius: 50%;
+        position: absolute; right: max(24px, env(safe-area-inset-right), env(safe-area-inset-bottom));
+        width: 92px; height: 92px; border-radius: 50%;
         display: grid; place-items: center; pointer-events: auto; touch-action: none;
         font-size: 13px; letter-spacing: 0.06em; color: var(--ink);
         background: rgba(20, 24, 34, 0.72); border: 2px solid #3a4256;
       }
       #btn-attack { bottom: 34px; border-color: rgba(77, 163, 255, 0.6); color: #cfe6ff; }
-      #btn-dash { bottom: 140px; right: 44px; width: 74px; height: 74px; border-color: rgba(255, 255, 255, 0.35); }
+      #btn-dash {
+        bottom: 140px; width: 74px; height: 74px; border-color: rgba(255, 255, 255, 0.35);
+        right: max(44px, calc(env(safe-area-inset-right) + 20px), calc(env(safe-area-inset-bottom) + 20px));
+      }
       .tbtn.press { background: rgba(77, 163, 255, 0.4); transform: scale(0.94); }
     </style>
   </head>
   <body>
+    <div id="app">
     <div id="stage">
       <canvas id="game"></canvas>
       <canvas id="overlay"></canvas>
@@ -87,6 +100,7 @@
       <u>WASD</u> di chuyển &middot; <u>chuột trái / J</u> chém &middot; <u>SPACE / SHIFT</u> dash<br />
       <u>1</u> panel &middot; <u>2</u> fps &middot; <u>3</u> hitbox &middot; <u>4</u> hit-stop &middot; <u>5</u> slow-mo<br />
       <u>6</u> spawn +4 &middot; <u>7</u> sạch phòng &middot; <u>R</u> lại phòng &middot; <u>N</u> phòng sau
+    </div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

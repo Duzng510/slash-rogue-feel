@@ -1,4 +1,5 @@
 import { CONFIG } from "./config.ts";
+import type { EnemyKind } from "./config.ts";
 import { dist } from "./mathx.ts";
 import { GameLoop } from "./loop.ts";
 import { World } from "./world/world.ts";
@@ -9,8 +10,11 @@ import { Camera } from "./render/camera.ts";
 import { Renderer } from "./render/renderer.ts";
 import { buildSprites } from "./render/pixelart.ts";
 import { Hud } from "./ui/hud.ts";
+import { syncOrientation, tryImmersive } from "./ui/immersive.ts";
+import type { OrientationLike } from "./ui/immersive.ts";
 import { DebugHud, type DebugFlags } from "./ui/debug.ts";
 import { Sfx } from "./audio/sfx.ts";
+import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
 
 const qs = new URLSearchParams(location.search);
@@ -101,6 +105,13 @@ if (touchLayer !== null) {
   }
 }
 
+// rotation decides which axes the fit uses, so the two always change together
+const onViewport = (): void => {
+  syncOrientation();
+  renderer.resize();
+};
+onViewport();
+
 const SLIDERS: { id: string; label: string; key: keyof typeof CONFIG.SLIDERS; fmt: (v: number) => string }[] = [
   { id: "s-shake", label: "v-shake", key: "shake", fmt: (v) => v.toFixed(2) },
   { id: "s-volume", label: "v-volume", key: "volume", fmt: (v) => v.toFixed(2) },
@@ -132,7 +143,19 @@ syncSliderLabels();
 
 window.addEventListener("pointerdown", () => sfx.unlock());
 window.addEventListener("keydown", () => sfx.unlock());
-window.addEventListener("resize", () => renderer.resize());
+window.addEventListener("resize", onViewport);
+window.addEventListener("orientationchange", onViewport);
+document.addEventListener("fullscreenchange", onViewport);
+if (document.body.classList.contains("touch")) {
+  // the first tap is the only user gesture available, and fullscreen requires one
+  window.addEventListener(
+    "pointerdown",
+    () => {
+      void tryImmersive(document.documentElement, screen.orientation as unknown as OrientationLike).then(onViewport);
+    },
+    { once: true }
+  );
+}
 
 function botIntent(): Intent {
   const p = world.player;
@@ -206,14 +229,25 @@ type Harness = {
   pressDash: () => void;
   setMove: (x: number, y: number) => void;
   setAim: (x: number, y: number) => void;
-  addEnemies: (n: number) => void;
+  addEnemies: (n: number, kinds?: EnemyKind[]) => void;
+  clearEnemies: () => void;
+  damageEnemy: (id: number, dmg: number) => boolean;
   gotoRoom: (i: number) => void;
   state: () => {
     tick: number;
     hitStop: number;
     player: { x: number; y: number; hp: number; state: string; swing: string | null; invuln: boolean };
     roomIndex: number;
-    enemies: { id: number; x: number; y: number; hp: number; state: string }[];
+    enemies: {
+      id: number;
+      x: number;
+      y: number;
+      hp: number;
+      state: string;
+      kind: string;
+      enraged: boolean;
+      telegraphTicksLeft: number;
+    }[];
     particles: number;
     fx: { arcs: number; flashes: number; vignette: number; shake: number };
   };
@@ -231,7 +265,30 @@ const harness: Harness = {
   setAim: (x, y) => {
     intent.aim = { x, y };
   },
-  addEnemies: (n) => world.addEnemies(n),
+  addEnemies: (n, kinds) => world.addEnemies(n, kinds),
+  clearEnemies: () => world.clearEnemies(),
+  damageEnemy: (id, dmg) => {
+    const e = world.enemies.find((x) => x.id === id);
+    if (e === undefined || e.dead) return false;
+    e.onHit(
+      createSwing(world, {
+        side: "player",
+        combo: 1,
+        dir: 0,
+        ox: e.x,
+        oy: e.y,
+        reach: 8,
+        deg: 90,
+        dmg,
+        knockback: 0,
+        fd: { startup: 1, active: 1, recovery: 1 },
+      }),
+      e.x,
+      e.y,
+      world
+    );
+    return true;
+  },
   gotoRoom: (i) => world.loadRoom(i),
   state: () => ({
     tick: world.tickCount,
@@ -245,7 +302,16 @@ const harness: Harness = {
       invuln: !world.player.canBeHit(),
     },
     roomIndex: world.roomIndex,
-    enemies: world.enemies.map((e) => ({ id: e.id, x: e.x, y: e.y, hp: e.hp, state: e.state })),
+    enemies: world.enemies.map((e) => ({
+      id: e.id,
+      x: e.x,
+      y: e.y,
+      hp: e.hp,
+      state: e.state,
+      kind: e.kind,
+      enraged: e.enraged,
+      telegraphTicksLeft: e.telegraphTicksLeft,
+    })),
     particles: world.particles.alive,
     fx: renderer.fxInfo,
   }),

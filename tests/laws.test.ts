@@ -1,13 +1,17 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIG } from "../src/config.ts";
+import { CONFIG, ENEMY_KINDS, enemyDef } from "../src/config.ts";
+import type { EnemyKind } from "../src/config.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
-import { makeEnemy, ENEMY_STATE, canGoEnemy } from "../src/entities/enemy.ts";
+import { TEMPLATES, MARKER_KIND } from "../src/world/rooms.ts";
+import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
+import { createSwing } from "../src/systems/combat.ts";
 import { PLAYER_STATE } from "../src/entities/player.ts";
 import { requestHitStop } from "../src/systems/feelSim.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
 import { makeRng } from "../src/mathx.ts";
+import { fitAxes, rotateVec, tryImmersive } from "../src/ui/immersive.ts";
 import type { Intent } from "../src/sim/types.ts";
 
 let pass = 0;
@@ -44,6 +48,27 @@ function duel(w: World, gap = 16): number {
   w.enemies.push(e);
   w.syncUnits();
   return e.id;
+}
+
+/** a swing that never goes through the sim, for poking one unit directly */
+function jab(src: World, dmg: number) {
+  return createSwing(src, {
+    side: "player",
+    combo: 1,
+    dir: 0,
+    ox: 0,
+    oy: 0,
+    reach: 10,
+    deg: 90,
+    dmg,
+    knockback: 0,
+    fd: { startup: 1, active: 1, recovery: 1 },
+  });
+}
+
+function withEnemy(w: World, e: Enemy): void {
+  w.enemies = [e];
+  w.syncUnits();
 }
 
 heading("Laws from config");
@@ -269,6 +294,246 @@ heading("Room loop");
   w.tick(intent());
   ok("walking into the open door advances the room", w.roomIndex !== before, `index ${w.roomIndex}`);
   ok("the new room is populated", w.enemies.length > 0);
+}
+
+heading("Archetype readability");
+{
+  const hz = CONFIG.TIME.TICK_HZ;
+  ok(
+    "every archetype telegraphs for at least MIN_TELEGRAPH_S",
+    ENEMY_KINDS.every((k) => enemyDef(k).TELEGRAPH_TICKS / hz >= CONFIG.LAWS.MIN_TELEGRAPH_S),
+    ENEMY_KINDS.map((k) => `${k}:${(enemyDef(k).TELEGRAPH_TICKS / hz).toFixed(2)}s`).join(" ")
+  );
+  ok("the boss stays readable in phase 2", enemyDef("boss").ENRAGED_TELEGRAPH_TICKS / hz >= CONFIG.LAWS.MIN_TELEGRAPH_S);
+  ok("every archetype leaves a reactable punish window", ENEMY_KINDS.every((k) => enemyDef(k).RECOVERY_TICKS / hz >= 0.15));
+
+  const colors = ENEMY_KINDS.map((k) => enemyDef(k).BODY_COLOR);
+  ok("body colours are pairwise distinct", new Set(colors).size === colors.length, colors.join(" "));
+  const keys = ENEMY_KINDS.map((k) => enemyDef(k).SPRITE_KEY);
+  ok("sprite keys are pairwise distinct", new Set(keys).size === keys.length, keys.join(" "));
+
+  const reserved = [
+    CONFIG.PALETTE.VOID,
+    CONFIG.PALETTE.FLOOR,
+    CONFIG.PALETTE.FLOOR_ACCENT,
+    CONFIG.PALETTE.WALL,
+    CONFIG.PALETTE.WALL_TOP,
+    CONFIG.PALETTE.DOOR_LOCKED,
+    CONFIG.PALETTE.PLAYER_BODY,
+    CONFIG.PALETTE.PLAYER_RIM,
+    CONFIG.PALETTE.DOOR_OPEN,
+  ];
+  const clashes = colors.filter((c) => reserved.includes(c));
+  ok("no enemy body colour is a floor, wall or player colour", clashes.length === 0, clashes.join(" "));
+
+  const art = readFileSync("src/render/pixelart.ts", "utf8");
+  const unbuilt = ENEMY_KINDS.filter((k) => !art.includes(`enemyDef("${k}")`));
+  ok("every archetype is drawn from its own def", unbuilt.length === 0, `missing ${unbuilt.join(",")}`);
+
+  ok(
+    "the charger telegraph is narrow enough to read as a lane",
+    enemyDef("charger").ATTACK_ARC_DEG <= CONFIG.LAWS.MAX_CHARGER_ARC_DEG,
+    `got ${enemyDef("charger").ATTACK_ARC_DEG}`
+  );
+  ok("the charger lane outranges a chaser swing", enemyDef("charger").ATTACK_REACH > enemyDef("chaser").ATTACK_REACH);
+  ok("the charger commits: it moves only while the swing is active", enemyDef("charger").LUNGE_SPEED > 0);
+  ok("the splitter is the only archetype that splits", ENEMY_KINDS.filter((k) => enemyDef(k).SPLIT_INTO !== null).join() === "splitter");
+}
+
+heading("Crowding cap");
+{
+  const w = sandbox();
+  for (let i = 0; i < 40; i++) w.spawnEnemy(w.player.x + i, w.player.y, "chaser");
+  ok("spawnEnemy refuses to exceed MAX_ALIVE", w.aliveEnemies() === CONFIG.ENEMY.MAX_ALIVE, `alive ${w.aliveEnemies()}`);
+  ok("the cap still leaves room above the biggest authored wave", CONFIG.ENEMY.MAX_ALIVE > Math.max(...CONFIG.ROOMS.WAVES));
+
+  const w2 = sandbox();
+  const parent = makeEnemy(w2.player.x + 40, w2.player.y, "splitter");
+  withEnemy(w2, parent);
+  for (let i = 0; i < 40; i++) w2.spawnEnemy(w2.player.x, w2.player.y, "chaser");
+  parent.onHit(jab(w2, 99), parent.x, parent.y, w2);
+  ok("a split into a full room cannot break the cap", w2.aliveEnemies() <= CONFIG.ENEMY.MAX_ALIVE, `alive ${w2.aliveEnemies()}`);
+}
+
+heading("Splitter");
+{
+  const w = sandbox();
+  const parent = makeEnemy(w.player.x + 40, w.player.y, "splitter");
+  withEnemy(w, parent);
+  const killed = parent.onHit(jab(w, 99), parent.x, parent.y, w);
+  const kids = w.enemies.filter((e) => e !== parent);
+  ok("a lethal hit kills the splitter", killed && parent.dead);
+  ok("it spawns exactly its configured count", kids.length === enemyDef("splitter").SPLIT_COUNT, `kids ${kids.length}`);
+  ok("the spawnlings are the configured kind", kids.every((k) => k.kind === enemyDef("splitter").SPLIT_INTO));
+  ok("the spawnlings come in at full hp", kids.every((k) => !k.dead && k.hp === enemyDef("small").HP));
+
+  const w2 = sandbox();
+  const p2 = makeEnemy(w2.player.x + 40, w2.player.y, "splitter");
+  withEnemy(w2, p2);
+  p2.onHit(jab(w2, 99), p2.x, p2.y, w2);
+  const kids2 = w2.enemies.filter((e) => e !== p2);
+  ok(
+    "the split spread is deterministic for a seed",
+    kids2.length === kids.length && kids2.every((k, i) => Math.abs(k.x - kids[i].x) < 1e-9 && Math.abs(k.y - kids[i].y) < 1e-9)
+  );
+}
+
+heading("Radial ring geometry");
+{
+  const w = sandbox();
+  const boss = makeEnemy(w.player.x + 20, w.player.y, "boss");
+  withEnemy(w, boss);
+  let guard = 0;
+  while (boss.state !== ENEMY_STATE.TELEGRAPH && guard++ < 300) w.tick(intent());
+  ok("the boss telegraphs before the ring lands", boss.state === ENEMY_STATE.TELEGRAPH);
+  const locked = 1 - enemyDef("boss").RETARGET_FRACTION;
+  while (boss.telegraphTicksLeft > boss.telegraphTotal * locked && guard++ < 500) w.tick(intent());
+  ok("the telegraph direction is locked by the time the player dodges", boss.telegraphTicksLeft <= boss.telegraphTotal * locked);
+
+  w.player.x = boss.x + 22;
+  w.player.y = boss.y;
+  let toAttack = 0;
+  while (boss.state !== ENEMY_STATE.ATTACK && toAttack++ < 80) w.tick(intent());
+  let duringRing = 0;
+  const hpBeforeRing = w.player.hp;
+  while (boss.state === ENEMY_STATE.ATTACK && duringRing++ < 80) w.tick(intent());
+  ok(
+    "the ring that is already charging lands behind the attacker",
+    w.player.hp < hpBeforeRing,
+    `hp ${w.player.hp}/${hpBeforeRing} after ${duringRing}`
+  );
+  ok("i-frames keep one ring to a single heart", hpBeforeRing - w.player.hp === 1);
+}
+
+heading("Boss phase 2");
+{
+  const w = sandbox();
+  const boss = makeEnemy(w.player.x, w.player.y, "boss");
+  withEnemy(w, boss);
+  const half = boss.maxHp * enemyDef("boss").ENRAGE_FRACTION;
+  let guard = 0;
+  while (boss.hp > half && !boss.enraged && guard++ < 60) boss.onHit(jab(w, 1), boss.x, boss.y, w);
+  ok("the boss enrages at or below half health", boss.enraged && boss.hp <= half, `hp ${boss.hp} half ${half}`);
+  ok("enrage is configured no later than half health", enemyDef("boss").ENRAGE_FRACTION <= 0.5);
+  boss.enraged = false;
+  boss.onHit(jab(w, 1), boss.x, boss.y, w);
+  ok("enrage never reverts once it is set", boss.enraged);
+  ok("phase 2 telegraphs faster", enemyDef("boss").ENRAGED_TELEGRAPH_TICKS < enemyDef("boss").TELEGRAPH_TICKS);
+  ok("phase 2 commits follow-up rings", enemyDef("boss").RING_FOLLOWUPS > 0);
+}
+
+heading("Shared state machine");
+{
+  const names = Object.values(ENEMY_STATE);
+  const badEdges = Object.entries(ENEMY_TRANSITIONS).flatMap(([from, tos]) =>
+    tos.filter((t) => !names.includes(t)).map((t) => `${from}->${t}`)
+  );
+  ok("every edge in the table lands on a real state", badEdges.length === 0, badEdges.join(","));
+  ok("one transition table serves every archetype", Object.keys(ENEMY_TRANSITIONS).length === names.length);
+  ok("an attack can chain straight into the next telegraph", canGoEnemy(ENEMY_STATE.ATTACK, ENEMY_STATE.TELEGRAPH));
+  ok("dead -> telegraph is not a legal edge", !canGoEnemy(ENEMY_STATE.DEAD, ENEMY_STATE.TELEGRAPH));
+
+  const w = sandbox();
+  const boss = makeEnemy(w.player.x + 30, w.player.y, "boss");
+  withEnemy(w, boss);
+  w.player.hp = 99;
+  let sawTelegraph = false;
+  let sawPunish = false;
+  for (let i = 0; i < 250; i++) {
+    w.tick(intent());
+    if (boss.state === ENEMY_STATE.TELEGRAPH) sawTelegraph = true;
+    if (boss.state === ENEMY_STATE.ATTACK && boss.swing !== null && boss.swing.phase === "recover") sawPunish = true;
+  }
+  ok("the boss telegraphs and then leaves a punish window", sawTelegraph && sawPunish);
+  ok("the boss rings twice back to back once enraged", (() => {
+    boss.enraged = true;
+    let telegraphs = 0;
+    let last = boss.state;
+    for (let i = 0; i < 250; i++) {
+      w.tick(intent());
+      if (boss.state === ENEMY_STATE.TELEGRAPH && last !== ENEMY_STATE.TELEGRAPH) telegraphs++;
+      last = boss.state;
+      if (telegraphs >= 2) break;
+    }
+    return telegraphs >= 2;
+  })(), "no follow-up ring");
+}
+
+heading("Authored content");
+{
+  const placed = new Set<EnemyKind>();
+  for (const t of TEMPLATES) {
+    for (const ch of t.rows.join("")) {
+      const k = MARKER_KIND[ch];
+      if (k !== undefined) placed.add(k);
+    }
+  }
+  const missing = ENEMY_KINDS.filter((k) => k !== "small" && !placed.has(k));
+  ok("every archetype you can fight is placed in a room", missing.length === 0, `missing ${missing.join(",")}`);
+  const lastRoom = TEMPLATES[TEMPLATES.length - 1];
+  ok("the last room is the boss arena", lastRoom.rows.join("").includes("B"));
+  ok("the boss arena holds no trash mobs", /[ECT]/.test(lastRoom.rows.join("")) === false);
+  ok("exactly one boss exists in the authored rooms", TEMPLATES.reduce((n, t) => n + (t.rows.join("").match(/B/g) ?? []).length, 0) === 1);
+
+  const arena = TEMPLATES[TEMPLATES.length - 1];
+  const cellOf = (ch: string): { x: number; y: number } | null => {
+    for (let ry = 0; ry < arena.rows.length; ry++) {
+      const cx = arena.rows[ry].indexOf(ch);
+      if (cx >= 0) return { x: (cx + 1) * CONFIG.WORLD.TILE, y: (ry + 1) * CONFIG.WORLD.TILE };
+    }
+    return null;
+  };
+  const entry = cellOf("S");
+  const bossMark = cellOf("B");
+  const gap = entry !== null && bossMark !== null ? Math.hypot(bossMark.x - entry.x, bossMark.y - entry.y) : Infinity;
+  ok("the boss can see the player the moment the arena loads", enemyDef("boss").CHASE_ACQUIRE >= gap, `gap ${Math.round(gap)}`);
+
+  const w = sandbox();
+  w.loadRoom(TEMPLATES.length - 1);
+  let engaged = false;
+  for (let i = 0; i < 400 && !engaged; i++) {
+    w.tick(intent());
+    engaged = w.enemies.some((e) => e.state === ENEMY_STATE.TELEGRAPH);
+  }
+  ok("the boss walks into range and telegraphs", engaged);
+}
+
+heading("Mobile landscape");
+{
+  const r = rotateVec(1, 0, true);
+  ok("a sideways app maps screen right to app up", r.x === 0 && r.y === -1, `${r.x},${r.y}`);
+  ok("an unrotated stick vector passes through", rotateVec(0.5, -0.25, false).x === 0.5);
+  let v = { x: 1, y: 2 };
+  for (let i = 0; i < 4; i++) v = rotateVec(v.x, v.y, true);
+  ok("rotateVec is a quarter turn, not a mirror", v.x === 1 && v.y === 2, `${v.x},${v.y}`);
+
+  const rotated = fitAxes(390, 844, true);
+  ok("the fit measures the rotated box, not the screen", rotated.w === 844 && rotated.h === 390, `${rotated.w}x${rotated.h}`);
+  const plain = fitAxes(844, 390, false);
+  ok("a real landscape window keeps its axes", plain.w === 844 && plain.h === 390);
+
+  const order: string[] = [];
+  const noApi = await tryImmersive({}, { lock: async () => { order.push("lock"); } });
+  ok("a browser without fullscreen is skipped, not thrown", !noApi);
+  ok("no fullscreen means no orientation lock attempt", order.length === 0, order.join(","));
+  const granted = await tryImmersive(
+    { requestFullscreen: async () => { order.push("fs"); } },
+    { lock: async () => { order.push("lock"); } }
+  );
+  ok("the lock runs only after fullscreen is granted", granted && order.join(",") === "fs,lock", order.join(","));
+  const denied = await tryImmersive(
+    { requestFullscreen: async () => { throw new Error("user denied"); } },
+    { lock: async () => { order.push("denied-lock"); } }
+  );
+  ok("a denied fullscreen stops there", !denied && !order.includes("denied-lock"));
+
+  const html = readFileSync("index.html", "utf8");
+  const open = html.indexOf('<div id="app">');
+  const script = html.indexOf("<script");
+  const inside = open >= 0 && script > open ? html.slice(open, script) : "";
+  const outside = ["stage", "panel", "touch", "keys"].filter((id) => !inside.includes(`id="${id}"`));
+  ok("every overlay lives inside the rotated wrapper", outside.length === 0, `outside: ${outside.join(",")}`);
+  ok("rot90 transforms that wrapper by a quarter turn", html.includes("body.rot90 #app") && html.includes("rotate(90deg)"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

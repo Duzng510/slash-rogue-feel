@@ -4,7 +4,7 @@ import type { ParticlePool } from "../systems/particles.ts";
 import type { Enemy } from "../entities/enemy.ts";
 import type { Player } from "../entities/player.ts";
 import type { Room } from "../world/rooms.ts";
-import type { FrameData } from "../config.ts";
+import type { EnemyKind, FrameData } from "../config.ts";
 
 export type Side = "player" | "enemy";
 
@@ -46,6 +46,8 @@ export interface Unit {
   canBeHit(): boolean;
   /** returns true when this hit was lethal */
   onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean;
+  /** per-unit pitch for the kill/hit sfx; enemies take it from their archetype */
+  killPitch?: number;
 }
 
 export type Intent = {
@@ -68,7 +70,7 @@ export type Sim = {
   rng: Rng;
   hitStopTicks: number;
   nextSwingId(): number;
-  spawnEnemy(x: number, y: number): void;
+  spawnEnemy(x: number, y: number, kind?: EnemyKind): void;
   loadRoom(index: number, respawnAtDoor: boolean): void;
   roomIndex: number;
   roomTotal: number;

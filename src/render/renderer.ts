@@ -3,6 +3,7 @@ import type { VisualEvent } from "../events.ts";
 import { ENEMY_STATE } from "../entities/enemy.ts";
 import { PLAYER_STATE } from "../entities/player.ts";
 import { TILE } from "../world/rooms.ts";
+import { fitAxes, isRotated } from "../ui/immersive.ts";
 import { facingOffsets, type Sprite } from "./pixelart.ts";
 import type { Camera } from "./camera.ts";
 import type { World } from "../world/world.ts";
@@ -55,7 +56,9 @@ export class Renderer {
     this.g.imageSmoothingEnabled = false;
     this.o.imageSmoothingEnabled = false;
     this.white.player = tinted(sprites.player.c, P.FLASH);
-    this.white.enemy = tinted(sprites.enemy.c, P.FLASH);
+    for (const key of Object.keys(sprites)) {
+      if (key.startsWith("enemy")) this.white[key] = tinted(sprites[key].c, P.FLASH);
+    }
     this.tileOf[TILE.FLOOR] = sprites.floor;
     this.tileOf[TILE.ACCENT] = sprites.accent;
     this.tileOf[TILE.WALL] = sprites.wall;
@@ -67,7 +70,8 @@ export class Renderer {
   resize(): void {
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
-    const fit = Math.min(window.innerWidth / iw, window.innerHeight / ih);
+    const axes = fitAxes(window.innerWidth, window.innerHeight, isRotated());
+    const fit = Math.min(axes.w / iw, axes.h / ih);
     const floor = Math.floor(fit);
     this.scale = Math.max(CONFIG.WORLD.MIN_SCALE, Number.isFinite(floor) && floor > 0 ? floor : CONFIG.WORLD.MIN_SCALE);
     const w = iw * this.scale;
@@ -183,12 +187,36 @@ export class Renderer {
   }
 
   private drawTelegraphs(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    const e = CONFIG.ENEMY;
     for (const en of this.world.enemies) {
       if (en.state !== ENEMY_STATE.TELEGRAPH) continue;
+      const e = en.def;
       const prog = 1 - en.telegraphTicksLeft / Math.max(1, en.telegraphTotal);
       const cx = Math.round(en.x - ox);
       const cy = Math.round(en.y - e.BODY_H * 0.5 - oy);
+
+      g.globalAlpha = 0.55 + 0.45 * prog;
+      g.strokeStyle = P.TELEGRAPH_EDGE;
+      g.lineWidth = 1;
+      g.setLineDash([3, 2]);
+      g.lineDashOffset = -this.world.tickCount % 5;
+
+      if (e.RADIAL) {
+        /** the disc grows into a fixed rim: read the rim, that is the line you must cross */
+        g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.55 + 0.45 * prog);
+        g.fillStyle = P.TELEGRAPH_FILL;
+        g.beginPath();
+        g.arc(cx, cy, Math.max(1, e.ATTACK_REACH * prog), 0, Math.PI * 2);
+        g.fill();
+        g.globalAlpha = 0.55 + 0.45 * prog;
+        g.strokeStyle = P.TELEGRAPH_EDGE;
+        g.beginPath();
+        g.arc(cx, cy, e.ATTACK_REACH, 0, Math.PI * 2);
+        g.stroke();
+        g.setLineDash([]);
+        g.globalAlpha = 1;
+        continue;
+      }
+
       g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.55 + 0.45 * prog);
       g.fillStyle = P.TELEGRAPH_FILL;
       this.wedge(g, cx, cy, en.telegraphDir, e.ATTACK_REACH, e.ATTACK_ARC_DEG, 0.1);
@@ -196,9 +224,6 @@ export class Renderer {
 
       g.globalAlpha = 0.55 + 0.45 * prog;
       g.strokeStyle = P.TELEGRAPH_EDGE;
-      g.lineWidth = 1;
-      g.setLineDash([3, 2]);
-      g.lineDashOffset = -this.world.tickCount % 5;
       this.wedge(g, cx, cy, en.telegraphDir, e.ATTACK_REACH, e.ATTACK_ARC_DEG, 0.1);
       g.stroke();
       g.setLineDash([]);
@@ -210,7 +235,9 @@ export class Renderer {
     const s = this.sprites.shadow;
     for (const en of this.world.enemies) {
       if (en.removed) continue;
-      g.drawImage(s.c, Math.round(en.x - s.ax - ox), Math.round(en.y - s.ay - oy));
+      const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
+      const w = Math.max(s.w, Math.round(sp.w * 0.9));
+      g.drawImage(s.c, Math.round(en.x - w / 2 - ox), Math.round(en.y - s.ay - oy), w, s.h);
     }
     const pl = this.world.player;
     g.drawImage(s.c, Math.round(pl.x - s.ax - ox), Math.round(pl.y - s.ay - oy));
@@ -220,24 +247,26 @@ export class Renderer {
     const target = this.world.player.autoTargetId;
     for (const en of this.world.enemies) {
       if (en.removed) continue;
-      const sp = this.sprites.enemy;
+      const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
+      const white = this.white[en.def.SPRITE_KEY] ?? this.white.enemy;
       const x = Math.round(en.x - sp.ax - ox);
       const y = Math.round(en.y - sp.ay - oy);
       const flashing = (this.flash.get(en.id) ?? 0) > 0;
 
       if (en.dead) {
-        g.globalAlpha = Math.max(0, en.corpseTicks / CONFIG.ENEMY.CORPSE_TICKS);
-        g.drawImage(sp.c, x, y + (CONFIG.ENEMY.CORPSE_TICKS - en.corpseTicks));
+        const total = en.def.CORPSE_TICKS;
+        g.globalAlpha = Math.max(0, en.corpseTicks / total);
+        g.drawImage(sp.c, x, y + (total - en.corpseTicks));
         g.globalAlpha = 1;
         continue;
       }
 
-      if (flashing) g.drawImage(this.white.enemy, x, y);
+      if (flashing) g.drawImage(white, x, y);
       else g.drawImage(sp.c, x, y);
 
       if (en.blink()) {
         g.globalAlpha = 0.5;
-        g.drawImage(this.white.enemy, x, y);
+        g.drawImage(white, x, y);
         g.globalAlpha = 1;
       }
 
@@ -245,6 +274,12 @@ export class Renderer {
         g.strokeStyle = P.TARGET_RIM;
         g.lineWidth = 1;
         g.strokeRect(x - 0.5, y - 0.5, sp.w + 1, sp.h + 1);
+      }
+
+      if (en.kind === "boss" && en.enraged) {
+        g.strokeStyle = P.ENEMY_CHARGER;
+        g.lineWidth = 1;
+        g.strokeRect(x - 1.5, y - 1.5, sp.w + 3, sp.h + 3);
       }
       if (en.state === ENEMY_STATE.ATTACK && en.swing !== null && en.swing.phase === "recover") {
         g.fillStyle = P.ENEMY_EYE;

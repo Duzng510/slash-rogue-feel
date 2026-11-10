@@ -77,6 +77,10 @@ export function stepSwing(sw: Swing): boolean {
 
 export function hitboxOf(sw: Swing): Rect | null {
   if (sw.phase !== "active") return null;
+  const r = sw.reach * 1.15;
+  if (sw.deg >= 320) {
+    return { x: sw.ox - r, y: sw.oy - r, w: r * 2, h: r * 2 };
+  }
   const half = sw.reach * 0.6;
   const cx = sw.ox + Math.cos(sw.dir) * sw.reach * 0.5;
   const cy = sw.oy + Math.sin(sw.dir) * sw.reach * 0.5;
@@ -117,7 +121,7 @@ function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, 
     if (killed) src.particles.burstShards(cx, cy, f.DEATH_SHARDS, CONFIG.PALETTE.ENEMY_SHADE, src.rng);
     if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: cx, y: cy - 8, value: sw.dmg });
     shake(src.queue, cx, cy, dir, killed ? f.SHAKE_KILL_MULT : 1);
-    sfx(src.queue, killed ? "kill" : "slash_hit", killed ? 1.1 : 1, killed ? 0.82 : 1);
+    sfx(src.queue, killed ? "kill" : "slash_hit", killed ? 1.1 : 1, (killed ? 0.82 : 1) * (target.killPitch ?? 1));
     requestHitStop(src, killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL);
   } else {
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });

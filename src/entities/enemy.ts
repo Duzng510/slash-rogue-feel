@@ -1,4 +1,5 @@
-import { CONFIG } from "../config.ts";
+import { CONFIG, enemyDef } from "../config.ts";
+import type { EnemyDef, EnemyKind } from "../config.ts";
 import { angleLerp, dist, normAngle } from "../mathx.ts";
 import { createSwing, stepSwing } from "../systems/combat.ts";
 import { knockback, pulse } from "../systems/feelSim.ts";
@@ -17,17 +18,18 @@ export const ENEMY_STATE = {
 
 export type EnemyState = (typeof ENEMY_STATE)[keyof typeof ENEMY_STATE];
 
-const TRANSITIONS: Record<EnemyState, EnemyState[]> = {
+/** one table for every archetype, so the transition law has a single source */
+export const ENEMY_TRANSITIONS: Record<EnemyState, EnemyState[]> = {
   idle: ["chase", "telegraph", "hurt", "dead"],
   chase: ["idle", "telegraph", "hurt", "dead"],
   telegraph: ["attack", "hurt", "dead", "chase"],
-  attack: ["idle", "hurt", "dead"],
+  attack: ["idle", "telegraph", "hurt", "dead"],
   hurt: ["idle", "chase", "telegraph", "dead"],
   dead: [],
 };
 
 export function canGoEnemy(from: EnemyState, to: EnemyState): boolean {
-  return from === to || TRANSITIONS[from].includes(to);
+  return from === to || ENEMY_TRANSITIONS[from].includes(to);
 }
 
 let nextId = 1;
@@ -35,14 +37,18 @@ let nextId = 1;
 export class Enemy implements Unit {
   readonly id: number;
   readonly side: Side = "enemy";
-  readonly bodyW = CONFIG.ENEMY.BODY_W;
-  readonly bodyH = CONFIG.ENEMY.BODY_H;
+  readonly kind: EnemyKind;
+  readonly def: EnemyDef;
+  readonly bodyW: number;
+  readonly bodyH: number;
+  readonly killPitch: number;
 
   x = 0;
   y = 0;
   vx = 0;
   vy = 0;
-  hp = CONFIG.ENEMY.HP;
+  hp: number;
+  readonly maxHp: number;
   facing = Math.PI;
   state: EnemyState = ENEMY_STATE.IDLE;
   swing: Swing | null = null;
@@ -52,18 +58,34 @@ export class Enemy implements Unit {
   ticksInState = 0;
   restTicks = 0;
   hurtTicks = 0;
-  corpseTicks = 0;
+  corpseTicks: number;
   animTicks = 0;
+
+  /** boss only: never reverts, and shortens the telegraph / commits a second ring */
+  enraged = false;
+  /** rings still owed by the current attack */
+  followUps = 0;
 
   /** telegraph geometry the renderer draws; locked halfway through so late dodges still work */
   telegraphDir = Math.PI;
   telegraphTicksLeft = 0;
-  telegraphTotal = CONFIG.ENEMY.TELEGRAPH_TICKS;
+  telegraphTotal: number;
 
-  constructor(x: number, y: number, id: number) {
+  constructor(x: number, y: number, id: number, kind: EnemyKind = "chaser") {
+    const def = enemyDef(kind);
+    this.kind = kind;
+    this.def = def;
+    this.id = id;
+    this.bodyW = def.BODY_W;
+    this.bodyH = def.BODY_H;
+    this.killPitch = def.KILL_PITCH;
+    this.hp = def.HP;
+    this.maxHp = def.HP;
+    this.corpseTicks = def.CORPSE_TICKS;
+    this.telegraphTotal = def.TELEGRAPH_TICKS;
+    this.telegraphTicksLeft = def.TELEGRAPH_TICKS;
     this.x = x;
     this.y = y;
-    this.id = id;
   }
 
   setState(next: EnemyState): void {
@@ -75,8 +97,8 @@ export class Enemy implements Unit {
   }
 
   hurtRect(): Rect {
-    const w = CONFIG.ENEMY.HURT_W;
-    const h = CONFIG.ENEMY.HURT_H;
+    const w = this.def.HURT_W;
+    const h = this.def.HURT_H;
     return { x: this.x - w / 2, y: this.y - h, w, h };
   }
 
@@ -89,16 +111,19 @@ export class Enemy implements Unit {
     return this.state === ENEMY_STATE.ATTACK && this.swing !== null && this.swing.phase === "recover";
   }
 
-  onHit(sw: Swing, _cx: number, _cy: number, _src: Sim): boolean {
+  onHit(sw: Swing, _cx: number, _cy: number, src: Sim): boolean {
+    const e = this.def;
     this.hp -= sw.dmg;
     knockback(this, sw.dir, sw.knockback);
     if (this.hp <= 0) {
       this.hp = 0;
       this.die();
+      this.split(src);
       return true;
     }
+    if (e.ENRAGE_FRACTION > 0 && !this.enraged && this.hp <= this.maxHp * e.ENRAGE_FRACTION) this.enraged = true;
     this.swing = null;
-    this.hurtTicks = CONFIG.ENEMY.HURT_TICKS;
+    this.hurtTicks = e.HURT_TICKS;
     this.setState(ENEMY_STATE.HURT);
     return false;
   }
@@ -106,12 +131,21 @@ export class Enemy implements Unit {
   die(): void {
     this.dead = true;
     this.swing = null;
-    this.corpseTicks = CONFIG.ENEMY.CORPSE_TICKS;
+    this.corpseTicks = this.def.CORPSE_TICKS;
     this.setState(ENEMY_STATE.DEAD);
   }
 
+  private split(src: Sim): void {
+    const e = this.def;
+    if (e.SPLIT_INTO === null || e.SPLIT_COUNT <= 0) return;
+    for (let i = 0; i < e.SPLIT_COUNT; i++) {
+      const a = (i / e.SPLIT_COUNT) * Math.PI * 2 + src.rng.range(-0.6, 0.6);
+      src.spawnEnemy(this.x + Math.cos(a) * 6, this.y + Math.sin(a) * 4, e.SPLIT_INTO);
+    }
+  }
+
   tick(src: Sim): void {
-    const e = CONFIG.ENEMY;
+    const e = this.def;
     const dt = CONFIG.TIME.TICK;
     this.animTicks++;
 
@@ -160,13 +194,25 @@ export class Enemy implements Unit {
         break;
       }
 
-      case ENEMY_STATE.ATTACK:
-        this.brake(dt);
+      case ENEMY_STATE.ATTACK: {
+        const lunging = this.swing !== null && this.swing.phase === "active" && e.LUNGE_SPEED > 0;
+        if (lunging) {
+          this.vx = Math.cos(this.telegraphDir) * e.LUNGE_SPEED;
+          this.vy = Math.sin(this.telegraphDir) * e.LUNGE_SPEED;
+        } else {
+          this.brake(dt);
+        }
         if (this.swing === null) {
           this.restTicks = e.REST_TICKS;
-          this.setState(ENEMY_STATE.IDLE);
+          if (this.followUps > 0) {
+            this.followUps--;
+            this.beginTelegraph(this.telegraphDir);
+          } else {
+            this.setState(ENEMY_STATE.IDLE);
+          }
         }
         break;
+      }
 
       case ENEMY_STATE.HURT:
         this.vx *= e.KNOCKBACK_FRICTION;
@@ -185,16 +231,17 @@ export class Enemy implements Unit {
   }
 
   private beginTelegraph(dir: number): void {
-    const e = CONFIG.ENEMY;
-    this.telegraphTotal = e.TELEGRAPH_TICKS;
-    this.telegraphTicksLeft = e.TELEGRAPH_TICKS;
+    const e = this.def;
+    const t = this.enraged && e.ENRAGED_TELEGRAPH_TICKS > 0 ? e.ENRAGED_TELEGRAPH_TICKS : e.TELEGRAPH_TICKS;
+    this.telegraphTotal = t;
+    this.telegraphTicksLeft = t;
     this.telegraphDir = dir;
     this.facing = dir;
     this.setState(ENEMY_STATE.TELEGRAPH);
   }
 
   private beginAttack(src: Sim): void {
-    const e = CONFIG.ENEMY;
+    const e = this.def;
     this.swing = createSwing(src, {
       side: "enemy",
       combo: 1,
@@ -207,6 +254,7 @@ export class Enemy implements Unit {
       knockback: 0,
       fd: { startup: 1, active: e.ACTIVE_TICKS, recovery: e.RECOVERY_TICKS },
     });
+    this.followUps = this.enraged ? e.RING_FOLLOWUPS : 0;
     this.setState(ENEMY_STATE.ATTACK);
   }
 
@@ -216,7 +264,7 @@ export class Enemy implements Unit {
   }
 
   private separate(src: Sim): void {
-    const e = CONFIG.ENEMY;
+    const e = this.def;
     for (const other of src.enemies) {
       if (other === this || other.dead) continue;
       const d = dist(this.x, this.y, other.x, other.y);
@@ -231,7 +279,7 @@ export class Enemy implements Unit {
     const f = Math.pow(0.82, dt * 60);
     this.vx *= f;
     this.vy *= f;
-    this.capSpeed(CONFIG.ENEMY.SPEED * 2.5);
+    this.capSpeed(this.def.SPEED * 2.5);
   }
 
   private capSpeed(limit: number): void {
@@ -243,7 +291,7 @@ export class Enemy implements Unit {
   }
 
   blink(): boolean {
-    const e = CONFIG.ENEMY;
+    const e = this.def;
     if (this.state !== ENEMY_STATE.TELEGRAPH) return false;
     const elapsed = this.telegraphTotal - this.telegraphTicksLeft;
     if (elapsed < this.telegraphTotal - e.BLINK_TAIL_TICKS) return false;
@@ -259,6 +307,6 @@ export function resetEnemyIds(): void {
   nextId = 1;
 }
 
-export function makeEnemy(x: number, y: number): Enemy {
-  return new Enemy(x, y, nextId++);
+export function makeEnemy(x: number, y: number, kind: EnemyKind = "chaser"): Enemy {
+  return new Enemy(x, y, nextId++, kind);
 }

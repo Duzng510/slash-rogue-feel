@@ -1,11 +1,11 @@
-import { CONFIG } from "../config.ts";
+import { CONFIG, type EnemyKind } from "../config.ts";
 import { makeRng } from "../mathx.ts";
 import { EventQueue, sfx } from "../events.ts";
 import { ParticlePool } from "../systems/particles.ts";
 import { resolveHits } from "../systems/combat.ts";
 import { Player } from "../entities/player.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
-import { Room, TEMPLATES } from "../world/rooms.ts";
+import { Room, TEMPLATES, type SpawnMark } from "../world/rooms.ts";
 import type { Intent, Sim, Unit } from "../sim/types.ts";
 
 export class World implements Sim {
@@ -38,12 +38,13 @@ export class World implements Sim {
     return this.swingSeq++;
   }
 
-  spawnEnemy(x: number, y: number): void {
-    this.enemies.push(makeEnemy(x, y));
+  spawnEnemy(x: number, y: number, kind: EnemyKind = "chaser"): void {
+    if (this.aliveEnemies() >= CONFIG.ENEMY.MAX_ALIVE) return;
+    this.enemies.push(makeEnemy(x, y, kind));
   }
 
   /** pick `count` of the template's spawn markers, deterministic by seed */
-  private waveSpawns(index: number): { x: number; y: number }[] {
+  private waveSpawns(index: number): SpawnMark[] {
     const want = CONFIG.ROOMS.WAVES[index] ?? this.room.spawns.length;
     const pool = this.room.spawns.slice();
     for (let i = pool.length - 1; i > 0; i--) {
@@ -60,7 +61,7 @@ export class World implements Sim {
     this.room = new Room(TEMPLATES[this.roomIndex], this.roomIndex);
     resetEnemyIds();
     this.enemies = [];
-    for (const s of this.waveSpawns(this.roomIndex)) this.spawnEnemy(s.x, s.y);
+    for (const s of this.waveSpawns(this.roomIndex)) this.spawnEnemy(s.x, s.y, s.kind);
     this.syncUnits();
     this.player.reset(this.room.start.x, this.room.start.y);
     if (keepSweep) this.particles.reset();
@@ -108,8 +109,8 @@ export class World implements Sim {
       if (++this.playerDeadTicks === CONFIG.ROOMS.RESPAWN_DELAY) {
         this.victory = false;
         this.playerDeadTicks = 0;
-        this.loadRoom(0);
-        this.banner("Chết — trở lại phòng 1");
+        this.loadRoom(this.roomIndex);
+        this.banner(`Chết — vào lại phòng ${this.roomIndex + 1}`);
       }
       return;
     }
@@ -129,12 +130,18 @@ export class World implements Sim {
   }
 
   /** debug helper: F6 stress-tests readability without touching the wave table */
-  addEnemies(n: number): void {
+  addEnemies(n: number, kinds: EnemyKind[] = ["chaser", "charger", "splitter"]): void {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
-      this.spawnEnemy(this.player.x + Math.cos(a) * 40, this.player.y + Math.sin(a) * 30);
+      this.spawnEnemy(this.player.x + Math.cos(a) * 40, this.player.y + Math.sin(a) * 30, kinds[i % kinds.length] ?? "chaser");
     }
     this.enemies = this.enemies.filter((e) => !e.removed);
+    this.syncUnits();
+  }
+
+  /** debug helper: isolate one archetype for a readability shot */
+  clearEnemies(): void {
+    this.enemies = [];
     this.syncUnits();
   }
 }

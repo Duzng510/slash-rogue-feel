@@ -1,5 +1,6 @@
 import { CONFIG } from "../config.ts";
 import { clamp, makeRng } from "../mathx.ts";
+import type { EnemyKind } from "../config.ts";
 
 export const TILE = {
   FLOOR: 0,
@@ -11,6 +12,11 @@ export const TILE = {
 } as const;
 
 export type Tile = (typeof TILE)[keyof typeof TILE];
+
+/** E chaser, C charger, T splitter, B boss; S stays the player start */
+export const MARKER_KIND: Record<string, EnemyKind> = { E: "chaser", C: "charger", T: "splitter", B: "boss" };
+
+export type SpawnMark = { x: number; y: number; kind: EnemyKind };
 
 export type Template = {
   name: string;
@@ -43,7 +49,7 @@ export const TEMPLATES: Template[] = [
     rows: [
       "......................",
       "...OO.......OO........",
-      "....E..........E......",
+      "....C..........T......",
       "......................",
       ".........OO...........",
       "S......E....E.........",
@@ -59,14 +65,14 @@ export const TEMPLATES: Template[] = [
     name: "Sân cột",
     rows: [
       "....O....O....O....O..",
-      "..E..............E....",
+      "..C..............T....",
       "......................",
       "....O....O....O....O..",
       "S.....................",
       "..E......E......E.....",
       "....O....O....O....O..",
       "......................",
-      "..E..............E....",
+      "..T..............C....",
       "....O....O....O....O..",
       "......................",
       ".........E............",
@@ -77,16 +83,33 @@ export const TEMPLATES: Template[] = [
     rows: [
       "OOOO..............OOOO",
       "O..................O..",
-      "..E...E....E...E......",
+      "..C...E....E...T......",
       "O..................O..",
       "OOO....OOOO....OOO....",
       "S.....................",
-      "..E...E....E...E......",
+      "..E...T....C...E......",
       "OOO....OOOO....OOO....",
       "O..................O..",
-      "..E.........E.........",
+      "..E.........C.........",
       "O..................O..",
       "OOOO..............OOOO",
+    ],
+  },
+  {
+    name: "Sàn nghi thức",
+    rows: [
+      "..........................",
+      "..O....O........O....O....",
+      "..........................",
+      "....O..................O....",
+      "..........................",
+      "S.............B.............",
+      "..........................",
+      "....O..................O....",
+      "..........................",
+      "..O....O........O....O....",
+      "..........................",
+      "..........................",
     ],
   },
 ];
@@ -97,7 +120,7 @@ export class Room {
   readonly index: number;
   readonly name: string;
   readonly tiles: Uint8Array;
-  readonly spawns: { x: number; y: number }[] = [];
+  readonly spawns: SpawnMark[] = [];
   readonly start: { x: number; y: number } = { x: 0, y: 0 };
   private readonly doorTiles: number[] = [];
   private hasStart = false;
@@ -125,7 +148,8 @@ export class Room {
           else if (rng.next() < 0.14) t = TILE.ACCENT;
           const cx = tx * CONFIG.WORLD.TILE;
           const cy = ty * CONFIG.WORLD.TILE;
-          if (ch === "E") this.spawns.push({ x: cx + CONFIG.WORLD.TILE / 2, y: cy + CONFIG.WORLD.TILE * 0.75 });
+          const mark = MARKER_KIND[ch ?? ""];
+          if (mark !== undefined) this.spawns.push({ x: cx + CONFIG.WORLD.TILE / 2, y: cy + CONFIG.WORLD.TILE * 0.75, kind: mark });
           if (ch === "S") {
             this.start.x = cx + CONFIG.WORLD.TILE / 2;
             this.start.y = cy + CONFIG.WORLD.TILE * 0.75;

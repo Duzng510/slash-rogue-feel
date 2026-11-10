@@ -1,4 +1,4 @@
-import { CONFIG } from "../config.ts";
+import { CONFIG, enemyDef } from "../config.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -38,9 +38,10 @@ export function buildSprites(): Record<string, Sprite> {
   });
 
   S.enemy = bake(11, 12, 5, 11, (g) => {
+    const body = enemyDef("chaser").BODY_COLOR;
     rect(g, 1, 0, 2, 2, P.ENEMY_SHADE);
     rect(g, 8, 0, 2, 2, P.ENEMY_SHADE);
-    rect(g, 1, 2, 9, 8, P.ENEMY_BODY);
+    rect(g, 1, 2, 9, 8, body);
     rect(g, 0, 3, 1, 6, P.VOID);
     rect(g, 10, 3, 1, 6, P.VOID);
     rect(g, 1, 9, 9, 2, P.ENEMY_SHADE);
@@ -48,6 +49,54 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 7, 11, 2, 1, P.VOID);
     rect(g, 3, 4, 2, 2, P.ENEMY_EYE);
     rect(g, 7, 4, 1, 2, P.ENEMY_EYE);
+  });
+
+  const charger = enemyDef("charger");
+  S[charger.SPRITE_KEY] = bake(13, 12, 6, 11, (g) => {
+    const widths = [1, 3, 5, 7, 9, 11, 11, 9, 7, 5, 3];
+    widths.forEach((w, y) => rect(g, (13 - w) / 2, y, w, 1, charger.BODY_COLOR));
+    rect(g, 2, 5, 9, 2, P.ENEMY_CHARGER_SHADE);
+    rect(g, 5, 3, 3, 2, P.ENEMY_EYE);
+    rect(g, 3, 11, 2, 1, P.VOID);
+    rect(g, 8, 11, 2, 1, P.VOID);
+  });
+
+  const splitter = enemyDef("splitter");
+  S[splitter.SPRITE_KEY] = bake(13, 11, 6, 10, (g) => {
+    rect(g, 1, 0, 11, 10, splitter.BODY_COLOR);
+    rect(g, 0, 2, 13, 6, splitter.BODY_COLOR);
+    rect(g, 1, 0, 11, 1, P.ENEMY_SPLITTER_SHADE);
+    rect(g, 1, 8, 11, 2, P.ENEMY_SPLITTER_SHADE);
+    rect(g, 6, 0, 1, 10, P.ENEMY_SPLITTER_SHADE);
+    rect(g, 2, 3, 2, 2, P.ENEMY_EYE);
+    rect(g, 9, 3, 2, 2, P.ENEMY_EYE);
+    rect(g, 3, 10, 2, 1, P.VOID);
+    rect(g, 8, 10, 2, 1, P.VOID);
+  });
+
+  const small = enemyDef("small");
+  S[small.SPRITE_KEY] = bake(7, 8, 3, 7, (g) => {
+    rect(g, 1, 0, 5, 7, small.BODY_COLOR);
+    rect(g, 0, 1, 7, 5, small.BODY_COLOR);
+    rect(g, 2, 2, 2, 2, P.ENEMY_EYE);
+    rect(g, 1, 5, 5, 2, P.ENEMY_SMALL_SHADE);
+    rect(g, 1, 7, 2, 1, P.VOID);
+    rect(g, 4, 7, 2, 1, P.VOID);
+  });
+
+  const boss = enemyDef("boss");
+  S[boss.SPRITE_KEY] = bake(20, 18, 10, 17, (g) => {
+    rect(g, 0, 2, 20, 14, P.ENEMY_BOSS_RIM);
+    rect(g, 1, 1, 18, 15, P.ENEMY_BOSS_RIM);
+    rect(g, 2, 2, 16, 13, boss.BODY_COLOR);
+    rect(g, 4, 0, 3, 2, P.ENEMY_BOSS_RIM);
+    rect(g, 13, 0, 3, 2, P.ENEMY_BOSS_RIM);
+    rect(g, 2, 2, 16, 2, P.ENEMY_BOSS_SHADE);
+    rect(g, 2, 12, 16, 3, P.ENEMY_BOSS_SHADE);
+    rect(g, 5, 6, 3, 3, P.ENEMY_EYE);
+    rect(g, 12, 6, 3, 3, P.ENEMY_EYE);
+    rect(g, 4, 16, 4, 2, P.VOID);
+    rect(g, 12, 16, 4, 2, P.VOID);
   });
 
   S.shadow = bake(10, 4, 5, 2, (g) => {
