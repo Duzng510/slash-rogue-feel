@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg: #08090d;
+    --ink: #d7dbe4;
+    --dim: #6b7280;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+}
+
+/* Landscape fallback: the whole app becomes a 16:10-ish landscape box rotated inside a portrait viewport */
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+body.rot90 #app {
+  inset: auto;
+  left: 0;
+  top: 0;
+  width: 100vh;
+  height: 100vw;
+  width: 100dvh;
+  height: 100dvw;
+  transform: rotate(90deg) translateY(-100%);
+  transform-origin: top left;
+}
+
+/* Visibility states driven by body classes */
+body.starting.touch #touch,
+body.starting #keys,
+body.starting #panel {
+  display: none;
+}
+
+body.touch #touch {
+  display: block;
+}
+
+body.touch #keys {
+  display: none;
+}
+
+body.artifact-modal #overlay {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+body.artifact-modal.touch #touch,
+body.artifact-modal #panel,
+body.artifact-modal #keys {
+  display: none;
+}

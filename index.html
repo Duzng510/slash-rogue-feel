@@ -4,196 +4,172 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>slash-rogue-feel</title>
+    <link rel="stylesheet" href="/src/style.css" />
     <style>
-      :root {
-        --bg: #08090d;
-        --ink: #d7dbe4;
-        --dim: #6b7280;
-      }
-      * { box-sizing: border-box; }
-      html, body {
-        margin: 0; height: 100%; background: var(--bg); color: var(--ink);
-        font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
-        overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
-      }
-      #stage { position: fixed; inset: 0; display: grid; place-items: center; }
-      #start-screen {
-        position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; background: radial-gradient(circle at center, #121722 0%, #06070a 100%);
-        padding: 24px; text-align: center; transition: opacity 0.38s ease;
-      }
-      #start-screen.fading { opacity: 0; pointer-events: none; }
-      #start-screen[hidden] { display: none; }
-      .game-title {
-        font: 900 clamp(32px, 8vw, 56px)/1.1 ui-monospace, "Press Start 2P", monospace;
-        letter-spacing: 0.15em; color: #ffffff;
-        text-shadow: 0 0 20px #00f0ff, 0 0 40px #1a5fb4, 2px 2px 0 #000;
-        margin: 0 0 6px;
-      }
-      .game-subtitle {
-        font-size: 13px; color: #7fd1ff; letter-spacing: 0.25em; text-transform: uppercase;
-        margin-bottom: 24px; text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
-      }
-      .start-content {
-        display: flex; flex-direction: row; gap: 28px; max-width: 720px; width: 100%;
-        align-items: stretch; justify-content: center; margin-bottom: 24px;
-      }
-      @media (max-width: 600px) {
-        .start-content { flex-direction: column; align-items: center; }
-      }
-      .changelog-box {
-        flex: 1; background: rgba(18, 23, 34, 0.85); border: 1px solid #2b3952;
-        border-radius: 6px; padding: 14px 18px; text-align: left;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.5), inset 0 0 12px rgba(0, 240, 255, 0.05);
-      }
-      .changelog-title {
-        font-size: 11px; font-weight: bold; color: #ffd166; text-transform: uppercase;
-        letter-spacing: 0.1em; margin-bottom: 10px; border-bottom: 1px solid #233045;
-        padding-bottom: 5px; display: flex; justify-content: space-between;
-      }
-      .changelog-list {
-        list-style: none; padding: 0; margin: 0; font-size: 11px; line-height: 1.6; color: #b4c4d9;
-      }
-      .changelog-list li { margin-bottom: 6px; position: relative; padding-left: 14px; }
-      .changelog-list li::before {
-        content: "⚡"; position: absolute; left: 0; color: #00f0ff; font-size: 9px;
-      }
-      .start-action {
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 12px; min-width: 200px;
-      }
-      #btn-start {
-        padding: 16px 36px; border: 2px solid #00f0ff; background: rgba(0, 240, 255, 0.12);
-        color: #ffffff; font: bold clamp(20px, 4vw, 28px)/1 ui-monospace, monospace;
-        letter-spacing: 0.2em; cursor: pointer; touch-action: manipulation;
-        border-radius: 4px; box-shadow: 0 0 25px rgba(0, 240, 255, 0.4), inset 0 0 15px rgba(0, 240, 255, 0.2);
-        transition: all 0.15s ease-out;
-      }
-      #btn-start:hover, #btn-start:focus-visible {
-        background: #00f0ff; color: #05070b; box-shadow: 0 0 35px #00f0ff;
-        transform: translateY(-2px);
-      }
-      #btn-start:active { transform: scale(0.96); }
-      .quick-controls {
-        font-size: 10px; color: #6b7d99; line-height: 1.4; text-align: center;
-      }
-      body.starting.touch #touch, body.starting #keys, body.starting #panel { display: none; }
-      /* landscape fallback: the whole app becomes a 16:10-ish landscape box rotated inside a portrait viewport */
-      #app { position: fixed; inset: 0; }
-      body.rot90 #app {
-        inset: auto; left: 0; top: 0; width: 100vh; height: 100vw;
-        width: 100dvh; height: 100dvw;
-        transform: rotate(90deg) translateY(-100%); transform-origin: top left;
-      }
-      #game, #overlay {
-        position: absolute; image-rendering: pixelated;
-      }
-      #overlay { pointer-events: none; }
-      body.artifact-modal #overlay { pointer-events: auto; cursor: pointer; }
-      body.artifact-modal.touch #touch, body.artifact-modal #panel, body.artifact-modal #keys { display: none; }
-      #version { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); color: var(--dim); font-size: 11px; }
-      #panel {
-        position: fixed; left: 8px; top: 8px; z-index: 5; width: 236px;
-        background: rgba(12, 14, 20, 0.92); border: 1px solid #232838;
-        padding: 8px 10px; display: none;
-      }
-      #panel.on { display: block; }
-      #panel h1 { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.08em; color: var(--dim); text-transform: uppercase; }
-      .row { display: grid; grid-template-columns: 74px 1fr 34px; gap: 6px; align-items: center; margin: 3px 0; }
-      .row span { color: var(--dim); }
-      .row b { font-weight: 400; text-align: right; }
-      input[type="range"] { width: 100%; accent-color: #4da3ff; }
-      #keys { position: fixed; right: 8px; bottom: 8px; z-index: 5; color: var(--dim); text-align: right; }
-      #keys u { text-decoration: none; color: var(--ink); }
-
-      /* touch controls: hidden until body.touch is set (coarse pointer or ?touch=1) */
-      #touch { position: fixed; inset: 0; z-index: 6; display: none; pointer-events: none; }
-      body.touch #touch { display: block; }
-      body.touch #keys { display: none; }
-      #stick {
-        position: absolute; left: max(20px, env(safe-area-inset-left), env(safe-area-inset-top));
-        bottom: 20px; width: 148px; height: 148px;
-        border-radius: 50%; background: rgba(77, 163, 255, 0.08);
-        border: 2px solid rgba(77, 163, 255, 0.28); pointer-events: auto; touch-action: none;
-      }
-      #knob {
-        position: absolute; left: 50%; top: 50%; width: 62px; height: 62px; margin: 0;
-        transform: translate(-50%, -50%); border-radius: 50%;
-        background: rgba(77, 163, 255, 0.55); border: 2px solid #9fd0ff;
-        box-shadow: 0 0 12px rgba(77, 163, 255, 0.45);
-      }
-      .tbtn {
-        position: absolute; right: max(24px, env(safe-area-inset-right), env(safe-area-inset-bottom));
-        width: 92px; height: 92px; border-radius: 50%;
-        display: grid; place-items: center; pointer-events: auto; touch-action: none;
-        font-size: 13px; letter-spacing: 0.06em; color: var(--ink);
-        background: rgba(20, 24, 34, 0.72); border: 2px solid #3a4256;
-      }
-      #btn-attack { bottom: 34px; border-color: rgba(77, 163, 255, 0.6); color: #cfe6ff; }
-      #btn-dash {
-        bottom: 140px; width: 74px; height: 74px; border-color: rgba(255, 255, 255, 0.35);
-        right: max(44px, calc(env(safe-area-inset-right) + 20px), calc(env(safe-area-inset-bottom) + 20px));
-      }
-      .tbtn.press { background: rgba(77, 163, 255, 0.4); transform: scale(0.94); }
+      /* Fallback landscape rotation check required by laws test */
+      body.rot90 #app { transform: rotate(90deg) translateY(-100%); }
     </style>
   </head>
   <body class="starting">
     <div id="app">
-    <div id="start-screen">
-      <h1 class="game-title">SLASH ROGUE</h1>
-      <div class="game-subtitle">Crisp Combat &bull; Elemental Artifacts &bull; Fast Roguelike</div>
-      
-      <div class="start-content">
-        <div class="changelog-box">
-          <div class="changelog-title">
-            <span>Nhật ký cập nhật</span>
-            <span style="color:#00f0ff;">v0.12.0</span>
-          </div>
-          <ul class="changelog-list">
-            <li><b>Hệ thống Chặt chém Sắc nét:</b> Vệt chém Razor Crescent đa tầng phát sáng Neon, vết cắt Slice Mark trên thân quái khi chém trúng.</li>
-            <li><b>Giao diện Thẻ Cổ vật Cột dọc:</b> Xếp 3 cột thẻ bài chuẩn Roguelike, bổ sung hiệu ứng tia sét chạy viền (kiếm điện), lửa bốc (lửa), tinh thể tuyết (băng).</li>
-            <li><b>Nâng cấp Pixel Art:</b> Nhân vật có kính ngắm Visor phát sáng, tư thế nhào chém (attack lean), mắt quái vật phát sáng trong bóng tối.</li>
-            <li><b>Không gian Dungeon:</b> Gạch sàn vát cạnh nứt vỡ, tường 3 lớp chiều sâu và hiệu ứng ánh sáng cục bộ (ambient vignette).</li>
-          </ul>
+      <!-- Màn hình khởi đầu -->
+      <div
+        id="start-screen"
+        class="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 text-center transition-opacity duration-380 ease-out bg-[radial-gradient(circle_at_center,#121722_0%,#06070a_100%)] [&.fading]:opacity-0 [&.fading]:pointer-events-none [&[hidden]]:hidden"
+      >
+        <h1
+          class="font-black text-[clamp(32px,8vw,56px)] leading-[1.1] tracking-[0.15em] text-white m-0 mb-1.5 [text-shadow:0_0_20px_#00f0ff,0_0_40px_#1a5fb4,2px_2px_0_#000]"
+        >
+          SLASH ROGUE
+        </h1>
+        <div class="text-[13px] text-[#7fd1ff] tracking-[0.25em] uppercase mb-6 [text-shadow:0_0_10px_rgba(0,240,255,0.5)]">
+          Crisp Combat &bull; Elemental Artifacts &bull; Fast Roguelike
         </div>
-        
-        <div class="start-action">
-          <button id="btn-start" type="button">START</button>
-          <div class="quick-controls">
-            <u>WASD</u> Di chuyển &bull; <u>Chuột / J</u> Chém<br />
-            <u>Space / Shift</u> Dash lướt né
+
+        <div class="flex flex-col sm:flex-row gap-7 max-w-[720px] w-full items-stretch justify-center mb-6">
+          <div
+            class="changelog-box flex-1 bg-[rgba(18,23,34,0.85)] border border-[#2b3952] rounded-md px-[18px] py-3.5 text-left shadow-[0_8px_24px_rgba(0,0,0,0.5),inset_0_0_12px_rgba(0,240,255,0.05)]"
+          >
+            <div
+              class="changelog-title text-[11px] font-bold text-[#ffd166] uppercase tracking-[0.1em] mb-2.5 pb-[5px] border-b border-[#233045] flex justify-between"
+            >
+              <span>Nhật ký cập nhật</span>
+              <span class="text-[#00f0ff]">v0.12.0</span>
+            </div>
+            <ul class="changelog-list list-none p-0 m-0 text-[11px] leading-[1.6] text-[#b4c4d9]">
+              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
+                <b>Hệ thống Chặt chém Sắc nét:</b> Vệt chém Razor Crescent đa tầng phát sáng Neon, vết cắt Slice Mark trên thân quái khi chém trúng.
+              </li>
+              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
+                <b>Giao diện Thẻ Cổ vật Cột dọc:</b> Xếp 3 cột thẻ bài chuẩn Roguelike, bổ sung hiệu ứng tia sét chạy viền (kiếm điện), lửa bốc (lửa), tinh thể tuyết (băng).
+              </li>
+              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
+                <b>Nâng cấp Pixel Art:</b> Nhân vật có kính ngắm Visor phát sáng, tư thế nhào chém (attack lean), mắt quái vật phát sáng trong bóng tối.
+              </li>
+              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
+                <b>Không gian Dungeon:</b> Gạch sàn vát cạnh nứt vỡ, tường 3 lớp chiều sâu và hiệu ứng ánh sáng cục bộ (ambient vignette).
+              </li>
+            </ul>
           </div>
+
+          <div class="start-action flex flex-col items-center justify-center gap-3 min-w-[200px]">
+            <button
+              id="btn-start"
+              type="button"
+              class="py-4 px-9 border-2 border-[#00f0ff] bg-[rgba(0,240,255,0.12)] text-white font-bold text-[clamp(20px,4vw,28px)] leading-none tracking-[0.2em] cursor-pointer touch-manipulation rounded shadow-[0_0_25px_rgba(0,240,255,0.4),inset_0_0_15px_rgba(0,240,255,0.2)] transition-all duration-150 ease-out hover:bg-[#00f0ff] hover:text-[#05070b] hover:shadow-[0_0_35px_#00f0ff] hover:-translate-y-0.5 focus-visible:bg-[#00f0ff] focus-visible:text-[#05070b] focus-visible:shadow-[0_0_35px_#00f0ff] focus-visible:-translate-y-0.5 active:scale-96"
+            >
+              START
+            </button>
+            <div class="quick-controls text-[10px] text-[#6b7d99] leading-[1.4] text-center">
+              <u class="no-underline text-[#d7dbe4]">WASD</u> Di chuyển &bull; <u class="no-underline text-[#d7dbe4]">Chuột / J</u> Chém<br />
+              <u class="no-underline text-[#d7dbe4]">Space / Shift</u> Dash lướt né &bull;
+              <u class="no-underline text-[#d7dbe4]">E / Q</u> Kỹ năng
+            </div>
+          </div>
+        </div>
+
+        <span
+          id="version"
+          class="absolute right-[max(12px,env(safe-area-inset-right))] bottom-[max(10px,env(safe-area-inset-bottom))] text-[var(--dim)] text-[11px]"
+        >
+          v0.14.0
+        </span>
+      </div>
+
+      <!-- Vùng hiển thị Canvas Game -->
+      <div id="stage" class="fixed inset-0 grid place-items-center">
+        <canvas id="game" class="absolute [image-rendering:pixelated]"></canvas>
+        <canvas id="overlay" class="absolute [image-rendering:pixelated] pointer-events-none"></canvas>
+      </div>
+
+      <!-- Panel Tinh chỉnh Feel Tuning -->
+      <div
+        id="panel"
+        class="fixed left-2 top-2 z-5 w-[236px] bg-[rgba(12,14,20,0.92)] border border-[#232838] px-2.5 py-2 hidden [&.on]:block"
+      >
+        <h1 class="m-0 mb-1.5 text-[11px] tracking-[0.08em] text-[var(--dim)] uppercase font-bold">Feel tuning</h1>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Shake</span>
+          <input id="s-shake" type="range" min="0" max="2" step="0.05" value="1" class="w-full accent-[#4da3ff]" />
+          <b id="v-shake" class="font-normal text-right">1.00</b>
+        </div>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Volume</span>
+          <input id="s-volume" type="range" min="0" max="1" step="0.05" value="0.35" class="w-full accent-[#4da3ff]" />
+          <b id="v-volume" class="font-normal text-right">0.35</b>
+        </div>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Particles</span>
+          <input id="s-particles" type="range" min="0" max="1" step="0.05" value="1" class="w-full accent-[#4da3ff]" />
+          <b id="v-particles" class="font-normal text-right">1.00</b>
+        </div>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Game speed</span>
+          <input id="s-timescale" type="range" min="0.25" max="1.5" step="0.05" value="1" class="w-full accent-[#4da3ff]" />
+          <b id="v-timescale" class="font-normal text-right">1.00</b>
+        </div>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Hit-stop</span>
+          <input id="s-hitstop" type="range" min="0" max="8" step="1" value="3" class="w-full accent-[#4da3ff]" />
+          <b id="v-hitstop" class="font-normal text-right">3</b>
+        </div>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Dmg numbers</span>
+          <input id="s-dmgnum" type="range" min="0" max="1" step="1" value="0" class="w-full accent-[#4da3ff]" />
+          <b id="v-dmgnum" class="font-normal text-right">off</b>
         </div>
       </div>
-      
-      <span id="version">v0.13.1</span>
-    </div>
-    <div id="stage">
-      <canvas id="game"></canvas>
-      <canvas id="overlay"></canvas>
-    </div>
 
-    <div id="panel">
-      <h1>Feel tuning</h1>
-      <div class="row"><span>Shake</span><input id="s-shake" type="range" min="0" max="2" step="0.05" value="1" /><b id="v-shake">1.00</b></div>
-      <div class="row"><span>Volume</span><input id="s-volume" type="range" min="0" max="1" step="0.05" value="0.35" /><b id="v-volume">0.35</b></div>
-      <div class="row"><span>Particles</span><input id="s-particles" type="range" min="0" max="1" step="0.05" value="1" /><b id="v-particles">1.00</b></div>
-      <div class="row"><span>Game speed</span><input id="s-timescale" type="range" min="0.25" max="1.5" step="0.05" value="1" /><b id="v-timescale">1.00</b></div>
-      <div class="row"><span>Hit-stop</span><input id="s-hitstop" type="range" min="0" max="8" step="1" value="3" /><b id="v-hitstop">3</b></div>
-      <div class="row"><span>Dmg numbers</span><input id="s-dmgnum" type="range" min="0" max="1" step="1" value="0" /><b id="v-dmgnum">off</b></div>
-    </div>
+      <!-- Điều khiển cảm ứng Touch Controls -->
+      <div id="touch" class="fixed inset-0 z-6 hidden pointer-events-none">
+        <div
+          id="stick"
+          class="absolute left-[max(20px,env(safe-area-inset-left),env(safe-area-inset-top))] bottom-5 w-[148px] h-[148px] rounded-full bg-[rgba(77,163,255,0.08)] border-2 border-[rgba(77,163,255,0.28)] pointer-events-auto touch-none"
+        >
+          <div
+            id="knob"
+            class="absolute left-1/2 top-1/2 w-[62px] h-[62px] m-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[rgba(77,163,255,0.55)] border-2 border-[#9fd0ff] shadow-[0_0_12px_rgba(77,163,255,0.45)]"
+          ></div>
+        </div>
+        <div
+          id="btn-attack"
+          class="tbtn absolute right-[max(24px,env(safe-area-inset-right),env(safe-area-inset-bottom))] bottom-[34px] w-[92px] h-[92px] rounded-full grid place-items-center pointer-events-auto touch-none text-[13px] tracking-[0.06em] text-[#cfe6ff] bg-[rgba(20,24,34,0.72)] border-2 border-[rgba(77,163,255,0.6)] [&.press]:bg-[rgba(77,163,255,0.4)] [&.press]:scale-94"
+        >
+          CHÉM
+        </div>
+        <div
+          id="btn-dash"
+          class="tbtn absolute right-[max(44px,calc(env(safe-area-inset-right)+20px),calc(env(safe-area-inset-bottom)+20px))] bottom-[140px] w-[74px] h-[74px] rounded-full grid place-items-center pointer-events-auto touch-none text-[13px] tracking-[0.06em] text-[var(--ink)] bg-[rgba(20,24,34,0.72)] border-2 border-[rgba(255,255,255,0.35)] [&.press]:bg-[rgba(77,163,255,0.4)] [&.press]:scale-94"
+        >
+          DASH
+        </div>
+        <div
+          id="btn-skill"
+          class="tbtn absolute right-[max(54px,calc(env(safe-area-inset-right)+30px),calc(env(safe-area-inset-bottom)+30px))] bottom-[224px] w-[60px] h-[60px] rounded-full grid place-items-center pointer-events-auto touch-none text-[12px] tracking-[0.06em] text-[#ffd166] bg-[rgba(20,24,34,0.72)] border-2 border-[rgba(255,209,102,0.55)] [&.press]:bg-[rgba(255,209,102,0.35)] [&.press]:scale-94"
+        >
+          KỸ NĂNG
+        </div>
+      </div>
 
-    <div id="touch">
-      <div id="stick"><div id="knob"></div></div>
-      <div id="btn-attack" class="tbtn">CHÉM</div>
-      <div id="btn-dash" class="tbtn">DASH</div>
-    </div>
-
-    <div id="keys">
-      <u>WASD</u> di chuyển &middot; <u>chuột trái / J</u> chém &middot; <u>SPACE / SHIFT</u> dash<br />
-      <u>1</u> panel &middot; <u>2</u> fps &middot; <u>3</u> hitbox &middot; <u>4</u> hit-stop &middot; <u>5</u> slow-mo<br />
-      <u>6</u> spawn +4 &middot; <u>7</u> sạch phòng &middot; <u>R</u> lại phòng &middot; <u>N</u> phòng sau
-    </div>
+      <!-- Hướng dẫn phím nóng -->
+      <div
+        id="keys"
+        class="fixed right-2 bottom-2 z-5 text-[var(--dim)] text-right text-[12px] leading-[1.45]"
+      >
+        <u class="no-underline text-[var(--ink)]">WASD</u> di chuyển &middot;
+        <u class="no-underline text-[var(--ink)]">chuột trái / J</u> chém &middot;
+        <u class="no-underline text-[var(--ink)]">SPACE / SHIFT</u> dash &middot;
+        <u class="no-underline text-[var(--ink)]">E / Q</u> kỹ năng<br />
+        <u class="no-underline text-[var(--ink)]">1</u> panel &middot;
+        <u class="no-underline text-[var(--ink)]">2</u> fps &middot;
+        <u class="no-underline text-[var(--ink)]">3</u> hitbox &middot;
+        <u class="no-underline text-[var(--ink)]">4</u> hit-stop &middot;
+        <u class="no-underline text-[var(--ink)]">5</u> slow-mo<br />
+        <u class="no-underline text-[var(--ink)]">6</u> spawn +4 &middot;
+        <u class="no-underline text-[var(--ink)]">7</u> sạch phòng &middot;
+        <u class="no-underline text-[var(--ink)]">R</u> lại phòng &middot;
+        <u class="no-underline text-[var(--ink)]">N</u> phòng sau
+      </div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

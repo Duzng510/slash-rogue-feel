@@ -3,6 +3,7 @@ import type { FrameData } from "../config.ts";
 import { normAngle, pointInArc, rectsOverlap } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
 import { requestHitStop } from "./feelSim.ts";
+import { CHARACTERS } from "./characters.ts";
 import type { Rect } from "../mathx.ts";
 import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
 import type { Enemy } from "../entities/enemy.ts";
@@ -49,6 +50,7 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
   const second = combo >= 2;
   const scale = second ? a.COMBO2_REACH_SCALE : 1;
   const berserk = src.artifacts.has("berserker") ? 1 + Math.min(0.5, (src.player.maxHp - src.player.hp) * 0.1) : 1;
+  const chain = src.player.consumeCombo();
   const base = a.COMBOS[Math.min(a.COMBOS.length, combo) - 1];
   const fd = src.curses.has("slow_hand") ? { ...base, startup: base.startup + CONFIG.CURSES.STARTUP_TICKS } : base;
   return {
@@ -63,7 +65,8 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
     reach: a.REACH * scale,
     deg: Math.min(170, a.ARC_DEG * (second ? a.COMBO2_ARC_SCALE : 1)),
     dmg:
-      a.DMG * (src.artifacts.has("heavy") ? 1.3 : 1) * berserk * (src.artifacts.has("glasscannon") ? 1.75 : 1) *
+      a.DMG * CHARACTERS[src.player.character].damageMult * (chain ? 1.5 : 1) *
+      (src.artifacts.has("heavy") ? 1.3 : 1) * berserk * (src.artifacts.has("glasscannon") ? 1.75 : 1) *
       (src.curses.has("glass") ? CONFIG.CURSES.DEALT_MULT : 1) +
       (src.player.reprisalTicks > 0 ? 1 : 0),
     knockback: a.KNOCKBACK * (src.player.impulseTicks > 0 ? 2 : 1),
@@ -208,6 +211,8 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
     src.runStats.damageDealt += sw.dmg;
+    /** only a landed melee swing feeds the swordsman's combo counter */
+    if (sw.side === "player" && sw.reach > 0) src.player.registerHit();
     const dir = sw.dir;
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
     if (sw.side === "player") {

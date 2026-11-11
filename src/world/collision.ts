@@ -4,7 +4,7 @@ export type Body = { x: number; y: number; vx: number; vy: number; bodyW: number
 
 type Block = { hitX: boolean; hitY: boolean };
 
-function blocked(room: RoomLike, x: number, y: number, w: number, h: number): boolean {
+export function blocked(room: RoomLike, x: number, y: number, w: number, h: number): boolean {
   const T = CONFIG.WORLD.TILE;
   const x0 = x - w / 2;
   const y0 = y - h;

@@ -3,7 +3,7 @@ import { isRotated, rotateVec } from "../ui/immersive.ts";
 
 /**
  * On-screen controls for touch devices: a left virtual stick for 8-way-ish movement and two
- * right-hand buttons for slash and dash. It only writes into IntentSource, exactly like
+ * right-hand buttons for slash, dash and the character skill. It only writes into IntentSource, exactly like
  * DesktopInput, so the sim never learns an input device exists. With no cursor the player faces
  * its movement direction and auto-aim snaps the swing to the nearest enemy in front.
  */
@@ -19,7 +19,8 @@ export class TouchInput {
     private readonly stick: HTMLElement,
     private readonly knob: HTMLElement,
     private readonly attackBtn: HTMLElement,
-    private readonly dashBtn: HTMLElement
+    private readonly dashBtn: HTMLElement,
+    private readonly skillBtn: HTMLElement
   ) {}
 
   attach(): void {
@@ -31,6 +32,8 @@ export class TouchInput {
     this.attackBtn.addEventListener("pointerup", this.releaseAttack);
     this.dashBtn.addEventListener("pointerdown", this.onDash);
     this.dashBtn.addEventListener("pointerup", this.releaseDash);
+    this.skillBtn.addEventListener("pointerdown", this.onSkill);
+    this.skillBtn.addEventListener("pointerup", this.releaseSkill);
   }
 
   detach(): void {
@@ -42,6 +45,8 @@ export class TouchInput {
     this.attackBtn.removeEventListener("pointerup", this.releaseAttack);
     this.dashBtn.removeEventListener("pointerdown", this.onDash);
     this.dashBtn.removeEventListener("pointerup", this.releaseDash);
+    this.skillBtn.removeEventListener("pointerdown", this.onSkill);
+    this.skillBtn.removeEventListener("pointerup", this.releaseSkill);
   }
 
   reset(): void {
@@ -56,6 +61,7 @@ export class TouchInput {
     this.knob.style.transform = "translate(-50%, -50%)";
     this.releaseAttack();
     this.releaseDash();
+    this.releaseSkill();
   }
 
   private onStickDown = (e: PointerEvent): void => {
@@ -116,5 +122,15 @@ export class TouchInput {
 
   private releaseDash = (): void => {
     this.dashBtn.classList.remove("press");
+  };
+
+  private onSkill = (e: PointerEvent): void => {
+    e.preventDefault();
+    this.skillBtn.classList.add("press");
+    this.intent.pressSkill(this.tick());
+  };
+
+  private releaseSkill = (): void => {
+    this.skillBtn.classList.remove("press");
   };
 }

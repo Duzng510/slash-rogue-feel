@@ -36,7 +36,7 @@ export type Swing = {
   kind?: string;
 };
 
-/** a travelling enemy shot: its own entity, blocked by terrain, dodged by i-frames */
+/** a travelling shot: its own entity, blocked by terrain, dodged by i-frames */
 export type Projectile = {
   x: number;
   y: number;
@@ -44,6 +44,8 @@ export type Projectile = {
   vy: number;
   dmg: number;
   ticksLeft: number;
+  owner: Side;
+  status?: Swing["status"];
 };
 
 export interface Unit {
@@ -75,6 +77,7 @@ export type Intent = {
   aimY: number;
   attack: boolean;
   dash: boolean;
+  skill: boolean;
 };
 
 export type Sim = {

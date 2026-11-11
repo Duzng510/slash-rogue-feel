@@ -3,7 +3,7 @@ import type { Intent } from "../sim/types.ts";
 
 const NONE = -99999;
 
-const IDLE: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false };
+const IDLE: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
 
 export type AimPoint = { x: number; y: number } | null;
 
@@ -18,6 +18,7 @@ export class IntentSource {
   aim: AimPoint = null;
   private attackAt = NONE;
   private dashAt = NONE;
+  private skillAt = NONE;
 
   pressAttack(tick: number): void {
     this.attackAt = tick;
@@ -27,9 +28,14 @@ export class IntentSource {
     this.dashAt = tick;
   }
 
+  pressSkill(tick: number): void {
+    this.skillAt = tick;
+  }
+
   clearPresses(): void {
     this.attackAt = NONE;
     this.dashAt = NONE;
+    this.skillAt = NONE;
   }
 
   read(tick: number, live = true): Intent {
@@ -37,8 +43,10 @@ export class IntentSource {
     const ttl = CONFIG.INPUT.PRESS_BUFFER_TICKS;
     const attack = this.attackAt !== NONE && tick - this.attackAt <= ttl;
     const dash = this.dashAt !== NONE && tick - this.dashAt <= ttl;
+    const skill = this.skillAt !== NONE && tick - this.skillAt <= ttl;
     if (attack) this.attackAt = NONE;
     if (dash) this.dashAt = NONE;
+    if (skill) this.skillAt = NONE;
     return {
       moveX: this.moveX,
       moveY: this.moveY,
@@ -46,6 +54,7 @@ export class IntentSource {
       aimY: this.aim === null ? NaN : this.aim.y,
       attack,
       dash,
+      skill,
     };
   }
 }

@@ -23,27 +23,85 @@ export function buildSprites(): Record<string, Sprite> {
   const S: Record<string, Sprite> = {};
   const T = CONFIG.WORLD.TILE;
 
-  S.player = bake(14, 15, 7, 14, (g) => {
+  // Swordsman (Kiếm Khách) - Agile, light armor, sharp visor slit, sword hilt
+  S.player_swordsman = bake(14, 15, 7, 14, (g) => {
     // Dark outline / cape undertone
     rect(g, 2, 0, 10, 3, P.VOID);
-    rect(g, 2, 1, 10, 10, P.PLAYER_BODY);
+    rect(g, 2, 1, 10, 10, "#1f4068"); // deep blue armor base
     // Helmet rim / cowl highlight
-    rect(g, 3, 0, 8, 2, P.PLAYER_RIM);
+    rect(g, 3, 0, 8, 2, "#4da3ff"); // cyan-blue rim
     // Side contour
     rect(g, 1, 3, 1, 8, P.VOID);
     rect(g, 12, 3, 1, 8, P.VOID);
     // Legs & feet boots
     rect(g, 3, 11, 3, 3, P.VOID);
     rect(g, 8, 11, 3, 3, P.VOID);
-    rect(g, 4, 11, 2, 2, P.PLAYER_BODY);
-    rect(g, 8, 11, 2, 2, P.PLAYER_BODY);
-    // Visor slit with high-contrast glowing slit
+    rect(g, 4, 11, 2, 2, "#1f4068");
+    rect(g, 8, 11, 2, 2, "#1f4068");
+    // Visor slit with high-contrast glowing cyan slit
     rect(g, 4, 4, 6, 2, P.VOID);
-    rect(g, 5, 4, 4, 1, P.SLASH_CYAN);
-    rect(g, 6, 5, 2, 1, P.SLASH_EDGE);
-    // Belt / emblem
-    rect(g, 5, 9, 4, 1, P.PLAYER_RIM);
+    rect(g, 5, 4, 4, 1, "#00e5ff");
+    rect(g, 6, 5, 2, 1, "#ffffff");
+    // Belt & sheath
+    rect(g, 4, 9, 6, 1, "#ffd166");
+    // Sheathed katana at left hip
+    rect(g, 1, 8, 2, 4, "#ffd166");
+    rect(g, 0, 7, 2, 2, "#ffffff");
   });
+
+  // Mage (Pháp Sư) - Mystical pointed hat, long purple robe, staff with glowing flame orb
+  S.player_mage = bake(14, 16, 7, 15, (g) => {
+    // Wizard pointed hat top
+    rect(g, 6, 0, 2, 2, "#c99ae6");
+    rect(g, 5, 2, 4, 2, "#7b2cbf");
+    // Hat brim
+    rect(g, 2, 4, 10, 2, "#4a148c");
+    rect(g, 3, 4, 8, 1, "#9d4edd");
+    // Shadowed hood face with mystic glowing yellow eyes
+    rect(g, 4, 6, 6, 2, P.VOID);
+    rect(g, 5, 6, 1, 1, "#ffd166");
+    rect(g, 8, 6, 1, 1, "#ffd166");
+    // Purple mystical Robe
+    rect(g, 3, 8, 8, 6, "#5a189a");
+    rect(g, 2, 9, 1, 4, P.VOID);
+    rect(g, 11, 9, 1, 4, P.VOID);
+    // Rune sash down the middle
+    rect(g, 6, 8, 2, 6, "#c99ae6");
+    // Bottom hem of robe
+    rect(g, 3, 14, 8, 2, "#3c096c");
+    // Arcane Staff on right side
+    rect(g, 11, 3, 2, 12, "#795548"); // wooden staff pole
+    // Staff head / glowing orb
+    rect(g, 10, 1, 4, 3, "#9d4edd");
+    rect(g, 11, 0, 2, 2, "#ffd166"); // glowing arcane core
+  });
+
+  // Tank (Khiên Sĩ) - Bulky horned helmet, thick crimson plate armor, heavy tower shield
+  S.player_tank = bake(16, 16, 8, 15, (g) => {
+    // Horned heavy war-helmet
+    rect(g, 3, 0, 2, 3, "#d90429"); // left horn
+    rect(g, 11, 0, 2, 3, "#d90429"); // right horn
+    rect(g, 4, 1, 8, 3, "#3a0ca3");
+    rect(g, 5, 1, 6, 2, "#ef233c");
+    // Iron visor slit
+    rect(g, 5, 4, 6, 2, P.VOID);
+    rect(g, 6, 4, 4, 1, "#ff5a3c"); // glowing red/orange stare
+    // Thick plate shoulder pads & chest
+    rect(g, 2, 6, 12, 5, "#2b2d42");
+    rect(g, 3, 6, 10, 4, "#8d99ae");
+    rect(g, 5, 7, 6, 3, "#ef233c"); // crimson chestplate
+    // Heavy spiked feet / greaves
+    rect(g, 4, 12, 3, 4, "#1f2421");
+    rect(g, 9, 12, 3, 4, "#1f2421");
+    rect(g, 5, 12, 2, 2, "#8d99ae");
+    rect(g, 9, 12, 2, 2, "#8d99ae");
+    // Heavy Tower Shield on left
+    rect(g, 0, 5, 3, 9, "#ff5a3c");
+    rect(g, 1, 6, 2, 7, "#ffd166"); // gold cross / boss on shield
+    rect(g, 0, 7, 1, 5, "#ffffff");
+  });
+
+  S.player = S.player_swordsman;
 
   S.enemy = bake(12, 13, 6, 12, (g) => {
     const body = enemyDef("chaser").BODY_COLOR;

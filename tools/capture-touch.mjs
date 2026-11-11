@@ -1,5 +1,6 @@
 // Dev-only: prove the on-screen controls actually move/attack the player, over CDP.
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9334;
 const URL = "http://localhost:5199/?manual=1&touch=1&seed=42";
@@ -14,6 +15,19 @@ const send=(method,params={})=>new Promise(res=>{const i=++id;pend.set(i,res);ws
 const ev=async(expr)=>{const r=await send("Runtime.evaluate",{expression:expr,returnByValue:true});if(r.result?.exceptionDetails)throw new Error(JSON.stringify(r.result.exceptionDetails));return r.result?.result?.value;};
 await send("Page.enable");await send("Runtime.enable");await send("Page.navigate",{url:URL});
 for(let i=0;i<60;i++){if(await ev("!!(window.__game&&window.__game.ready)"))break;await sleep(100);}
+
+const shot = async (name) => {
+  const s = await send("Page.captureScreenshot", { format: "png" });
+  writeFileSync(`${OUT}/shot-${name}.png`, Buffer.from(s.result.data, "base64"));
+};
+
+// the run opens on the character modal, which also hides the touch layer
+const modal = { choices: await ev("window.__game.state().characterChoices.length") };
+await ev("window.__game.advance(1/60)");
+await shot("character-modal");
+modal.picked = await ev(`window.__game.pickCharacter("swordsman")`);
+await ev("(() => { for (let i=0;i<120;i++) window.__game.advance(1/60); })()");
+await shot("character-hud");
 
 // touch layer visible?
 const visible = await ev("getComputedStyle(document.getElementById('touch')).display");
@@ -47,5 +61,16 @@ const dashed = await ev(`(() => {
   return g.state().player.state;
 })()`);
 
-console.log(JSON.stringify({ visible, moved, slashed, dashed }, null, 2));
+// tap KỸ NĂNG, expect the swordsman dash to teleport ~80px.
+const skilled = await ev(`(() => {
+  const g = window.__game;
+  const p = g.state().player;
+  const x0 = p.x, y0 = p.y;
+  document.getElementById('btn-skill').dispatchEvent(new PointerEvent('pointerdown',{pointerId:10,bubbles:true}));
+  for (let i=0;i<6;i++) g.advance(1/60);
+  const q = g.state().player;
+  return { jump: Math.round(Math.hypot(q.x-x0, q.y-y0)), character: g.state().character };
+})()`);
+
+console.log(JSON.stringify({ modal, visible, moved, slashed, dashed, skilled }, null, 2));
 ws.close();chrome.kill();process.exit(0);

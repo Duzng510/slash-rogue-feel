@@ -13,7 +13,7 @@ import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchie
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import type { Intent } from "../src/sim/types.ts";
 
-const idle: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false };
+const idle: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
 function sandbox() {
   const w = new World();
   w.clearEnemies();
@@ -26,7 +26,7 @@ function sandbox() {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null, totalGold: 0 };
+  return { earned, best: null, totalGold: 0, charactersWon: new Set() };
 }
 
 function hits(w: World): void {
@@ -225,7 +225,7 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
 });
 
 test("a fresh save only offers the two unlocked artifacts, then gating opens more", () => {
-  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0 });
+  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set() });
   fresh.clearEnemies();
   fresh.player.reset(160, 100);
   fresh.tick(idle);
@@ -234,7 +234,7 @@ test("a fresh save only offers the two unlocked artifacts, then gating opens mor
   assert.ok(offered.every(id => ARTIFACT_UNLOCKS[id] === null));
   assert.ok(!offered.includes("lightning"));
 
-  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0 });
+  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0, charactersWon: new Set() });
   withFirstBlood.clearEnemies();
   withFirstBlood.player.reset(160, 100);
   withFirstBlood.tick(idle);
@@ -308,6 +308,25 @@ test("clearing the last room ends the run with victory", () => {
   assert.equal(w2.pendingEnd, null);
   assert.equal(w2.roomIndex, 0);
   assert.equal(w2.artifacts.size, 0);
+});
+
+test("a victory banks its character, and three different characters earn soul_collector", () => {
+  const w = sandbox();
+  w.achievements.charactersWon.add("swordsman");
+  w.achievements.charactersWon.add("mage");
+  assert.ok(w.pickCharacter("tank"));
+  w.introTicks = 0;
+  w.loadRoom(w.roomTotal - 1);
+  w.clearEnemies();
+  w.tick(idle);
+  w.chooseArtifact(w.artifactChoices[0].id);
+  w.runStats.roomsCleared = w.roomTotal - 1;
+  w.player.x = (w.room.w - 0.5) * 16;
+  w.player.y = Math.floor(w.room.h / 2) * 16;
+  w.tick(idle);
+  assert.equal(w.pendingEnd, "won");
+  assert.ok(w.achievements.charactersWon.has("tank"));
+  assert.ok(w.achievements.earned.has("soul_collector"));
 });
 
 test("artifact melee modifiers apply once without changing the base config", () => {

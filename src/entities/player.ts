@@ -1,11 +1,12 @@
 import { CONFIG } from "../config.ts";
 import { angleLerp, dist, normAngle } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
-import { createSwing, playerSwingInit, stepSwing } from "../systems/combat.ts";
+import { createSwing, hitFeedback, playerSwingInit, stepSwing } from "../systems/combat.ts";
+import { CHARACTERS, COMBO_HITS, COMBO_WINDOW, executeSkill, type CharacterId } from "../systems/characters.ts";
 import { ENEMY_STATE } from "./enemy.ts";
 import { resolveAttackDir } from "../systems/aim.ts";
 import { knockback } from "../systems/feelSim.ts";
-import { moveBody } from "../world/collision.ts";
+import { moveBody, blocked } from "../world/collision.ts";
 import type { Intent, Side, Sim, Swing, Unit } from "../sim/types.ts";
 import type { Rect } from "../mathx.ts";
 
@@ -66,6 +67,13 @@ export class Player implements Unit {
   shieldReady = true;
   shieldCd = 0;
   autoTargetId = -1;
+  character: CharacterId = "swordsman";
+  skillCd = 0;
+  skillActiveTicks = 0;
+  comboHits = 0;
+  comboWindow = 0;
+  killsSinceHeal = 0;
+  private comboBonus = false;
   private queuedAttackTicks = 0;
 
   reset(x: number, y: number): void {
@@ -91,6 +99,12 @@ export class Player implements Unit {
     this.hurtTicks = 0;
     this.deadTicks = 0;
     this.autoTargetId = -1;
+    this.skillCd = 0;
+    this.skillActiveTicks = 0;
+    this.comboHits = 0;
+    this.comboWindow = 0;
+    this.killsSinceHeal = 0;
+    this.comboBonus = false;
   }
 
   setState(next: PlayerState): void {
@@ -112,6 +126,18 @@ export class Player implements Unit {
 
   onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean {
     const p = CONFIG.PLAYER;
+    if (this.character === "tank" && this.skillActiveTicks > 0) {
+      artifactText(src.queue, this.x, this.y - 14, "KHIÊN", "#8ab4ff");
+      sfx(src.queue, "reprisal_ready", 0.6, 1.2);
+      const back = { side: "player", combo: 0, dir: sw.dir, ox: this.x, oy: this.y, reach: 0, deg: 0, dmg: 2, knockback: 30 } as unknown as Swing;
+      for (const e of src.enemies) {
+        if (e.dead || !e.canBeHit()) continue;
+        if (dist(e.x, e.y, this.x, this.y) > 20) continue;
+        const killed = e.onHit(back, e.x, e.y, src);
+        hitFeedback(src, e, back, e.x, e.y, killed, false);
+      }
+      return false;
+    }
     if (src.artifacts.has("shield") && this.shieldReady) {
       this.shieldReady = false;
       this.shieldCd = 420;
@@ -128,7 +154,7 @@ export class Player implements Unit {
     this.swing = null;
     this.combo = 0;
     this.queuedAttackTicks = 0;
-    knockback(this, sw.dir, p.HURT_KNOCKBACK);
+    knockback(this, sw.dir, p.HURT_KNOCKBACK * (this.character === "tank" ? 0.5 : 1));
     src.particles.burstBlood(cx, cy, sw.dir, CONFIG.FEEL.PLAYER_BLOOD, src.rng);
     shake(src.queue, this.x, this.y, sw.dir, CONFIG.FEEL.SHAKE_PLAYER_HURT_MULT);
 
@@ -168,6 +194,9 @@ export class Player implements Unit {
     if (this.impulseTicks > 0) this.impulseTicks--;
     if (this.reprisalTicks > 0) this.reprisalTicks--;
     if (this.shieldCd > 0 && --this.shieldCd === 0) this.shieldReady = true;
+    if (this.skillCd > 0) this.skillCd--;
+    if (this.skillActiveTicks > 0) this.skillActiveTicks--;
+    if (this.comboWindow > 0 && --this.comboWindow === 0) this.comboHits = 0;
     this.animTicks++;
 
     if (this.dead) {
@@ -204,6 +233,11 @@ export class Player implements Unit {
       }
     } else if (freshRequest) {
       this.startSwing(src, 1, intent, null);
+    }
+
+    if (intent.skill && this.skillCd <= 0 && this.state !== PLAYER_STATE.HURT) {
+      this.skillCd = CHARACTERS[this.character].skillCd;
+      executeSkill(this.character, src);
     }
 
     const dashing = this.state === PLAYER_STATE.DASH;
@@ -272,7 +306,7 @@ export class Player implements Unit {
     if (src.artifacts.has("phantom_dash")) {
       const ox = this.x, oy = this.y;
       let step = 0;
-      while (step < 60 && !src.room.solidAtPx(this.x + Math.cos(dir) * (step + 6), this.y + Math.sin(dir) * (step + 6))) step += 6;
+      while (step < 60 && !blocked(src.room, this.x + Math.cos(dir) * (step + 6), this.y + Math.sin(dir) * (step + 6), this.bodyW, this.bodyH)) step += 6;
       this.x += Math.cos(dir) * step;
       this.y += Math.sin(dir) * step;
       const slash = createSwing(src, { side: "player", combo: 0, dir, ox, oy, reach: 0, deg: 0, dmg: 2, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
@@ -329,13 +363,40 @@ export class Player implements Unit {
 
     if (control > 0) {
       const speed = Math.hypot(this.vx, this.vy);
-      const maxSpeed = p.SPEED * (src.artifacts.has("desperate") && this.hp <= 2 ? 1.2 : 1) *
+      const maxSpeed = p.SPEED * CHARACTERS[this.character].speedMult *
+        (src.artifacts.has("desperate") && this.hp <= 2 ? 1.2 : 1) *
         (src.curses.has("heavy_legs") ? CONFIG.CURSES.SPEED_MULT : 1);
       if (speed > maxSpeed) {
         this.vx = (this.vx / speed) * maxSpeed;
         this.vy = (this.vy / speed) * maxSpeed;
       }
     }
+  }
+
+  /** swordsman passive: counts landed hits and arms the bonus once the window fills */
+  registerHit(): void {
+    if (this.comboWindow <= 0) this.comboHits = 0;
+    this.comboWindow = COMBO_WINDOW;
+    if (++this.comboHits < COMBO_HITS) return;
+    this.comboHits = 0;
+    this.comboBonus = true;
+  }
+
+  consumeCombo(): boolean {
+    if (!this.comboBonus) return false;
+    this.comboBonus = false;
+    return true;
+  }
+
+  /** tank passive: every tenth kill knits back 1 HP */
+  registerKill(src: Sim): void {
+    if (this.character !== "tank") return;
+    if (++this.killsSinceHeal < 10) return;
+    this.killsSinceHeal = 0;
+    if (this.dead || this.hp >= this.maxHp) return;
+    this.hp++;
+    artifactText(src.queue, this.x, this.y - 14, "+1 HP", "#58ff8a");
+    sfx(src.queue, "pursuit_proc", 0.6, 1.1);
   }
 
   /** 0..3 walk cycle, mirrored by facing for the slash-heavy look */

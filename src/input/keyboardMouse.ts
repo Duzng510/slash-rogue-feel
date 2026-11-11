@@ -36,6 +36,7 @@ const HOTKEYS: Record<string, Hotkey> = {
 
 const ATTACK = new Set(["keyj", "keyk"]);
 const DASH = new Set(["space", "shiftleft", "shiftright"]);
+const SKILL = new Set(["keyq", "keye"]);
 
 export type DesktopOpts = {
   tick: () => number;
@@ -74,12 +75,13 @@ export class DesktopInput {
 
   private onKeyDown = (e: KeyboardEvent): void => {
     const code = e.code.toLowerCase();
-    if (MOVE[code] || ATTACK.has(code) || DASH.has(code) || HOTKEYS[code]) e.preventDefault();
+    if (MOVE[code] || ATTACK.has(code) || DASH.has(code) || SKILL.has(code) || HOTKEYS[code]) e.preventDefault();
     if (this.opts.blocked?.() || e.repeat || this.down.has(code)) return;
     this.down.add(code);
 
     if (ATTACK.has(code)) this.intent.pressAttack(this.opts.tick());
     else if (DASH.has(code)) this.intent.pressDash(this.opts.tick());
+    else if (SKILL.has(code)) this.intent.pressSkill(this.opts.tick());
     else if (HOTKEYS[code]) this.opts.onHotkey(HOTKEYS[code]);
 
     this.syncAxes();

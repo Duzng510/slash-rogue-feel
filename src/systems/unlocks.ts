@@ -1,4 +1,5 @@
 import type { RunStats } from "./runStats.ts";
+import type { CharacterId } from "./characters.ts";
 
 /** Achievement ids are a stable, versioned contract — never rename one, only add. */
 export type AchievementId =
@@ -26,7 +27,8 @@ export type AchievementId =
   | "warden_slayer"
   | "phantom_master"
   | "vampire_lord"
-  | "pacifist_room";
+  | "pacifist_room"
+  | "soul_collector";
 
 export type AchEvent = "kill" | "room" | "win" | "hit" | "artifact" | "end";
 
@@ -56,6 +58,7 @@ const ALL_ACHIEVEMENTS: readonly AchievementId[] = [
   "phantom_master",
   "vampire_lord",
   "pacifist_room",
+  "soul_collector",
 ];
 
 /** Vietnamese labels, shown by the HUD toast for achievements that unlock no artifact */
@@ -85,6 +88,7 @@ export const ACHIEVEMENT_NAMES: Record<AchievementId, string> = {
   phantom_master: "Bậc thầy ảo ảnh",
   vampire_lord: "Chúa tể hút máu",
   pacifist_room: "Phòng hòa bình",
+  soul_collector: "Thu phục hồn tướng",
 };
 
 export type BestRun = { time: number; rooms: number; kills: number; artifacts: number };
@@ -93,6 +97,8 @@ export type Achievements = {
   earned: Set<AchievementId>;
   best: BestRun | null;
   totalGold: number;
+  /** characters beaten to the end at least once; three of them earns soul_collector */
+  charactersWon: Set<CharacterId>;
 };
 
 const SPEEDRUN_TICKS = 8 * 60 * 60;
@@ -103,29 +109,37 @@ function isAchievementId(v: unknown): v is AchievementId {
   return typeof v === "string" && (ALL_ACHIEVEMENTS as readonly string[]).includes(v);
 }
 
+function isCharacterId(v: unknown): v is CharacterId {
+  return v === "swordsman" || v === "mage" || v === "tank";
+}
+
 export function emptyAchievements(): Achievements {
-  return { earned: new Set<AchievementId>(), best: null, totalGold: 0 };
+  return { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set<CharacterId>() };
 }
 
 /** decode persisted JSON into a valid Achievements; the storage adapter owns where the string came from */
 export function parseAchievements(raw: string | null): Achievements {
   if (raw === null) return emptyAchievements();
   try {
-    const data = JSON.parse(raw) as { earned?: unknown; best?: unknown; totalGold?: unknown };
+    const data = JSON.parse(raw) as { earned?: unknown; best?: unknown; totalGold?: unknown; charactersWon?: unknown };
     const earned = new Set<AchievementId>();
     if (Array.isArray(data.earned)) {
       for (const id of data.earned) if (isAchievementId(id)) earned.add(id);
     }
+    const charactersWon = new Set<CharacterId>();
+    if (Array.isArray(data.charactersWon)) {
+      for (const id of data.charactersWon) if (isCharacterId(id)) charactersWon.add(id);
+    }
     const best = (data.best ?? null) as BestRun | null;
     const totalGold = typeof data.totalGold === "number" && data.totalGold >= 0 ? data.totalGold : 0;
-    return { earned, best, totalGold };
+    return { earned, best, totalGold, charactersWon };
   } catch {
     return emptyAchievements();
   }
 }
 
 export function stringifyAchievements(a: Achievements): string {
-  return JSON.stringify({ earned: [...a.earned], best: a.best, totalGold: a.totalGold });
+  return JSON.stringify({ earned: [...a.earned], best: a.best, totalGold: a.totalGold, charactersWon: [...a.charactersWon] });
 }
 
 export function isUnlocked(id: AchievementId, a: Achievements): boolean {

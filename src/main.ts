@@ -19,6 +19,7 @@ import { Sfx } from "./audio/sfx.ts";
 import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
 import type { ArtifactId, CurseId } from "./systems/artifacts.ts";
+import type { CharacterId } from "./systems/characters.ts";
 import type { RunStats, EndAction, EndMode } from "./systems/runStats.ts";
 import { parseAchievements, stringifyAchievements, emptyAchievements } from "./systems/unlocks.ts";
 import type { Achievements } from "./systems/unlocks.ts";
@@ -76,7 +77,7 @@ const flags: DebugFlags = {
 };
 
 function applyHotkey(k: Hotkey): void {
-  if (world.artifactChoices.length > 0) return;
+  if (world.artifactChoices.length > 0 || world.characterChoices.length > 0) return;
   switch (k) {
     case "panel":
       panel.classList.toggle("on");
@@ -113,7 +114,7 @@ function applyHotkey(k: Hotkey): void {
 
 const desk = new DesktopInput(intent, {
   tick: () => world.tickCount,
-  blocked: () => world.artifactChoices.length > 0 || endScreen.isOpen(),
+  blocked: () => world.artifactChoices.length > 0 || world.characterChoices.length > 0 || endScreen.isOpen(),
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
@@ -132,7 +133,8 @@ if (touchLayer !== null) {
         document.getElementById("stick") as HTMLElement,
         document.getElementById("knob") as HTMLElement,
         document.getElementById("btn-attack") as HTMLElement,
-        document.getElementById("btn-dash") as HTMLElement
+        document.getElementById("btn-dash") as HTMLElement,
+        document.getElementById("btn-skill") as HTMLElement
       );
     }
   }
@@ -143,7 +145,8 @@ function resetInput(): void {
   desk.reset();
   touch?.reset();
 }
-const modalActive = (): boolean => world.artifactChoices.length > 0 || world.shopOffers !== null;
+/** the start screen sits above the canvas, so its clicks must not be swallowed by the modal blocker */
+const modalActive = (): boolean => startScreen.hidden && (world.characterChoices.length > 0 || world.artifactChoices.length > 0 || world.shopOffers !== null);
 function syncArtifactModal(): boolean {
   const open = modalActive();
   if (open !== modalOpen) {
@@ -169,8 +172,14 @@ function modalFromClient(x: number, y: number): string | null {
   const v = (y - r.top) / r.height;
   return isRotated() ? hud.modalAt(v * 320, (1 - u) * 180) : hud.modalAt(u * 320, v * 180);
 }
-function applyModal(key: string): void {
-  if (key === "t:normal") world.curseTab = false;
+function applyModal(key: string, from: ModalKey): void {
+  if (from === "p") {
+    if (world.pickCharacter(key.slice(2) as CharacterId)) {
+      resetInput();
+      suppressModalClick = false;
+    }
+    syncArtifactModal();
+  } else if (key === "t:normal") world.curseTab = false;
   else if (key === "t:curse") world.curseTab = true;
   else if (key.startsWith("c:")) {
     if (world.chooseCurse(key.slice(2) as CurseId)) {
@@ -191,7 +200,13 @@ function applyModal(key: string): void {
     syncArtifactModal();
   } else chooseArtifact(key.slice(2) as ArtifactId);
 }
-const modalPointers = new Map<number, string | null>();
+/** which modal a pointer press landed in; the key after the prefix tells which id was hit */
+type ModalKey = "p" | "a" | "c" | "s" | "t";
+function modalKind(key: string | null): ModalKey | null {
+  if (key === null) return null;
+  return key[0] as ModalKey;
+}
+const modalPointers = new Map<number, ModalKey | null>();
 const endPointers = new Map<number, EndAction | null>();
 const endActionFromClient = (x: number, y: number): EndAction | null => endScreen.handlePointer(x, y, renderer.scale);
 let suppressModalClick = false;
@@ -207,7 +222,7 @@ window.addEventListener("pointerdown", (e) => {
     return;
   }
   syncArtifactModal();
-  modalPointers.set(e.pointerId, e.button === 0 ? modalFromClient(e.clientX, e.clientY) : null);
+  modalPointers.set(e.pointerId, e.button === 0 ? modalKind(modalFromClient(e.clientX, e.clientY)) : null);
 }, { capture: true });
 for (const type of ["pointerup", "pointercancel"] as const) {
   window.addEventListener(type, (e) => {
@@ -223,15 +238,29 @@ for (const type of ["pointerup", "pointercancel"] as const) {
         resetInput();
         if (act === "restart") world.restart();
         else world.continueAfterWin();
-        world.beginIntro();
       }
       return;
     }
-    const id = modalPointers.get(e.pointerId);
+    const kind = modalPointers.get(e.pointerId);
     modalPointers.delete(e.pointerId);
-    if (type === "pointerup" && id != null && id === modalFromClient(e.clientX, e.clientY)) applyModal(id);
+    const key = type === "pointerup" ? modalFromClient(e.clientX, e.clientY) : null;
+    if (key !== null && kind !== null && kind === modalKind(key)) applyModal(key, kind);
   }, { capture: true });
 }
+// Keyboard selection shortcuts for character screen [1], [2], [3]
+window.addEventListener("keydown", (e) => {
+  if (world.characterChoices.length > 0) {
+    let pickId: CharacterId | null = null;
+    if (e.code === "Digit1" || e.code === "Numpad1") pickId = world.characterChoices[0];
+    else if (e.code === "Digit2" || e.code === "Numpad2") pickId = world.characterChoices[1];
+    else if (e.code === "Digit3" || e.code === "Numpad3") pickId = world.characterChoices[2];
+    if (pickId) {
+      e.preventDefault();
+      applyModal(`p:${pickId}`, "p");
+    }
+  }
+}, { capture: true });
+
 for (const type of ["mousedown", "mouseup", "click", "dblclick", "contextmenu"] as const) {
   window.addEventListener(type, (e) => {
     if (!suppressModalClick && !modalActive() && !endScreen.isOpen()) return;
@@ -304,7 +333,7 @@ function botIntent(): Intent {
     }
   }
   if (target === null) {
-    return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false };
+    return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
   }
   const a = Math.atan2(target.y - p.y, target.x - p.x);
   const close = best <= CONFIG.ATTACK.REACH * 0.95;
@@ -315,6 +344,7 @@ function botIntent(): Intent {
     aimY: target.y,
     attack: close && world.tickCount % 14 === 0,
     dash: best > 70 && world.tickCount % 89 === 0,
+    skill: false,
   };
 }
 
@@ -370,6 +400,7 @@ function frame(dtReal: number): void {
   debug.measure(dtReal);
   debug.draw(o, renderer.scale, world, renderer, flags);
   hud.drawArtifacts(o, renderer.scale);
+  hud.drawCharacters(o, renderer.scale);
   if (endScreen.isOpen()) endScreen.draw(o, renderer.scale);
   hud.drawAchievementToast(o, renderer.scale);
 }
@@ -389,6 +420,8 @@ const startButton = document.getElementById("btn-start") as HTMLButtonElement;
 function startGame(): void {
   startScreen.hidden = true;
   document.body.classList.remove("starting");
+  /** the capture harnesses assert on frames counted from the fight itself, so no intro walk there */
+  if (autoplay) world.characterChoices = [];
   if (!autoplay) {
     desk.attach();
     touch?.attach();
@@ -406,7 +439,6 @@ if (autoplay || qs.get("manual") === "1") {
         onViewport();
       });
     startScreen.classList.add("fading");
-    world.beginIntro();
     setTimeout(startGame, 380);
   }, { once: true });
 }
@@ -416,6 +448,8 @@ type Harness = {
   advance: (dt: number) => number;
   pressAttack: () => void;
   pressDash: () => void;
+  pressSkill: () => void;
+  pickCharacter: (id: CharacterId) => boolean;
   setMove: (x: number, y: number) => void;
   setAim: (x: number, y: number) => void;
   addEnemies: (n: number, kinds?: EnemyKind[], elite?: boolean) => void;
@@ -433,6 +467,8 @@ type Harness = {
     hitStop: number;
     player: { x: number; y: number; hp: number; state: string; swing: string | null; invuln: boolean };
     roomIndex: number;
+    character: string;
+    characterChoices: CharacterId[];
     artifacts: ArtifactId[];
     artifactChoices: ArtifactId[];
     curseOffer: string[] | null;
@@ -463,6 +499,13 @@ const harness: Harness = {
   advance: (dt) => loop.advance(dt),
   pressAttack: () => intent.pressAttack(world.tickCount),
   pressDash: () => intent.pressDash(world.tickCount),
+  pressSkill: () => intent.pressSkill(world.tickCount),
+  pickCharacter: (id) => {
+    const picked = world.pickCharacter(id);
+    if (picked) resetInput();
+    syncArtifactModal();
+    return picked;
+  },
   setMove: (x, y) => {
     intent.moveX = x;
     intent.moveY = y;
@@ -500,7 +543,7 @@ const harness: Harness = {
     e.applyStatus(status, world);
     return true;
   },
-  gotoRoom: (i) => { world.loadRoom(i); syncArtifactModal(); },
+  gotoRoom: (i) => { world.characterChoices = []; world.loadRoom(i); syncArtifactModal(); },
   chooseArtifact,
   buyShop: (i) => {
     const bought = world.chooseShop(i);
@@ -525,6 +568,8 @@ const harness: Harness = {
       invuln: !world.player.canBeHit(),
     },
     roomIndex: world.roomIndex,
+    character: world.player.character,
+    characterChoices: [...world.characterChoices],
     artifacts: [...world.artifacts],
     artifactChoices: world.artifactChoices.map((artifact) => artifact.id),
     curseOffer: world.curseOffer === null ? null : world.curseOffer.curses.map((c) => c.id),

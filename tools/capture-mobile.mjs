@@ -63,6 +63,7 @@ async function shot(name, w, h) {
     if (errs) throw new Error(`${name}: page error — ${errs}`);
     await sleep(100);
   }
+  await evalJs('window.__game.pickCharacter("swordsman")');
   const info = await evalJs(`(() => {
     const g = window.__game;
     for (let i = 0; i < 40; i++) g.advance(1 / 60);
@@ -90,6 +91,7 @@ await shot("mobile-landscape", 844, 390);
 await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
 await send("Page.navigate", { url: URL });
 for (let i = 0; i < 60; i++) if (await evalJs("!!(window.__game && window.__game.ready)")) break;
+await evalJs('window.__game.pickCharacter("swordsman")');
 const probe = await evalJs(`(() => {
   Element.prototype.setPointerCapture = () => {};
   const g = window.__game;

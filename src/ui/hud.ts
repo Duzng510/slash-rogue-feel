@@ -2,9 +2,25 @@ import { CONFIG } from "../config.ts";
 import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
 import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
+import { CHARACTERS } from "../systems/characters.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
 
 const P = CONFIG.PALETTE;
+
+/** greedy word wrap to the card width, in canvas measure units */
+function wrapLines(o: CanvasRenderingContext2D, text: string, max: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/)) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && o.measureText(next).width > max) {
+      lines.push(line);
+      line = word;
+    } else line = next;
+  }
+  lines.push(line);
+  return lines;
+}
 
 export class Hud {
   private toastText = "";
@@ -45,6 +61,15 @@ export class Hud {
 
   modalAt(x: number, y: number): string | null {
     const w = this.world;
+    if (w.characterChoices.length > 0) {
+      if (y < 34 || y > 172) return null;
+      let i = -1;
+      if (x >= 12 && x <= 104) i = 0;
+      else if (x >= 114 && x <= 206) i = 1;
+      else if (x >= 216 && x <= 308) i = 2;
+      const id = i < 0 ? undefined : w.characterChoices[i];
+      return id === undefined ? null : `p:${id}`;
+    }
     if (w.shopOffers !== null) {
       if (y >= 166 && y <= 178 && x >= 16 && x <= 304) return "s:leave";
       // 3 vertical columns for shop: left 12, width 92, gap 10 (col 0: 12-104, col 1: 114-206, col 2: 216-308), y: 38 - 158
@@ -77,6 +102,180 @@ export class Hud {
     }
     const artifact = w.artifactChoices[i];
     return artifact && !w.artifacts.has(artifact.id) ? `a:${artifact.id}` : null;
+  }
+
+  /** the run-start build choice: impressive character selection stage with pedestals, animated preview models and glowing runes */
+  drawCharacters(o: CanvasRenderingContext2D, scale: number): void {
+    const list = this.world.characterChoices;
+    if (list.length === 0) return;
+    const now = performance.now();
+
+    o.save();
+    o.scale(scale, scale);
+
+    // Deep cosmic background with dark gradient
+    const bgGrad = o.createRadialGradient(160, 90, 20, 160, 90, 180);
+    bgGrad.addColorStop(0, "rgba(15, 20, 32, 0.96)");
+    bgGrad.addColorStop(1, "rgba(5, 7, 12, 0.98)");
+    o.fillStyle = bgGrad;
+    o.fillRect(0, 0, 320, 180);
+
+    // Subtle atmospheric floating magical motes
+    for (let i = 0; i < 18; i++) {
+      const px = (Math.sin(now * 0.0007 + i * 2.3) * 0.5 + 0.5) * 320;
+      const py = (Math.cos(now * 0.0009 + i * 1.7) * 0.5 + 0.5) * 180;
+      const pAlpha = 0.15 + 0.15 * Math.sin(now * 0.002 + i);
+      o.fillStyle = i % 2 === 0 ? "rgba(100, 200, 255," + pAlpha + ")" : "rgba(255, 200, 100," + pAlpha + ")";
+      o.fillRect(Math.floor(px), Math.floor(py), 1.5, 1.5);
+    }
+
+    // Title banner with glowing aura
+    o.textBaseline = "top";
+    o.textAlign = "center";
+    o.shadowColor = "#4da3ff";
+    o.shadowBlur = 4;
+    o.fillStyle = "#ffffff";
+    o.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+    o.fillText("CHỌN ANH HÙNG XUẤT TRẬN", 160, 8);
+    o.shadowBlur = 0;
+
+    o.font = "bold 6.5px sans-serif";
+    o.fillStyle = "#8ab4ff";
+    o.fillText("Bấm phím [1], [2], [3] hoặc chạm/nhấn vào thẻ nhân vật để bắt đầu", 160, 23);
+
+    const cardW = 92;
+    const cardH = 138;
+    const cardY = 34;
+
+    list.forEach((id, i) => {
+      const c = CHARACTERS[id];
+      const cardX = 12 + i * 102;
+      const midX = cardX + cardW / 2;
+
+      // Card Base
+      o.fillStyle = "rgba(13, 17, 26, 0.95)";
+      o.fillRect(cardX, cardY, cardW, cardH);
+
+      // Card Outline with soft glow
+      o.strokeStyle = c.color;
+      o.lineWidth = 1;
+      o.strokeRect(cardX + 0.5, cardY + 0.5, cardW - 1, cardH - 1);
+
+      // Top color banner
+      o.fillStyle = c.color;
+      o.fillRect(cardX, cardY, cardW, 2);
+
+      // Hotkey badge [1], [2], [3]
+      o.fillStyle = "#0a0d14";
+      o.fillRect(cardX + 4, cardY + 4, 13, 11);
+      o.strokeStyle = c.color;
+      o.strokeRect(cardX + 4.5, cardY + 4.5, 12, 10);
+      o.textAlign = "center";
+      o.fillStyle = "#ffffff";
+      o.font = "bold 7px sans-serif";
+      o.fillText(`${i + 1}`, cardX + 10.5, cardY + 6);
+
+      // Character Title
+      o.textAlign = "left";
+      o.font = "bold 9px sans-serif";
+      o.fillStyle = "#ffffff";
+      o.fillText(c.name, cardX + 21, cardY + 6);
+
+      // --- Pedestal & Summoning Circle ---
+      const pedY = cardY + 42;
+      // Glowing rune aura beneath feet
+      const pulse = 0.6 + 0.35 * Math.sin(now * 0.005 + i * 1.5);
+      o.save();
+      o.globalAlpha = pulse;
+      o.strokeStyle = c.color;
+      o.lineWidth = 1.2;
+      o.beginPath();
+      o.ellipse(midX, pedY + 4, 22, 6, 0, 0, Math.PI * 2);
+      o.stroke();
+      o.fillStyle = c.color;
+      o.globalAlpha = pulse * 0.25;
+      o.fill();
+      o.restore();
+
+      // Stone pedestal
+      o.fillStyle = "#1e2638";
+      o.beginPath();
+      o.ellipse(midX, pedY + 6, 17, 4.5, 0, 0, Math.PI * 2);
+      o.fill();
+      o.fillStyle = "#111622";
+      o.fillRect(midX - 17, pedY + 6, 34, 4);
+      o.beginPath();
+      o.ellipse(midX, pedY + 10, 17, 4.5, 0, 0, Math.PI * 2);
+      o.fill();
+
+      // --- Live Sprite Model Preview ---
+      const spriteKey = `player_${id}`;
+      const sp = this.sprites[spriteKey] ?? this.sprites.player;
+      if (sp) {
+        // Gentle breathing/idle bob animation
+        const bob = Math.round(Math.sin(now * 0.004 + i * 2) * 1.5);
+        const sprX = Math.round(midX - sp.ax);
+        const sprY = Math.round(pedY + 4 - sp.ay + bob);
+        o.drawImage(sp.c, sprX, sprY);
+      }
+
+      // --- Stat Bars (HP, DMG, SPD) ---
+      const statY = cardY + 58;
+      o.font = "bold 6.5px sans-serif";
+
+      // HP Bar
+      o.fillStyle = "#8d99ae";
+      o.fillText("MÁU", cardX + 6, statY);
+      o.fillStyle = "#161d2d";
+      o.fillRect(cardX + 26, statY + 1, 58, 4);
+      o.fillStyle = "#ef233c";
+      const hpFill = Math.min(58, Math.round((c.baseHp / 7) * 58));
+      o.fillRect(cardX + 26, statY + 1, hpFill, 4);
+
+      // DMG Bar
+      o.fillStyle = "#8d99ae";
+      o.fillText("CÔNG", cardX + 6, statY + 7);
+      o.fillStyle = "#161d2d";
+      o.fillRect(cardX + 26, statY + 8, 58, 4);
+      o.fillStyle = "#ffd166";
+      const dmgFill = Math.min(58, Math.round((c.damageMult / 1.5) * 58));
+      o.fillRect(cardX + 26, statY + 8, dmgFill, 4);
+
+      // SPD Bar
+      o.fillStyle = "#8d99ae";
+      o.fillText("TỐC", cardX + 6, statY + 14);
+      o.fillStyle = "#161d2d";
+      o.fillRect(cardX + 26, statY + 15, 58, 4);
+      o.fillStyle = "#06d6a0";
+      const spdFill = Math.min(58, Math.round((c.speedMult / 1.2) * 58));
+      o.fillRect(cardX + 26, statY + 15, spdFill, 4);
+
+      // Divider line
+      o.fillStyle = "#222c3f";
+      o.fillRect(cardX + 6, cardY + 81, cardW - 12, 1);
+
+      // --- Skill Section ---
+      o.font = "bold 7px sans-serif";
+      o.fillStyle = "#ffd166";
+      o.fillText(`[E] ${c.skillName}`, cardX + 6, cardY + 85);
+      o.font = "6.5px sans-serif";
+      o.fillStyle = "#c5d3e8";
+      wrapLines(o, c.skillDesc, cardW - 12).forEach((t, j) => {
+        o.fillText(t, cardX + 6, cardY + 95 + j * 8, cardW - 12);
+      });
+
+      // --- Passive Section ---
+      o.font = "bold 7px sans-serif";
+      o.fillStyle = c.color;
+      o.fillText(`Nội tại: ${c.passiveName}`, cardX + 6, cardY + 113);
+      o.font = "6.5px sans-serif";
+      o.fillStyle = "#9db0cc";
+      wrapLines(o, c.passiveDesc, cardW - 12).forEach((t, j) => {
+        o.fillText(t, cardX + 6, cardY + 122 + j * 8, cardW - 12);
+      });
+    });
+
+    o.restore();
   }
 
   drawArtifacts(o: CanvasRenderingContext2D, scale: number): void {
@@ -282,6 +481,31 @@ export class Hud {
       o.drawImage(s.c, Math.round((6 + i * step) * scale), Math.round(6 * scale), s.w * scale, s.h * scale);
     }
 
+    const cdef = CHARACTERS[w.player.character];
+    const badgeX = 10 + w.player.maxHp * step;
+    o.textBaseline = "top";
+    o.fillStyle = cdef.color;
+    o.fillRect(Math.round(badgeX * scale), Math.round(7 * scale), Math.round(5 * scale), Math.round(5 * scale));
+    o.font = `${Math.round(6 * scale)}px ui-monospace, monospace`;
+    o.globalAlpha = 0.85;
+    o.fillStyle = P.TEXT;
+    o.fillText(cdef.name, Math.round((badgeX + 8) * scale), Math.round(6 * scale));
+    o.globalAlpha = 1;
+
+    /** vertical skill gauge, top-right (the bottom-left corner belongs to the touch stick) */
+    const total = cdef.skillCd;
+    const ratio = w.player.skillCd <= 0 ? 1 : 1 - w.player.skillCd / total;
+    const gx = Math.round(310 * scale);
+    const gy = Math.round(8 * scale);
+    const gw = Math.round(6 * scale);
+    const gh = Math.round(30 * scale);
+    o.fillStyle = P.VOID;
+    o.fillRect(gx - Math.round(scale), gy - Math.round(scale), gw + 2 * Math.round(scale), gh + 2 * Math.round(scale));
+    o.fillStyle = ratio >= 1 ? cdef.color : "#2b3242";
+    o.fillRect(gx, Math.round(gy + (1 - ratio) * gh), gw, Math.round(ratio * gh));
+    o.fillStyle = P.TEXT;
+    o.fillText("E", gx, gy + gh + Math.round(2 * scale));
+
     let boss: World["enemies"][number] | null = null;
     for (const e of w.enemies) if (e.def.HP_BAR && !e.dead) boss = e;
     if (boss !== null) {
@@ -323,7 +547,7 @@ export class Hud {
     if (w.introLineTicks > 0 && w.introLine.length > 0) {
       o.globalAlpha = Math.min(1, w.introLineTicks / 24);
       o.font = `${Math.round(7 * scale)}px ui-monospace, monospace`;
-      const text = `Kiếm khách: "${w.introLine}"`;
+      const text = `${CHARACTERS[w.player.character].name}: "${w.introLine}"`;
       const tw = o.measureText(text).width;
       const x = Math.round((o.canvas.width - tw) / 2);
       const y = Math.round(o.canvas.height * 0.8);

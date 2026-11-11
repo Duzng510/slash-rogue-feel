@@ -151,8 +151,10 @@ export class Enemy implements Unit {
     const playerHit = sw.side === "player";
     const crit = playerHit && src.artifacts.has("crit") && src.rng.next() < 0.2;
     const frozen = this.freezeTicks > 0;
+    const statused = frozen || this.burnTicks > 0 || this.wetTicks > 0 || this.shockTicks > 0 || this.poisonTicks > 0 || this.bleedTicks > 0;
     if (frozen) this.freezeTicks = 0;
     let dmg = crit ? sw.dmg * 2 : sw.dmg;
+    if (playerHit && statused && src.player.character === "mage") dmg *= 1.3;
     if (e.SHIELD && playerHit && Math.abs(normAngle(sw.dir - this.facing)) > Math.PI / 2) {
       dmg *= 0.5;
       src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
@@ -193,6 +195,7 @@ export class Enemy implements Unit {
       if (this.kind === "warden") src.runStats.wardenKills++;
       if (playerOwned) {
         src.runStats.roomKills++;
+        src.player.registerKill(src);
         if (this.poisonTicks > 0) src.runStats.poisonKills++;
       }
       if (playerOwned && src.artifacts.has("heavy") && this.burnTicks === 0 && this.wetTicks === 0) src.runStats.heavyKills++;
@@ -543,6 +546,7 @@ export class Enemy implements Unit {
       vy: Math.sin(dir) * e.SHOT_SPEED,
       dmg: e.SHOT_DMG * this.dmgScale,
       ticksLeft: e.SHOT_LIFE_TICKS,
+      owner: "enemy",
     });
     sfx(src.queue, "shoot", 0.8, 1);
   }
@@ -558,6 +562,7 @@ export class Enemy implements Unit {
         vy: Math.sin(a) * e.SHOT_SPEED,
         dmg: e.SHOT_DMG * this.dmgScale,
         ticksLeft: e.SHOT_LIFE_TICKS,
+        owner: "enemy",
       });
     }
     sfx(src.queue, "shoot", 0.8, 0.7);

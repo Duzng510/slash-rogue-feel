@@ -6,10 +6,11 @@ import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
 import { TEMPLATES, MARKER_KIND, Room, TILE, type Template } from "../src/world/rooms.ts";
 import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
-import { createSwing, playerSwingInit } from "../src/systems/combat.ts";
+import { createSwing, hitFeedback, playerSwingInit } from "../src/systems/combat.ts";
+import { CHARACTERS, COMBO_HITS } from "../src/systems/characters.ts";
 import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS, CURSES } from "../src/systems/artifacts.ts";
 import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
-import { checkAchievements } from "../src/systems/unlocks.ts";
+import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import { PLAYER_STATE } from "../src/entities/player.ts";
 import { requestHitStop } from "../src/systems/feelSim.ts";
@@ -38,7 +39,7 @@ function heading(t: string): void {
 }
 
 function intent(over: Partial<Intent> = {}): Intent {
-  return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, ...over };
+  return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, ...over };
 }
 
 function sandbox(): World {
@@ -54,7 +55,7 @@ function sandbox(): World {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null, totalGold: 0 };
+  return { earned, best: null, totalGold: 0, charactersWon: new Set() };
 }
 
 function duel(w: World, gap = 16): number {
@@ -730,7 +731,7 @@ heading("Curse (P10)");
 {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0 });
+  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set() });
   w.clearEnemies();
   w.tick(intent());
   ok("the first clear offers a two-curse package", w.curseOffer !== null && w.curseOffer.curses.length === 2 && w.curseOffer.artifacts.length === 2);
@@ -1047,7 +1048,7 @@ heading("Priority 4 — ranged & teleporter");
   const wi = sandbox();
   const hpI = wi.player.hp;
   wi.player.iframeTicks = 20;
-  wi.projectiles = [{ x: wi.player.x, y: wi.player.y - 3, vx: 0, vy: 0, dmg: 1, ticksLeft: 40 }];
+  wi.projectiles = [{ x: wi.player.x, y: wi.player.y - 3, vx: 0, vy: 0, dmg: 1, ticksLeft: 40, owner: "enemy" }];
   wi.tick(intent());
   ok("a shot during i-frames deals no damage", wi.player.hp === hpI, `hp ${hpI}->${wi.player.hp}`);
   ok("a shot during i-frames passes through, not consumed", wi.projectiles.length === 1, `left ${wi.projectiles.length}`);
@@ -1055,13 +1056,13 @@ heading("Priority 4 — ranged & teleporter");
   // projectile hits when the player is hittable
   const wh = sandbox();
   const hpH = wh.player.hp;
-  wh.projectiles = [{ x: wh.player.x, y: wh.player.y - 3, vx: 0, vy: 0, dmg: 1, ticksLeft: 40 }];
+  wh.projectiles = [{ x: wh.player.x, y: wh.player.y - 3, vx: 0, vy: 0, dmg: 1, ticksLeft: 40, owner: "enemy" }];
   wh.tick(intent());
   ok("a shot that overlaps a hittable player lands", wh.player.hp < hpH && wh.projectiles.length === 0, `hp ${wh.player.hp}`);
 
   // projectile is blocked by a wall
   const wwall = sandbox();
-  wwall.projectiles = [{ x: T + 1, y: 2 * T + 8, vx: -400, vy: 0, dmg: 1, ticksLeft: 400 }];
+  wwall.projectiles = [{ x: T + 1, y: 2 * T + 8, vx: -400, vy: 0, dmg: 1, ticksLeft: 400, owner: "enemy" }];
   let wguard = 0;
   while (wwall.projectiles.length > 0 && wguard++ < 20) wwall.tick(intent());
   ok("a projectile is blocked by a wall before it expires", wwall.projectiles.length === 0 && wguard < 6, `ticks ${wguard}`);
@@ -1069,7 +1070,7 @@ heading("Priority 4 — ranged & teleporter");
   // projectile expires on its own when it never overlaps
   const wexp = sandbox();
   const hpE = wexp.player.hp;
-  wexp.projectiles = [{ x: wexp.player.x, y: wexp.player.y - 100, vx: 0, vy: -150, dmg: 1, ticksLeft: 5 }];
+  wexp.projectiles = [{ x: wexp.player.x, y: wexp.player.y - 100, vx: 0, vy: -150, dmg: 1, ticksLeft: 5, owner: "enemy" }];
   let eguard = 0;
   while (wexp.projectiles.length > 0 && eguard++ < 40) wexp.tick(intent());
   ok("a stray projectile expires and never hurts the player", wexp.projectiles.length === 0 && wexp.player.hp === hpE, `ticks ${eguard}`);
@@ -1115,6 +1116,88 @@ heading("Priority 4 — ranged & teleporter");
   let g2 = 0;
   while (d2.projectiles.length === 0 && g2++ < 200) d2.tick(intent());
   ok("the ranged shot is deterministic", g1 === g2 && Math.abs(d1.projectiles[0].vx - d2.projectiles[0].vx) < 1e-6, `g1 ${g1} g2 ${g2}`);
+}
+
+heading("Characters (H2 build choice)");
+{
+  const w = new World(CONFIG.SEED);
+  ok("a fresh world asks for a build", w.characterChoices.length === 3);
+  ok("picking banks its health and closes the choice", w.pickCharacter("tank") && w.player.maxHp === CHARACTERS.tank.baseHp && w.characterChoices.length === 0);
+  ok("a character outside the open choice cannot be picked", w.pickCharacter("mage") === false);
+
+  w.player.character = "swordsman";
+  const base = playerSwingInit(w, 1, 0).dmg;
+  for (let i = 0; i < COMBO_HITS; i++) w.player.registerHit();
+  ok("five landed hits inside the window make the next swing 1.5x", Math.abs(playerSwingInit(w, 1, 0).dmg - base * 1.5) < 1e-9);
+  ok("the bonus is spent on that one swing", Math.abs(playerSwingInit(w, 1, 0).dmg - base) < 1e-9);
+}
+{
+  const m = sandbox();
+  const foe = makeEnemy(m.player.x + 12, m.player.y, "chaser");
+  withEnemy(m, foe);
+  const melee = createSwing(m, { side: "player", combo: 1, dir: 0, ox: m.player.x, oy: m.player.y, reach: CONFIG.ATTACK.REACH, deg: 90, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  hitFeedback(m, foe, melee, foe.x, foe.y, false, false);
+  ok("a landed swing is what feeds the combo counter", m.player.comboHits === 1);
+  const dot = createSwing(m, { side: "player", combo: 1, dir: 0, ox: foe.x, oy: foe.y, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  hitFeedback(m, foe, dot, foe.x, foe.y, false, false);
+  ok("status damage does not feed it", m.player.comboHits === 1);
+}
+{
+  const g = sandbox();
+  g.pickCharacter("mage");
+  g.introTicks = 0;
+  g.player.reset(g.room.start.x, g.room.start.y);
+  const foe = makeEnemy(g.player.x + 24, g.player.y, "chaser");
+  withEnemy(g, foe);
+  g.tick(intent({ skill: true }));
+  ok("the fireball is a player-owned shot", g.projectiles.length === 1 && g.projectiles[0]?.owner === "player");
+  ok("casting locks the skill behind its cooldown", g.player.skillCd === CHARACTERS.mage.skillCd);
+  g.tick(intent({ skill: true }));
+  ok("a press on cooldown fires nothing", g.projectiles.length === 1);
+  let guard = 0;
+  while (g.projectiles.length > 0 && guard++ < 40) g.tick(intent());
+  ok("the fireball damages and lights its target", foe.hp < foe.maxHp && foe.burnTicks > 0 && g.projectiles.length === 0, `hp ${foe.hp} burn ${foe.burnTicks}`);
+
+  const plain = makeEnemy(g.player.x + 60, g.player.y, "chaser");
+  const lit = makeEnemy(g.player.x + 60, g.player.y + 20, "chaser");
+  g.enemies = [plain, lit];
+  g.syncUnits();
+  lit.applyStatus("burn", g);
+  const bolt = createSwing(g, { side: "player", combo: 1, dir: 0, ox: g.player.x, oy: g.player.y, reach: 8, deg: 90, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  plain.onHit(bolt, plain.x, plain.y, g);
+  const bolt2 = createSwing(g, { side: "player", combo: 1, dir: 0, ox: g.player.x, oy: g.player.y, reach: 8, deg: 90, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  lit.onHit(bolt2, lit.x, lit.y, g);
+  ok("resonance: a statused enemy takes 30% more", plain.maxHp - plain.hp < lit.maxHp - lit.hp, `${plain.maxHp - plain.hp} vs ${lit.maxHp - lit.hp}`);
+}
+{
+  const t = sandbox();
+  t.pickCharacter("tank");
+  t.introTicks = 0;
+  t.player.reset(t.room.start.x, t.room.start.y);
+  t.player.skillActiveTicks = 30;
+  const foe = makeEnemy(t.player.x + 10, t.player.y, "chaser");
+  withEnemy(t, foe);
+  const foeHp = foe.hp;
+  const swing = createSwing(t, { side: "enemy", combo: 1, dir: Math.PI, ox: foe.x, oy: foe.y, reach: 20, deg: 90, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  t.player.onHit(swing, t.player.x, t.player.y, t);
+  ok("the shield nulls the hit", t.player.hp === t.player.maxHp);
+  ok("the shield reflects 2 damage", foeHp - foe.hp === 2, `${foeHp}->${foe.hp}`);
+
+  t.player.skillActiveTicks = 0;
+  t.player.hp = 6;
+  t.player.killsSinceHeal = 9;
+  const last = makeEnemy(t.player.x + 10, t.player.y, "chaser");
+  last.hp = 1;
+  withEnemy(t, last);
+  const kill = createSwing(t, { side: "player", combo: 1, dir: 0, ox: t.player.x, oy: t.player.y, reach: 8, deg: 90, dmg: 2, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  last.onHit(kill, last.x, last.y, t);
+  ok("every tenth kill knits the tank back 1 HP", t.player.hp === 7 && t.player.killsSinceHeal === 0, `hp ${t.player.hp}`);
+}
+{
+  const saved = emptyAchievements();
+  saved.charactersWon.add("mage");
+  ok("the roster of beaten characters survives storage", parseAchievements(stringifyAchievements(saved)).charactersWon.has("mage"));
+  ok("an older save without the roster still parses", parseAchievements('{"earned":[],"best":null,"totalGold":5}').charactersWon.size === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

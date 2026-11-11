@@ -65,6 +65,19 @@ for (let i = 0; i < 60; i++) {
   await sleep(100);
 }
 
+// desktop pointer path: a real click on the middle card must pick that character and start the run
+await evalJs("window.__game.advance(1/60)");
+const modalShot = await send("Page.captureScreenshot", { format: "png" });
+writeFileSync(`${OUT}/shot-character-modal.png`, Buffer.from(modalShot.result.data, "base64"));
+const card = await evalJs(`(() => { const r = document.getElementById("overlay").getBoundingClientRect();
+  return { x: r.left + r.width * (160 / 320), y: r.top + r.height * (100 / 180) }; })()`);
+for (const type of ["mousePressed", "mouseReleased"]) {
+  await send("Input.dispatchMouseEvent", { type, x: card.x, y: card.y, button: "left", clickCount: 1 });
+}
+const picked = await evalJs("({ character: window.__game.state().character, choices: window.__game.state().characterChoices.length })");
+console.log("modal click ->", JSON.stringify(picked));
+if (picked.character !== "mage" || picked.choices !== 0) throw new Error("middle card click did not pick the mage");
+
 // spawn enemies around the player, walk in, then advance until a swing is in its active frames.
 await evalJs(`(() => {
   const g = window.__game;

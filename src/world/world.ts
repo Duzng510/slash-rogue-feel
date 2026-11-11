@@ -15,6 +15,7 @@ import {
   checkAchievements,
 } from "../systems/unlocks.ts";
 import { Player } from "../entities/player.ts";
+import { CHARACTERS, CHARACTER_LIST, type CharacterId } from "../systems/characters.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
 import { Room, TEMPLATES, TILE, type SpawnMark } from "../world/rooms.ts";
 import { SpatialGrid } from "./grid.ts";
@@ -58,6 +59,8 @@ export class World implements Sim {
 
   readonly artifacts = new Set<ArtifactId>();
   artifactChoices: Artifact[] = [];
+  /** open build choice while non-empty; the composition root owns the modal */
+  characterChoices: CharacterId[] = [];
   readonly curses = new Set<CurseId>();
   curseOffer: { artifacts: Artifact[]; curses: Curse[] } | null = null;
   curseTab = false;
@@ -78,6 +81,17 @@ export class World implements Sim {
     this.achievements = achievements;
     this.room = new Room(TEMPLATES[0], 0);
     this.loadRoom(0, false);
+    this.characterChoices = [...CHARACTER_LIST];
+  }
+
+  pickCharacter(id: CharacterId): boolean {
+    if (!this.characterChoices.includes(id)) return false;
+    this.player.character = id;
+    this.player.maxHp = CHARACTERS[id].baseHp;
+    this.player.hp = this.player.maxHp;
+    this.characterChoices = [];
+    this.beginIntro();
+    return true;
   }
 
   nextSwingId(): number {
@@ -157,8 +171,9 @@ export class World implements Sim {
     this.resetRun();
     this.artifacts.clear();
     this.curses.clear();
-    this.player.maxHp = CONFIG.PLAYER.HP;
+    this.player.maxHp = CHARACTERS[this.player.character].baseHp;
     this.rewardedRooms.clear();
+    this.characterChoices = [...CHARACTER_LIST];
     this.loadRoom(0);
   }
 
@@ -166,6 +181,7 @@ export class World implements Sim {
   continueAfterWin(): void {
     this.resetRun();
     this.rewardedRooms.clear();
+    this.characterChoices = [...CHARACTER_LIST];
     this.loadRoom(0);
   }
 
@@ -255,6 +271,12 @@ export class World implements Sim {
   private endRun(): void {
     this.runStats.finalHp = this.player.hp;
     this.achievements.totalGold += this.runStats.totalGoldEarned;
+    if (this.victory) {
+      this.achievements.charactersWon.add(this.player.character);
+      if (this.achievements.charactersWon.size >= CHARACTER_LIST.length) {
+        this.awardAchievements(["soul_collector"]);
+      }
+    }
     this.awardAchievements(checkAchievements(this.runStats, "end", this.achievements.totalGold));
   }
 
@@ -333,7 +355,7 @@ export class World implements Sim {
     const walkingIn = intro && (s.x - this.player.x) * this.introDx + (s.y - this.player.y) * this.introDy > 1.5 &&
       this.introTicks > 0;
     this.player.tick(
-      walkingIn ? { moveX: this.introDx, moveY: this.introDy, aimX: NaN, aimY: NaN, attack: false, dash: false } : input,
+      walkingIn ? { moveX: this.introDx, moveY: this.introDy, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false } : input,
       this,
     );
     if (intro && !walkingIn) {

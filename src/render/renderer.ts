@@ -62,6 +62,9 @@ export class Renderer {
     this.g.imageSmoothingEnabled = false;
     this.o.imageSmoothingEnabled = false;
     this.white.player = tinted(sprites.player.c, P.FLASH);
+    if (sprites.player_swordsman) this.white.player_swordsman = tinted(sprites.player_swordsman.c, P.FLASH);
+    if (sprites.player_mage) this.white.player_mage = tinted(sprites.player_mage.c, P.FLASH);
+    if (sprites.player_tank) this.white.player_tank = tinted(sprites.player_tank.c, P.FLASH);
     for (const key of Object.keys(sprites)) {
       if (key.startsWith("enemy")) {
         this.white[key] = tinted(sprites[key].c, P.FLASH);
@@ -500,9 +503,10 @@ export class Renderer {
     for (const p of this.world.projectiles) {
       const x = Math.round(p.x - ox);
       const y = Math.round(p.y - oy);
-      g.fillStyle = P.VOID;
+      const hot = p.owner === "player";
+      g.fillStyle = hot ? "#3a1c08" : P.VOID;
       g.fillRect(x - 2, y - 2, 4, 4);
-      g.fillStyle = P.PROJ;
+      g.fillStyle = hot ? "#ff963f" : P.PROJ;
       g.fillRect(x - 1, y - 1, 2, 2);
     }
   }
@@ -513,7 +517,8 @@ export class Renderer {
 
     const blinkOut = pl.iframeTicks > 0 && Math.floor(pl.iframeTicks / 3) % 2 === 0;
 
-    const sp = this.sprites.player;
+    const spriteKey = `player_${pl.character}`;
+    const sp = this.sprites[spriteKey] ?? this.sprites.player;
     // Dynamic attack lean
     let leanX = 0;
     let leanY = 0;
@@ -527,7 +532,19 @@ export class Renderer {
     const flashing = (this.flash.get(pl.id) ?? 0) > 0;
 
     g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
-    g.drawImage(flashing ? this.white.player : sp.c, x, y);
+    if (pl.skillActiveTicks > 0) {
+      g.save();
+      g.strokeStyle = "#8ab4ff";
+      g.lineWidth = 1;
+      g.globalAlpha = 0.5 + 0.35 * Math.sin(pl.skillActiveTicks * 0.4);
+      g.beginPath();
+      g.arc(Math.round(pl.x - ox), Math.round(pl.y - 7 - oy), 14, 0, Math.PI * 2);
+      g.stroke();
+      g.restore();
+      g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
+    }
+    const flashImg = (this.white[spriteKey] ?? this.white.player);
+    g.drawImage(flashing ? flashImg : sp.c, x, y);
 
     const f = facingOffsets(pl.state === PLAYER_STATE.DASH ? pl.dashDir : pl.facing);
     g.fillStyle = P.PLAYER_RIM;
