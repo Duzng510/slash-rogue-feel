@@ -1199,6 +1199,34 @@ heading("Characters (H2 build choice)");
   ok("the roster of beaten characters survives storage", parseAchievements(stringifyAchievements(saved)).charactersWon.has("mage"));
   ok("an older save without the roster still parses", parseAchievements('{"earned":[],"best":null,"totalGold":5}').charactersWon.size === 0);
 }
+{
+  const m = sandbox();
+  m.pickCharacter("mage");
+  m.player.comboBonus = true;
+  ok("mage cannot consume combo bonus", !m.player.consumeCombo());
+  const t = sandbox();
+  t.pickCharacter("tank");
+  t.player.comboBonus = true;
+  ok("tank cannot consume combo bonus", !t.player.consumeCombo());
+  const s = sandbox();
+  s.pickCharacter("swordsman");
+  s.player.comboBonus = true;
+  ok("swordsman can consume combo bonus", s.player.consumeCombo());
+
+  const w1 = sandbox();
+  w1.pickCharacter("swordsman");
+  w1.introTicks = 1;
+  w1.tick(intent());
+  const w2 = sandbox();
+  w2.pickCharacter("mage");
+  w2.introTicks = 1;
+  w2.tick(intent());
+  const w3 = sandbox();
+  w3.pickCharacter("tank");
+  w3.introTicks = 1;
+  w3.tick(intent());
+  ok("each character has a distinct intro line", w1.introLine.length > 0 && w1.introLine !== w2.introLine && w2.introLine !== w3.introLine);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;

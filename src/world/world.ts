@@ -27,6 +27,12 @@ export type ShopOffer = {
   artifact?: Artifact;
 };
 
+export const INTRO_LINES: Record<CharacterId, string> = {
+  swordsman: "Một nhát là đủ.",
+  mage: "Lửa sẽ nuốt tất cả.",
+  tank: "Đứng yên, ta lo.",
+};
+
 export class World implements Sim {
   readonly queue = new EventQueue();
   readonly particles = new ParticlePool();
@@ -361,7 +367,7 @@ export class World implements Sim {
     if (intro && !walkingIn) {
       this.introTicks = 0;
       this.player.reset(this.room.start.x, this.room.start.y);
-      this.introLine = "Let's fight!";
+      this.introLine = INTRO_LINES[this.player.character];
       this.introLineTicks = 180;
     }
     if (!intro) for (const e of this.enemies) e.tick(this, this.grid);

@@ -73,7 +73,7 @@ export class Player implements Unit {
   comboHits = 0;
   comboWindow = 0;
   killsSinceHeal = 0;
-  private comboBonus = false;
+  comboBonus = false;
   private queuedAttackTicks = 0;
 
   reset(x: number, y: number): void {
@@ -127,12 +127,15 @@ export class Player implements Unit {
   onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean {
     const p = CONFIG.PLAYER;
     if (this.character === "tank" && this.skillActiveTicks > 0) {
-      artifactText(src.queue, this.x, this.y - 14, "KHIÊN", "#8ab4ff");
+      artifactText(src.queue, this.x, this.y - 14, "PHẢN ĐÒN", "#8ab4ff");
       sfx(src.queue, "reprisal_ready", 0.6, 1.2);
-      const back = { side: "player", combo: 0, dir: sw.dir, ox: this.x, oy: this.y, reach: 0, deg: 0, dmg: 2, knockback: 30 } as unknown as Swing;
       for (const e of src.enemies) {
         if (e.dead || !e.canBeHit()) continue;
         if (dist(e.x, e.y, this.x, this.y) > 20) continue;
+        const pushDir = Math.hypot(e.x - this.x, e.y - this.y) > 0.1
+          ? Math.atan2(e.y - this.y, e.x - this.x)
+          : sw.dir + Math.PI;
+        const back = { side: "player", combo: 0, dir: pushDir, ox: this.x, oy: this.y, reach: 0, deg: 0, dmg: 2, knockback: 30 } as unknown as Swing;
         const killed = e.onHit(back, e.x, e.y, src);
         hitFeedback(src, e, back, e.x, e.y, killed, false);
       }
@@ -383,6 +386,7 @@ export class Player implements Unit {
   }
 
   consumeCombo(): boolean {
+    if (this.character !== "swordsman") return false;
     if (!this.comboBonus) return false;
     this.comboBonus = false;
     return true;

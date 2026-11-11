@@ -1,0 +1,8 @@
+{
+  "name": "slash-rogue-feel",
+  "description": "Crisp top-down pixel art slash roguelike featuring responsive combat, elemental artifacts, and fast-paced gameplay.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

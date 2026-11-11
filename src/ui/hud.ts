@@ -2,7 +2,7 @@ import { CONFIG } from "../config.ts";
 import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
 import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
-import { CHARACTERS } from "../systems/characters.ts";
+import { CHARACTERS, COMBO_HITS } from "../systems/characters.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
 
 const P = CONFIG.PALETTE;
@@ -180,6 +180,14 @@ export class Hud {
       o.font = "bold 9px sans-serif";
       o.fillStyle = "#ffffff";
       o.fillText(c.name, cardX + 21, cardY + 6);
+
+      if (this.world.achievements.charactersWon.has(id)) {
+        o.fillStyle = "#ffd166";
+        o.font = "bold 5.5px sans-serif";
+        o.textAlign = "right";
+        o.fillText("✓ ĐÃ PHÁ ĐẢO", cardX + cardW - 4, cardY + 6);
+        o.textAlign = "left";
+      }
 
       // --- Pedestal & Summoning Circle ---
       const pedY = cardY + 42;
@@ -491,6 +499,22 @@ export class Hud {
     o.fillStyle = P.TEXT;
     o.fillText(cdef.name, Math.round((badgeX + 8) * scale), Math.round(6 * scale));
     o.globalAlpha = 1;
+
+    if (w.player.character === "swordsman") {
+      const cx = Math.round(badgeX * scale);
+      const cy = Math.round(14 * scale);
+      if (w.player.comboHits > 0 || w.player.comboBonus) {
+        for (let i = 0; i < COMBO_HITS; i++) {
+          o.fillStyle = (w.player.comboBonus || i < w.player.comboHits) ? "#ffd166" : "#2b3242";
+          o.fillRect(cx + i * 3 * scale, cy, Math.round(2 * scale), Math.round(2 * scale));
+        }
+      }
+      if (w.player.comboBonus) {
+        o.fillStyle = "#ffd166";
+        o.font = `bold ${Math.round(6 * scale)}px sans-serif`;
+        o.fillText("+50%", cx + 17 * scale, cy - Math.round(1 * scale));
+      }
+    }
 
     /** vertical skill gauge, top-right (the bottom-left corner belongs to the touch stick) */
     const total = cdef.skillCd;
