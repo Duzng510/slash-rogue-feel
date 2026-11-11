@@ -57,3 +57,5 @@ coverage/
 .nyc_output/
 cdp2
 cdp3
+
+docs

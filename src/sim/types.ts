@@ -97,6 +97,8 @@ export type Sim = {
   roomTotal: number;
   bannerTicks: number;
   bannerText: string;
+  introLine: string;
+  introLineTicks: number;
   victory: boolean;
   playerDeadTicks: number;
   runStats: RunStats;

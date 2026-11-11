@@ -49,6 +49,11 @@ const PALETTE = {
   SPARK: "#ffffff",
   GHOST: "#2f6fb5",
   SLASH: "#bfe8ff",
+  SLASH_EDGE: "#ffffff",
+  SLASH_CYAN: "#00f0ff",
+  SLASH_CYAN_DEEP: "#1060c0",
+  SLASH_GOLD: "#ffe066",
+  SLASH_ORANGE_DEEP: "#ff5522",
   HP_FULL: "#4da3ff",
   HP_EMPTY: "#232838",
   TARGET_RIM: "#d8f0ff",
@@ -519,7 +524,7 @@ export const CONFIG = {
     particles: 1,
     timescale: 1,
     hitStopScale: 1,
-    dmgNumbers: 0,
+    dmgNumbers: 1,
   },
 
   LAWS: {

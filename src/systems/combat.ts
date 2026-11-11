@@ -63,7 +63,7 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
     reach: a.REACH * scale,
     deg: Math.min(170, a.ARC_DEG * (second ? a.COMBO2_ARC_SCALE : 1)),
     dmg:
-      a.DMG * (src.artifacts.has("heavy") ? 1.5 : 1) * berserk * (src.artifacts.has("glasscannon") ? 2 : 1) *
+      a.DMG * (src.artifacts.has("heavy") ? 1.3 : 1) * berserk * (src.artifacts.has("glasscannon") ? 1.75 : 1) *
       (src.curses.has("glass") ? CONFIG.CURSES.DEALT_MULT : 1) +
       (src.player.reprisalTicks > 0 ? 1 : 0),
     knockback: a.KNOCKBACK * (src.player.impulseTicks > 0 ? 2 : 1),
@@ -127,7 +127,7 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
 
       sw.seen.add(target.id);
       const exec = sw.side === "player" && target.side === "enemy" && src.artifacts.has("executioner") &&
-        (target as Enemy).hp < (target as Enemy).maxHp * 0.3;
+        (target as Enemy).hp < (target as Enemy).maxHp * 0.2;
       const killed = target.onHit(sw, cx, cy, src);
       hitFeedback(src, target, sw, cx, cy, killed, !exec);
       if (target.side === "player" && src.artifacts.has("thorns") && !attacker.dead) {
@@ -210,6 +210,9 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     src.runStats.damageDealt += sw.dmg;
     const dir = sw.dir;
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
+    if (sw.side === "player") {
+      src.queue.push({ t: "slice", x: cx, y: cy, dir: dir, len: 14 });
+    }
     src.particles.burstBlood(cx, cy, dir, killed ? f.DEATH_SHARDS : f.BLOOD, src.rng);
     src.particles.burstSpark(cx, cy, f.SPARK, src.rng);
     if (killed) src.particles.burstShards(cx, cy, f.DEATH_SHARDS, CONFIG.PALETTE.ENEMY_SHADE, src.rng);
@@ -218,7 +221,7 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     const heavy = !killed && sw.side === "player" && src.artifacts.has("heavy");
     const sname = killed ? "kill" : heavy ? "slash_hit_heavy" : "slash_hit";
     sfx(src.queue, sname, killed ? 1.1 : 1, (killed ? 0.82 : heavy ? 0.85 : 1) * (target.killPitch ?? 1));
-    if (stop) requestHitStop(src, (killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL) * (src.artifacts.has("heavy") ? 2 : 1));
+    if (stop) requestHitStop(src, (killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL) * (src.artifacts.has("heavy") ? 1.5 : 1));
   } else {
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
     requestHitStop(src, CONFIG.FEEL.HIT_STOP_PLAYER_HURT);

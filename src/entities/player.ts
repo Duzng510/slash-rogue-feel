@@ -114,7 +114,7 @@ export class Player implements Unit {
     const p = CONFIG.PLAYER;
     if (src.artifacts.has("shield") && this.shieldReady) {
       this.shieldReady = false;
-      this.shieldCd = 300;
+      this.shieldCd = 420;
       knockback(this, sw.dir, p.HURT_KNOCKBACK);
       artifactText(src.queue, this.x, this.y - 14, "KHIÊN", "#8ab4ff");
       sfx(src.queue, "reprisal_ready", 0.8, 1.3);

@@ -315,7 +315,7 @@ test("artifact melee modifiers apply once without changing the base config", () 
   w.artifacts.add("heavy");
   w.artifacts.add("pursuit");
   const enemy = makeEnemy(175, 103);
-  enemy.hp = 1.5;
+  enemy.hp = 1.2;
   w.enemies = [enemy];
   w.syncUnits();
   w.player.dashCd = 40;
@@ -324,7 +324,7 @@ test("artifact melee modifiers apply once without changing the base config", () 
   hits(w);
   assert.equal(enemy.hp, 0);
   assert.equal(w.player.dashCd, 22);
-  assert.equal(w.hitStopTicks, CONFIG.FEEL.HIT_STOP_KILL * 2);
+  assert.equal(w.hitStopTicks, Math.round(CONFIG.FEEL.HIT_STOP_KILL * 1.5));
   assert.equal(playerSwingInit(sandbox(), 1, 0).dmg, 1);
   w.artifacts.add("desperate");
   for (const hp of [2, 3]) {
@@ -477,7 +477,7 @@ test("missing or truncated start selects a walkable tile; solid rooms reject", (
 const jab = (w: World, dmg: number, side: "player" | "enemy" = "player") =>
   createSwing(w, { side, combo: 1, dir: 0, ox: 0, oy: 0, reach: 20, deg: 90, dmg, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
 
-test("berserker scales with lost HP and glasscannon doubles damage", () => {
+test("berserker scales with lost HP and glasscannon multiplies damage by 1.75", () => {
   const w = sandbox();
   const base = playerSwingInit(w, 1, 0).dmg;
   w.artifacts.add("berserker");
@@ -486,7 +486,7 @@ test("berserker scales with lost HP and glasscannon doubles damage", () => {
   const low = base * (1 + (CONFIG.PLAYER.HP - 1) * 0.1);
   assert.equal(playerSwingInit(w, 1, 0).dmg, low);
   w.artifacts.add("glasscannon");
-  assert.equal(playerSwingInit(w, 1, 0).dmg, low * 2);
+  assert.equal(playerSwingInit(w, 1, 0).dmg, low * 1.75);
 });
 
 test("status priority keeps water over poison and lightning over freeze", () => {
@@ -565,7 +565,7 @@ test("detonate blasts 3 dmg and burn within 50px when a burning enemy dies", () 
   assert.equal(c.hp, c.maxHp);
 });
 
-test("corrode extends wet to 5s and amplifies damage taken by 50%", () => {
+test("corrode extends wet to 5s and amplifies direct slash damage by 25%", () => {
   const w = sandbox();
   w.artifacts.add("corrode");
   const e = makeEnemy(220, 100, "boss");
@@ -574,7 +574,7 @@ test("corrode extends wet to 5s and amplifies damage taken by 50%", () => {
   e.applyStatus("wet", w);
   assert.equal(e.wetTicks, 300);
   e.onHit(jab(w, 2), e.x, e.y, w);
-  assert.equal(e.hp, 21);
+  assert.equal(e.hp, 21.5);
 });
 
 test("vampire heals 1 HP every 5 kills, capped at max", () => {
@@ -591,11 +591,11 @@ test("vampire heals 1 HP every 5 kills, capped at max", () => {
   assert.equal(w.player.hp, 3);
 });
 
-test("executioner instantly kills below 30% HP without hit-stop", () => {
+test("executioner instantly kills below 20% HP without hit-stop", () => {
   const w = sandbox();
   w.artifacts.add("executioner");
   const e = makeEnemy(175, 103, "boss");
-  e.hp = 7;
+  e.hp = 4;
   w.enemies = [e];
   w.syncUnits();
   const sw = createSwing(w, playerSwingInit(w, 1, 0));
@@ -641,7 +641,7 @@ test("chain lightning jumps once to the nearest enemy within 60px", () => {
   assert.equal(c.hp, c.maxHp);
 });
 
-test("shield blocks one hit without damage and recharges after 5s", () => {
+test("shield blocks one hit without damage and recharges after 7s", () => {
   const w = sandbox();
   w.artifacts.add("shield");
   const hp = w.player.hp;
@@ -649,7 +649,7 @@ test("shield blocks one hit without damage and recharges after 5s", () => {
   assert.deepEqual([w.player.hp, w.player.state], [hp, "idle"]);
   w.player.onHit(jab(w, 1, "enemy"), w.player.x, w.player.y, w);
   assert.equal(w.player.hp, hp - 1);
-  for (let i = 0; i < 300; i++) w.player.tick(idle, w);
+  for (let i = 0; i < 420; i++) w.player.tick(idle, w);
   assert.ok(w.player.shieldReady);
 });
 
@@ -667,11 +667,11 @@ test("phantom dash teleports 60px without i-frames and cuts through enemies", ()
   assert.equal(e.hp, e.maxHp - 2);
 });
 
-test("glasscannon clamps current HP to 2 when picked", () => {
+test("glasscannon clamps current HP to 3 when picked", () => {
   const w = sandbox();
   w.artifactChoices = ARTIFACTS.filter(a => a.id === "glasscannon");
   assert.ok(w.chooseArtifact("glasscannon"));
-  assert.equal(w.player.hp, 2);
+  assert.equal(w.player.hp, 3);
 });
 
 test("healer pulses 1 HP to nearby allies every 3s, never itself or far allies", () => {

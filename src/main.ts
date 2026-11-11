@@ -223,6 +223,7 @@ for (const type of ["pointerup", "pointercancel"] as const) {
         resetInput();
         if (act === "restart") world.restart();
         else world.continueAfterWin();
+        world.beginIntro();
       }
       return;
     }
@@ -404,7 +405,9 @@ if (autoplay || qs.get("manual") === "1") {
         immersiveNote = r.reason;
         onViewport();
       });
-    startGame();
+    startScreen.classList.add("fading");
+    world.beginIntro();
+    setTimeout(startGame, 380);
   }, { once: true });
 }
 

@@ -162,7 +162,8 @@ export class Enemy implements Unit {
       dmg += 2;
       if (playerHit) artifactText(src.queue, this.x, this.y - 16, "PHÁ BĂNG", "#a8e8ff");
     }
-    if (playerHit && src.artifacts.has("executioner") && this.hp < this.maxHp * 0.3) dmg = this.hp;
+    if (playerHit && this.wetTicks > 0 && src.artifacts.has("corrode")) dmg *= 1.25;
+    if (playerHit && src.artifacts.has("executioner") && this.hp < this.maxHp * 0.2) dmg = this.hp;
     this.takeDamage(dmg, src, playerHit);
     if (crit) {
       src.runStats.critHits++;
@@ -179,7 +180,6 @@ export class Enemy implements Unit {
   }
 
   private takeDamage(dmg: number, src: Sim, playerOwned = true): void {
-    if (this.wetTicks > 0 && src.artifacts.has("corrode")) dmg *= 1.5;
     this.hp = Math.max(0, this.hp - dmg);
     if (this.hp === 0) {
       this.die();
@@ -236,7 +236,7 @@ export class Enemy implements Unit {
       src.runStats.comboSeen = true;
       this.takeDamage(2, src);
       src.particles.burstSpark(this.x, this.y - 5, 6, src.rng);
-      src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 2 });
+      if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 2 });
     } else if (status === "burn") {
       if (this.burnTicks === 0) this.burnPulse = 60;
       this.burnTicks = 120;

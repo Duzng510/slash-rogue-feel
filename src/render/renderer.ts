@@ -10,7 +10,8 @@ import type { World } from "../world/world.ts";
 
 const P = CONFIG.PALETTE;
 
-type Arc = { x: number; y: number; dir: number; reach: number; deg: number; left: number; total: number };
+type Arc = { x: number; y: number; dir: number; reach: number; deg: number; combo: number; left: number; total: number };
+type Slice = { x: number; y: number; dir: number; len: number; left: number; total: number };
 type FloatText = { x: number; y: number; text: string; color: string; left: number; total: number };
 
 export type DrawFlags = { boxes: boolean; fps: boolean; hitStop: boolean };
@@ -38,6 +39,7 @@ export class Renderer {
   origin = { x: 0, y: 0 };
 
   private arcs: Arc[] = [];
+  private slices: Slice[] = [];
   private beams: { x: number; y: number; dir: number; len: number; left: number; total: number }[] = [];
   private texts: FloatText[] = [];
   private flash = new Map<number, number>();
@@ -111,12 +113,17 @@ export class Renderer {
     for (const e of events) {
       if (e.t === "shake") this.cam.addShake(e.mag, e.dir);
       else if (e.t === "flash") this.flash.set(e.ent, e.ticks);
-      else if (e.t === "slashArc") this.arcs.push({ x: e.x, y: e.y, dir: e.dir, reach: e.reach, deg: e.deg, left: e.ticks, total: e.ticks });
+      else if (e.t === "slice") this.slices.push({ x: e.x, y: e.y, dir: e.dir, len: e.len, left: 6, total: 6 });
+      else if (e.t === "slashArc") this.arcs.push({ x: e.x, y: e.y, dir: e.dir, reach: e.reach, deg: e.deg, combo: e.combo, left: e.ticks, total: e.ticks });
       else if (e.t === "hurtVignette") this.vignette = Math.min(CONFIG.READABILITY.VIGNETTE_MAX, e.strength);
       else if (e.t === "beam") this.beams.push({ x: e.x, y: e.y, dir: e.dir, len: e.len, left: 20, total: 20 });
       else if (e.t === "artifactText") {
         if (this.texts.length >= 24) this.texts.shift();
         this.texts.push({ x: e.x, y: e.y, text: e.text, color: e.color, left: 48, total: 48 });
+      }
+      else if (e.t === "dmgNumber") {
+        if (this.texts.length >= 24) this.texts.shift();
+        this.texts.push({ x: e.x, y: e.y, text: String(Math.round(e.value)), color: "#ffffff", left: 36, total: 36 });
       }
     }
   }
@@ -125,6 +132,8 @@ export class Renderer {
     const ticks = dtReal * CONFIG.TIME.TICK_HZ;
     for (const a of this.arcs) a.left -= ticks;
     this.arcs = this.arcs.filter((a) => a.left > 0);
+    for (const s of this.slices) s.left -= ticks;
+    this.slices = this.slices.filter((s) => s.left > 0);
     for (const b of this.beams) b.left -= ticks;
     this.beams = this.beams.filter((b) => b.left > 0);
     for (const ft of this.texts) {
@@ -166,12 +175,30 @@ export class Renderer {
     this.drawShadows(g, ox, oy);
     this.drawArcs(g, ox, oy);
     this.drawEnemies(g, ox, oy);
+    this.drawSlices(g, ox, oy);
     this.drawProjectiles(g, ox, oy);
     this.drawBeams(g, ox, oy);
     this.drawPlayer(g, ox, oy);
     this.drawParticles(g, ox, oy);
     this.drawTexts(g, ox, oy);
+    this.drawAmbient(g, ox, oy);
     this.drawVignette(g, flags);
+  }
+
+  private drawAmbient(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const pl = this.world.player;
+    const px = Math.round(pl.x - ox);
+    const py = Math.round(pl.y - 7 - oy);
+    const iw = CONFIG.WORLD.INTERNAL_W;
+    const ih = CONFIG.WORLD.INTERNAL_H;
+
+    // Soft atmospheric vignette darkening screen corners
+    const grad = g.createRadialGradient(px, py, 45, px, py, 175);
+    grad.addColorStop(0, "rgba(5, 7, 11, 0)");
+    grad.addColorStop(0.65, "rgba(5, 7, 11, 0.22)");
+    grad.addColorStop(1, "rgba(5, 7, 11, 0.65)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, iw, ih);
   }
 
   private drawTiles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
@@ -211,10 +238,74 @@ export class Renderer {
     g.globalCompositeOperation = "lighter";
     for (const a of this.arcs) {
       const t = Math.max(0, a.left / Math.max(1, a.total));
+      const cx = Math.round(a.x - ox);
+      const cy = Math.round(a.y - oy);
+      const r = a.reach * (0.75 + 0.25 * t);
+      const half = ((a.deg * Math.PI) / 180) * 0.5;
+
+      const isCombo2 = a.combo === 2;
+      const baseColor = isCombo2 ? P.SLASH_GOLD : P.SLASH_CYAN;
+      const deepColor = isCombo2 ? P.SLASH_ORANGE_DEEP : P.SLASH_CYAN_DEEP;
+
+      // Layer 1: Body glow gradient
       g.globalAlpha = rd.SLASH_ALPHA * (0.35 + 0.65 * t);
-      g.fillStyle = P.SLASH;
-      this.wedge(g, Math.round(a.x - ox), Math.round(a.y - oy), a.dir, a.reach * (0.7 + 0.3 * t), a.deg, 0.4);
+      const grad = g.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
+      grad.addColorStop(0, deepColor);
+      grad.addColorStop(0.7, baseColor);
+      grad.addColorStop(1, P.SLASH_EDGE);
+      g.fillStyle = grad;
+      this.wedge(g, cx, cy, a.dir, r, a.deg, 0.45);
       g.fill();
+
+      // Layer 2: Razor edge rim (sharp outer perimeter)
+      g.globalAlpha = rd.SLASH_ALPHA * (0.6 + 0.4 * t);
+      g.strokeStyle = P.SLASH_EDGE;
+      g.lineWidth = 1.25;
+      g.beginPath();
+      g.arc(cx, cy, r, a.dir - half, a.dir + half);
+      g.stroke();
+
+      // Layer 3: Razor cutting tip spark
+      const tipX = cx + Math.cos(a.dir + half) * r;
+      const tipY = cy + Math.sin(a.dir + half) * r;
+      g.fillStyle = P.SLASH_EDGE;
+      g.fillRect(tipX - 1, tipY - 1, 2, 2);
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = "source-over";
+  }
+
+  private drawSlices(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.slices.length === 0) return;
+    g.globalCompositeOperation = "lighter";
+    for (const s of this.slices) {
+      const prog = s.left / s.total;
+      const cx = Math.round(s.x - ox);
+      const cy = Math.round(s.y - oy);
+      const angle = s.dir + Math.PI * 0.5; // perpendicular slice cut line
+      const half = s.len * 0.5;
+      const x0 = cx - Math.cos(angle) * half;
+      const y0 = cy - Math.sin(angle) * half;
+      const x1 = cx + Math.cos(angle) * half;
+      const y1 = cy + Math.sin(angle) * half;
+
+      // Glow border
+      g.globalAlpha = prog * 0.8;
+      g.strokeStyle = P.SLASH_CYAN;
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
+
+      // Sharp white core
+      g.globalAlpha = prog;
+      g.strokeStyle = P.SLASH_EDGE;
+      g.lineWidth = 1;
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
     }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
@@ -423,8 +514,16 @@ export class Renderer {
     const blinkOut = pl.iframeTicks > 0 && Math.floor(pl.iframeTicks / 3) % 2 === 0;
 
     const sp = this.sprites.player;
-    const x = Math.round(pl.x - sp.ax - ox);
-    const y = Math.round(pl.y - sp.ay - oy);
+    // Dynamic attack lean
+    let leanX = 0;
+    let leanY = 0;
+    if (pl.state === PLAYER_STATE.ATTACK) {
+      leanX = Math.round(Math.cos(pl.facing) * 1.5);
+      leanY = Math.round(Math.sin(pl.facing) * 1.5);
+    }
+
+    const x = Math.round(pl.x - sp.ax - ox) + leanX;
+    const y = Math.round(pl.y - sp.ay - oy) + leanY;
     const flashing = (this.flash.get(pl.id) ?? 0) > 0;
 
     g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;

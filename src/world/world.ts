@@ -41,6 +41,12 @@ export class World implements Sim {
   readonly roomTotal = TEMPLATES.length;
   bannerTicks = 0;
   bannerText = "";
+  /** run-start walk-in; >0 while the hero enters and enemies hold */
+  introTicks = 0;
+  introLine = "";
+  introLineTicks = 0;
+  private introDx = 1;
+  private introDy = 0;
   victory = false;
   playerDeadTicks = 0;
   tickCount = 0;
@@ -125,6 +131,15 @@ export class World implements Sim {
     this.bannerTicks = 96;
   }
 
+  /** start the entrance: hero walks in through the gap in the left wall, then says their line */
+  beginIntro(): void {
+    this.introTicks = 120;
+    this.introDx = 1;
+    this.introDy = 0;
+    this.player.x = CONFIG.WORLD.TILE / 2;
+    this.player.y = this.room.start.y;
+  }
+
   /** zero per-run stats and achievement-delta bookkeeping, keeping object identities alive */
   private resetRun(): void {
     resetStats(this.runStats);
@@ -170,8 +185,8 @@ export class World implements Sim {
     if (!this.artifactChoices.some(b => b.id === id) || this.artifacts.has(id)) return false;
     this.artifacts.add(id);
     if (id === "glasscannon") {
-      this.player.maxHp = 2;
-      this.player.hp = Math.min(this.player.hp, 2);
+      this.player.maxHp = 3;
+      this.player.hp = Math.min(this.player.hp, 3);
     }
     this.rewardedRooms.add(this.roomIndex);
     this.runStats.artifactsTaken++;
@@ -192,8 +207,8 @@ export class World implements Sim {
     if (offer.kind === "artifact" && offer.artifact !== undefined) {
       this.artifacts.add(offer.artifact.id);
       if (offer.artifact.id === "glasscannon") {
-        this.player.maxHp = 2;
-        this.player.hp = Math.min(this.player.hp, 2);
+        this.player.maxHp = 3;
+        this.player.hp = Math.min(this.player.hp, 3);
       }
       this.runStats.artifactsTaken++;
     } else if (offer.kind === "heal") {
@@ -256,8 +271,8 @@ export class World implements Sim {
     for (const a of offer.artifacts) {
       this.artifacts.add(a.id);
       if (a.id === "glasscannon") {
-        this.player.maxHp = 2;
-        this.player.hp = Math.min(this.player.hp, 2);
+        this.player.maxHp = 3;
+        this.player.hp = Math.min(this.player.hp, 3);
       }
     }
     this.runStats.artifactsTaken += offer.artifacts.length;
@@ -304,6 +319,7 @@ export class World implements Sim {
     if (this.pendingEnd !== null) return;
     this.tickCount++;
     if (this.bannerTicks > 0) this.bannerTicks--;
+    if (this.introLineTicks > 0) this.introLineTicks--;
 
     if (this.hitStopTicks > 0) {
       this.hitStopTicks--;
@@ -311,8 +327,22 @@ export class World implements Sim {
     }
 
     this.runStats.ticksElapsed++;
-    this.player.tick(input, this);
-    for (const e of this.enemies) e.tick(this, this.grid);
+    const intro = this.introTicks > 0;
+    if (intro) this.introTicks--;
+    const s = this.room.start;
+    const walkingIn = intro && (s.x - this.player.x) * this.introDx + (s.y - this.player.y) * this.introDy > 1.5 &&
+      this.introTicks > 0;
+    this.player.tick(
+      walkingIn ? { moveX: this.introDx, moveY: this.introDy, aimX: NaN, aimY: NaN, attack: false, dash: false } : input,
+      this,
+    );
+    if (intro && !walkingIn) {
+      this.introTicks = 0;
+      this.player.reset(this.room.start.x, this.room.start.y);
+      this.introLine = "Let's fight!";
+      this.introLineTicks = 180;
+    }
+    if (!intro) for (const e of this.enemies) e.tick(this, this.grid);
     this.enemies = this.enemies.filter((e) => !e.removed);
     this.syncUnits();
     this.grid.clear();

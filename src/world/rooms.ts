@@ -52,7 +52,7 @@ export const TEMPLATES: Template[] = [
       "....E.........E.........",
       FLOOR_ROW,
       "......OO................",
-      "S.......................",
+      ".....S................",
       "..........E.............",
       FLOOR_ROW,
       "....O..........O........",
@@ -319,6 +319,7 @@ export class Room {
       const idx = ty * this.w + (this.w - 1);
       this.tiles[idx] = TILE.DOOR;
       this.doorTiles.push(idx);
+      this.tiles[ty * this.w] = TILE.FLOOR;
     }
   }
 

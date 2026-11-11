@@ -39,3 +39,4 @@
    - Multi-tier walls: Light top rim (`WALL_TOP`), shaded stone brick face, and dark bottom drop shadow onto the floor.
 2. **Ambient & Torchlight Glow**:
    - Soft radial light centered on the player and glowing weapon slashes to pop against the dark dungeon void.
+

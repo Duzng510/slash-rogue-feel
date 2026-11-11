@@ -29,6 +29,7 @@ export type VisualEvent =
   | { t: "dmgNumber"; x: number; y: number; value: number }
   | { t: "roomBanner"; text: string }
   | { t: "artifactText"; x: number; y: number; text: string; color: string }
+  | { t: "slice"; x: number; y: number; dir: number; len: number }
   | { t: "beam"; x: number; y: number; dir: number; len: number }
   | { t: "achievement"; id: AchievementId };
 

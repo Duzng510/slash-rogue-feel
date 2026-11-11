@@ -23,32 +23,45 @@ export function buildSprites(): Record<string, Sprite> {
   const S: Record<string, Sprite> = {};
   const T = CONFIG.WORLD.TILE;
 
-  S.player = bake(12, 14, 6, 13, (g) => {
-    rect(g, 2, 0, 8, 3, P.VOID);
-    rect(g, 2, 1, 8, 9, P.PLAYER_BODY);
-    rect(g, 3, 0, 6, 2, P.PLAYER_RIM);
-    rect(g, 1, 3, 1, 6, P.VOID);
-    rect(g, 10, 3, 1, 6, P.VOID);
-    rect(g, 2, 10, 3, 3, P.VOID);
-    rect(g, 7, 10, 3, 3, P.VOID);
-    rect(g, 3, 10, 2, 2, P.PLAYER_BODY);
-    rect(g, 7, 10, 2, 2, P.PLAYER_BODY);
-    rect(g, 4, 4, 4, 2, P.VOID);
-    rect(g, 5, 5, 3, 1, P.PLAYER_RIM);
+  S.player = bake(14, 15, 7, 14, (g) => {
+    // Dark outline / cape undertone
+    rect(g, 2, 0, 10, 3, P.VOID);
+    rect(g, 2, 1, 10, 10, P.PLAYER_BODY);
+    // Helmet rim / cowl highlight
+    rect(g, 3, 0, 8, 2, P.PLAYER_RIM);
+    // Side contour
+    rect(g, 1, 3, 1, 8, P.VOID);
+    rect(g, 12, 3, 1, 8, P.VOID);
+    // Legs & feet boots
+    rect(g, 3, 11, 3, 3, P.VOID);
+    rect(g, 8, 11, 3, 3, P.VOID);
+    rect(g, 4, 11, 2, 2, P.PLAYER_BODY);
+    rect(g, 8, 11, 2, 2, P.PLAYER_BODY);
+    // Visor slit with high-contrast glowing slit
+    rect(g, 4, 4, 6, 2, P.VOID);
+    rect(g, 5, 4, 4, 1, P.SLASH_CYAN);
+    rect(g, 6, 5, 2, 1, P.SLASH_EDGE);
+    // Belt / emblem
+    rect(g, 5, 9, 4, 1, P.PLAYER_RIM);
   });
 
-  S.enemy = bake(11, 12, 5, 11, (g) => {
+  S.enemy = bake(12, 13, 6, 12, (g) => {
     const body = enemyDef("chaser").BODY_COLOR;
-    rect(g, 1, 0, 2, 2, P.ENEMY_SHADE);
-    rect(g, 8, 0, 2, 2, P.ENEMY_SHADE);
-    rect(g, 1, 2, 9, 8, body);
-    rect(g, 0, 3, 1, 6, P.VOID);
-    rect(g, 10, 3, 1, 6, P.VOID);
-    rect(g, 1, 9, 9, 2, P.ENEMY_SHADE);
-    rect(g, 2, 11, 2, 1, P.VOID);
-    rect(g, 7, 11, 2, 1, P.VOID);
+    // Horns / spikes
+    rect(g, 1, 0, 2, 3, P.ENEMY_SHADE);
+    rect(g, 9, 0, 2, 3, P.ENEMY_SHADE);
+    rect(g, 2, 2, 8, 8, body);
+    rect(g, 1, 3, 1, 7, P.VOID);
+    rect(g, 10, 3, 1, 7, P.VOID);
+    rect(g, 2, 9, 8, 2, P.ENEMY_SHADE);
+    // Claws / feet
+    rect(g, 2, 11, 2, 2, P.VOID);
+    rect(g, 8, 11, 2, 2, P.VOID);
+    // Glowing sharp eyes
     rect(g, 3, 4, 2, 2, P.ENEMY_EYE);
-    rect(g, 7, 4, 1, 2, P.ENEMY_EYE);
+    rect(g, 7, 4, 2, 2, P.ENEMY_EYE);
+    rect(g, 4, 4, 1, 1, "#ffffff");
+    rect(g, 8, 4, 1, 1, "#ffffff");
   });
 
   const charger = enemyDef("charger");
@@ -226,27 +239,47 @@ export function buildSprites(): Record<string, Sprite> {
 
   S.floor = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 0, T, T, P.FLOOR);
-    g.globalAlpha = 0.35;
-    rect(g, 2, 11, 1, 1, P.FLOOR_ACCENT);
-    rect(g, 9, 4, 1, 1, P.FLOOR_ACCENT);
-    rect(g, 13, 13, 1, 1, P.FLOOR_ACCENT);
+    // Beveled stone tile borders
+    rect(g, 0, 0, T, 1, "#181b22");
+    rect(g, 0, 0, 1, T, "#181b22");
+    rect(g, 0, T - 1, T, 1, "#0d0f14");
+    rect(g, T - 1, 0, 1, T, "#0d0f14");
+    // Subtle dither / stone texture
+    g.globalAlpha = 0.45;
+    rect(g, 3, 4, 2, 1, P.FLOOR_ACCENT);
+    rect(g, 9, 8, 3, 1, P.FLOOR_ACCENT);
+    rect(g, 12, 12, 2, 2, P.FLOOR_ACCENT);
+    rect(g, 5, 11, 1, 2, P.FLOOR_ACCENT);
   });
 
   S.accent = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 0, T, T, P.FLOOR);
+    // Raised carved floor stone
     rect(g, 0, 0, T, 1, P.FLOOR_ACCENT);
-    rect(g, 0, 1, 1, T - 1, P.FLOOR_ACCENT);
-    g.globalAlpha = 0.5;
-    rect(g, 5, 7, 2, 2, P.FLOOR_ACCENT);
+    rect(g, 0, 0, 1, T, P.FLOOR_ACCENT);
+    rect(g, 0, T - 1, T, 1, P.VOID);
+    rect(g, T - 1, 0, 1, T, P.VOID);
+    g.globalAlpha = 0.6;
+    rect(g, 4, 4, 8, 8, P.FLOOR_ACCENT);
+    rect(g, 6, 6, 4, 4, P.FLOOR);
   });
 
   S.wall = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 0, T, T, P.WALL);
+    // Wall top rim
     rect(g, 0, 0, T, 3, P.WALL_TOP);
+    rect(g, 0, 0, T, 1, "#4d5975");
+    // Mid drop line
     rect(g, 0, 3, T, 1, P.VOID);
-    g.globalAlpha = 0.5;
-    rect(g, 3, 8, 2, 3, P.VOID);
-    rect(g, 11, 10, 2, 2, P.VOID);
+    // Stone brick patterns
+    g.globalAlpha = 0.55;
+    rect(g, 0, 8, T, 1, P.VOID);
+    rect(g, 7, 4, 1, 4, P.VOID);
+    rect(g, 3, 9, 1, 7, P.VOID);
+    rect(g, 12, 9, 1, 7, P.VOID);
+    // Cast shadow at the base
+    g.globalAlpha = 0.8;
+    rect(g, 0, T - 2, T, 2, P.VOID);
   });
 
   S.crate = bake(T, T, 0, 0, (g) => {

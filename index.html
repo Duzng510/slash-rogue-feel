@@ -17,17 +17,66 @@
         overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none;
       }
       #stage { position: fixed; inset: 0; display: grid; place-items: center; }
-      #start-screen { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: var(--bg); }
-      #start-screen[hidden] { display: none; }
-      #btn-start {
-        padding: 24px 40px; border: 0; background: transparent; color: var(--ink);
-        font: bold clamp(28px, 6vw, 48px)/1.2 ui-monospace, Consolas, monospace;
-        letter-spacing: 0.18em; cursor: pointer; touch-action: manipulation;
-        text-shadow: 0 0 20px rgba(77, 163, 255, 0.35);
+      #start-screen {
+        position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; background: radial-gradient(circle at center, #121722 0%, #06070a 100%);
+        padding: 24px; text-align: center; transition: opacity 0.38s ease;
       }
-      #btn-start:hover, #btn-start:focus-visible { color: #9fd0ff; }
-      #btn-start:focus-visible { outline: 2px solid #4da3ff; outline-offset: 4px; }
+      #start-screen.fading { opacity: 0; pointer-events: none; }
+      #start-screen[hidden] { display: none; }
+      .game-title {
+        font: 900 clamp(32px, 8vw, 56px)/1.1 ui-monospace, "Press Start 2P", monospace;
+        letter-spacing: 0.15em; color: #ffffff;
+        text-shadow: 0 0 20px #00f0ff, 0 0 40px #1a5fb4, 2px 2px 0 #000;
+        margin: 0 0 6px;
+      }
+      .game-subtitle {
+        font-size: 13px; color: #7fd1ff; letter-spacing: 0.25em; text-transform: uppercase;
+        margin-bottom: 24px; text-shadow: 0 0 10px rgba(0, 240, 255, 0.5);
+      }
+      .start-content {
+        display: flex; flex-direction: row; gap: 28px; max-width: 720px; width: 100%;
+        align-items: stretch; justify-content: center; margin-bottom: 24px;
+      }
+      @media (max-width: 600px) {
+        .start-content { flex-direction: column; align-items: center; }
+      }
+      .changelog-box {
+        flex: 1; background: rgba(18, 23, 34, 0.85); border: 1px solid #2b3952;
+        border-radius: 6px; padding: 14px 18px; text-align: left;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.5), inset 0 0 12px rgba(0, 240, 255, 0.05);
+      }
+      .changelog-title {
+        font-size: 11px; font-weight: bold; color: #ffd166; text-transform: uppercase;
+        letter-spacing: 0.1em; margin-bottom: 10px; border-bottom: 1px solid #233045;
+        padding-bottom: 5px; display: flex; justify-content: space-between;
+      }
+      .changelog-list {
+        list-style: none; padding: 0; margin: 0; font-size: 11px; line-height: 1.6; color: #b4c4d9;
+      }
+      .changelog-list li { margin-bottom: 6px; position: relative; padding-left: 14px; }
+      .changelog-list li::before {
+        content: "⚡"; position: absolute; left: 0; color: #00f0ff; font-size: 9px;
+      }
+      .start-action {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 12px; min-width: 200px;
+      }
+      #btn-start {
+        padding: 16px 36px; border: 2px solid #00f0ff; background: rgba(0, 240, 255, 0.12);
+        color: #ffffff; font: bold clamp(20px, 4vw, 28px)/1 ui-monospace, monospace;
+        letter-spacing: 0.2em; cursor: pointer; touch-action: manipulation;
+        border-radius: 4px; box-shadow: 0 0 25px rgba(0, 240, 255, 0.4), inset 0 0 15px rgba(0, 240, 255, 0.2);
+        transition: all 0.15s ease-out;
+      }
+      #btn-start:hover, #btn-start:focus-visible {
+        background: #00f0ff; color: #05070b; box-shadow: 0 0 35px #00f0ff;
+        transform: translateY(-2px);
+      }
       #btn-start:active { transform: scale(0.96); }
+      .quick-controls {
+        font-size: 10px; color: #6b7d99; line-height: 1.4; text-align: center;
+      }
       body.starting.touch #touch, body.starting #keys, body.starting #panel { display: none; }
       /* landscape fallback: the whole app becomes a 16:10-ish landscape box rotated inside a portrait viewport */
       #app { position: fixed; inset: 0; }
@@ -90,7 +139,35 @@
   </head>
   <body class="starting">
     <div id="app">
-    <div id="start-screen"><button id="btn-start" type="button">START</button><span id="version">v0.11.0</span></div>
+    <div id="start-screen">
+      <h1 class="game-title">SLASH ROGUE</h1>
+      <div class="game-subtitle">Crisp Combat &bull; Elemental Artifacts &bull; Fast Roguelike</div>
+      
+      <div class="start-content">
+        <div class="changelog-box">
+          <div class="changelog-title">
+            <span>Nhật ký cập nhật</span>
+            <span style="color:#00f0ff;">v0.12.0</span>
+          </div>
+          <ul class="changelog-list">
+            <li><b>Hệ thống Chặt chém Sắc nét:</b> Vệt chém Razor Crescent đa tầng phát sáng Neon, vết cắt Slice Mark trên thân quái khi chém trúng.</li>
+            <li><b>Giao diện Thẻ Cổ vật Cột dọc:</b> Xếp 3 cột thẻ bài chuẩn Roguelike, bổ sung hiệu ứng tia sét chạy viền (kiếm điện), lửa bốc (lửa), tinh thể tuyết (băng).</li>
+            <li><b>Nâng cấp Pixel Art:</b> Nhân vật có kính ngắm Visor phát sáng, tư thế nhào chém (attack lean), mắt quái vật phát sáng trong bóng tối.</li>
+            <li><b>Không gian Dungeon:</b> Gạch sàn vát cạnh nứt vỡ, tường 3 lớp chiều sâu và hiệu ứng ánh sáng cục bộ (ambient vignette).</li>
+          </ul>
+        </div>
+        
+        <div class="start-action">
+          <button id="btn-start" type="button">START</button>
+          <div class="quick-controls">
+            <u>WASD</u> Di chuyển &bull; <u>Chuột / J</u> Chém<br />
+            <u>Space / Shift</u> Dash lướt né
+          </div>
+        </div>
+      </div>
+      
+      <span id="version">v0.13.1</span>
+    </div>
     <div id="stage">
       <canvas id="game"></canvas>
       <canvas id="overlay"></canvas>

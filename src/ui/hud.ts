@@ -47,19 +47,30 @@ export class Hud {
     const w = this.world;
     if (w.shopOffers !== null) {
       if (y >= 166 && y <= 178 && x >= 16 && x <= 304) return "s:leave";
-      if (x < 16 || x > 304) return null;
-      const i = Math.floor((y - 40) / 43);
-      if (i < 0 || i > 2 || y > 40 + i * 43 + 38 || i >= w.shopOffers.length) return null;
+      // 3 vertical columns for shop: left 12, width 92, gap 10 (col 0: 12-104, col 1: 114-206, col 2: 216-308), y: 38 - 158
+      if (y < 38 || y > 158) return null;
+      let i = -1;
+      if (x >= 12 && x <= 104) i = 0;
+      else if (x >= 114 && x <= 206) i = 1;
+      else if (x >= 216 && x <= 308) i = 2;
+      if (i < 0 || i >= w.shopOffers.length) return null;
       return `s:${i}`;
     }
-    if (w.curseOffer !== null && y >= 24 && y <= 35) {
+    if (w.curseOffer !== null && y >= 20 && y <= 32) {
       if (x >= 16 && x < 160) return "t:normal";
       if (x >= 160 && x <= 304) return "t:curse";
       return null;
     }
-    if (x < 16 || x > 304) return null;
-    const i = Math.floor((y - 40) / 43);
-    if (i < 0 || i > 2 || y > 40 + i * 43 + 38) return null;
+    // 3 vertical columns for artifacts / curses
+    const topY = w.curseOffer !== null ? 36 : 38;
+    const botY = w.curseOffer !== null ? 142 : 166;
+    if (y < topY || y > botY) return null;
+    let i = -1;
+    if (x >= 12 && x <= 104) i = 0;
+    else if (x >= 114 && x <= 206) i = 1;
+    else if (x >= 216 && x <= 308) i = 2;
+    if (i < 0) return null;
+
     if (w.curseTab && w.curseOffer !== null) {
       const curse = i < 2 ? w.curseOffer.curses[i] : undefined;
       return curse ? `c:${curse.id}` : null;
@@ -104,47 +115,115 @@ export class Hud {
     o.textAlign = "left";
     const cards = shop !== null
       ? shop.map(offer => offer.kind === "artifact" && offer.artifact !== undefined
-        ? { name: offer.artifact.name, desc: offer.artifact.desc, color: ARTIFACT_COLORS[offer.artifact.id], price: offer.price as number | null }
+        ? { id: offer.artifact.id, name: offer.artifact.name, desc: offer.artifact.desc, color: ARTIFACT_COLORS[offer.artifact.id], price: offer.price as number | null }
         : offer.kind === "heal"
-          ? { name: "Hồi 2 HP", desc: "Hồi ngay 2 máu.", color: "#58ff8a", price: offer.price as number | null }
+          ? { id: "heal", name: "Hồi 2 HP", desc: "Hồi ngay 2 máu.", color: "#58ff8a", price: offer.price as number | null }
           : offer.kind === "maxhp"
-            ? { name: "+1 HP tối đa", desc: "Tăng máu tối đa thêm 1, hồi kèm 1 máu.", color: "#4da3ff", price: offer.price as number | null }
-            : { name: "Gỡ nguyền rủa", desc: "Gỡ bỏ một nguyền rủa đang mang.", color: "#ff5a7a", price: offer.price as number | null })
+            ? { id: "maxhp", name: "+1 HP tối đa", desc: "Tăng máu tối đa thêm 1, hồi kèm 1 máu.", color: "#4da3ff", price: offer.price as number | null }
+            : { id: "curse_remove", name: "Gỡ nguyền rủa", desc: "Gỡ bỏ một nguyền rủa đang mang.", color: "#ff5a7a", price: offer.price as number | null })
       : this.world.curseTab && offer !== null
-        ? offer.curses.map(c => ({ name: c.name, desc: c.desc, color: "#ff5a7a", price: null as number | null }))
-        : this.world.artifactChoices.slice(0, 3).map(a => ({ name: a.name, desc: a.desc, color: ARTIFACT_COLORS[a.id], price: null as number | null }));
+        ? offer.curses.map(c => ({ id: c.id, name: c.name, desc: c.desc, color: "#ff5a7a", price: null as number | null }))
+        : this.world.artifactChoices.slice(0, 3).map(a => ({ id: a.id, name: a.name, desc: a.desc, color: ARTIFACT_COLORS[a.id], price: null as number | null }));
+
+    const cardW = 92;
+    const cardH = offer !== null && this.world.curseTab ? 96 : shop !== null ? 120 : 126;
+    const startY = offer !== null ? 36 : 38;
+    const tick = this.world.tickCount;
+
     cards.forEach((card, i) => {
-      const y = 40 + i * 43;
-      o.globalAlpha = card.price === null || this.world.runStats.gold >= card.price ? 1 : 0.45;
-      o.fillStyle = "#172233";
-      o.fillRect(16, y, 288, 38);
-      o.fillStyle = card.color;
-      o.fillRect(16, y, 2, 38);
-      o.strokeStyle = "#537da6";
+      const x = 12 + i * 102;
+      const y = startY;
+      const affordable = card.price === null || this.world.runStats.gold >= card.price;
+      o.globalAlpha = affordable ? 1 : 0.45;
+
+      // Card background
+      o.fillStyle = "#111622";
+      o.fillRect(x, y, cardW, cardH);
+
+      // Card border
+      o.strokeStyle = card.color;
       o.lineWidth = 1;
-      o.strokeRect(16.5, y + 0.5, 287, 37);
-      o.font = "bold 9px sans-serif";
-      o.fillStyle = "#d2e8ff";
-      o.fillText(card.name, 24, y + 5, 272);
-      if (card.price !== null) {
-        o.textAlign = "right";
-        o.fillStyle = this.world.runStats.gold >= card.price ? "#ffd166" : "#ff5a7a";
-        o.fillText(`◆ ${card.price}`, 296, y + 5);
-        o.textAlign = "left";
+      o.strokeRect(x + 0.5, y + 0.5, cardW - 1, cardH - 1);
+
+      // Header top accent
+      o.fillStyle = card.color;
+      o.fillRect(x, y, cardW, 3);
+
+      // Elemental dynamic aura effects
+      if (affordable) {
+        o.save();
+        const cid = card.id;
+        if (cid === "lightning" || cid === "chain_lightning") {
+          // Lightning spark arcs around the border
+          o.strokeStyle = "#ffffff";
+          o.lineWidth = 1;
+          for (let s = 0; s < 3; s++) {
+            const seed = (tick * 0.4 + s * 13) % 40;
+            const sx = x + (seed < 20 ? (seed / 20) * cardW : cardW);
+            const sy = y + (seed >= 20 ? ((seed - 20) / 20) * cardH : 0);
+            o.beginPath();
+            o.moveTo(sx, sy);
+            o.lineTo(sx + (Math.sin(tick + s) * 4), sy + (Math.cos(tick + s) * 4));
+            o.stroke();
+          }
+        } else if (cid === "fire" || cid === "detonate") {
+          // Fire ember glow floating upwards
+          o.fillStyle = "#ff6a00";
+          for (let s = 0; s < 4; s++) {
+            const ex = x + 10 + ((s * 23 + tick * 0.7) % (cardW - 20));
+            const ey = y + cardH - 6 - ((tick * 1.2 + s * 19) % (cardH * 0.7));
+            o.fillRect(ex, ey, 2, 2);
+          }
+        } else if (cid === "freeze" || cid === "water") {
+          // Frost crystal shine
+          o.fillStyle = "#e0f8ff";
+          const fx = x + 6 + (Math.sin(tick * 0.08 + i) * 0.5 + 0.5) * (cardW - 12);
+          const fy = y + 8;
+          o.fillRect(fx, fy, 2, 2);
+        } else if (cid === "poison" || cid === "bleed") {
+          // Venom / Blood drip pulse
+          o.fillStyle = card.color;
+          const dropY = y + 8 + ((tick * 0.6 + i * 15) % 18);
+          o.fillRect(x + 8 + i * 10, dropY, 2, 3);
+        }
+        o.restore();
       }
-      o.font = "8px sans-serif";
-      o.fillStyle = "#c3cddd";
+
+      // Title
+      o.font = "bold 8.5px sans-serif";
+      o.fillStyle = "#ffffff";
+      o.fillText(card.name, x + 6, y + 8, cardW - 12);
+
+      // Price tag if in shop
+      if (card.price !== null) {
+        o.font = "bold 8px sans-serif";
+        o.fillStyle = affordable ? "#ffd166" : "#ff5a7a";
+        o.fillText(`◆ ${card.price}`, x + 6, y + 21);
+      }
+
+      // Separator line
+      o.fillStyle = "#222c3f";
+      o.fillRect(x + 6, y + (card.price !== null ? 31 : 21), cardW - 12, 1);
+
+      // Description with word-wrap
+      o.font = "7.5px sans-serif";
+      o.fillStyle = "#b4c4d9";
       const lines: string[] = [];
       let line = "";
       for (const word of card.desc.split(/\s+/)) {
         const next = line ? `${line} ${word}` : word;
-        if (line && o.measureText(next).width > 272) {
+        if (line && o.measureText(next).width > cardW - 12) {
           lines.push(line);
           line = word;
         } else line = next;
       }
       lines.push(line);
-      lines.forEach((text, j) => o.fillText(text, 24, y + 18 + j * 9, 272));
+      const textStartY = y + (card.price !== null ? 35 : 25);
+      lines.forEach((text, j) => {
+        if (textStartY + j * 10 < y + cardH - 4) {
+          o.fillText(text, x + 6, textStartY + j * 10, cardW - 12);
+        }
+      });
       o.globalAlpha = 1;
     });
     if (shop !== null) {
@@ -158,9 +237,9 @@ export class Hud {
     if (this.world.curseTab && offer !== null) {
       o.font = "8px sans-serif";
       o.fillStyle = "#ffd166";
-      o.fillText(`Nhận: ${offer.artifacts.map(a => a.name).join(" + ")}`, 24, 128, 272);
+      o.fillText(`Nhận: ${offer.artifacts.map(a => a.name).join(" + ")}`, 16, 148, 288);
       o.fillStyle = "#a7b4c9";
-      o.fillText("Chạm một nguyền rủa để nhận cả gói", 24, 140, 272);
+      o.fillText("Chạm một nguyền rủa để nhận cả gói", 16, 160, 288);
     }
     o.restore();
   }
@@ -237,6 +316,20 @@ export class Hud {
       o.fillStyle = P.VOID;
       o.fillRect(x - 4, y - 2, tw + 8, Math.round(11 * scale));
       o.fillStyle = w.victory ? P.DOOR_OPEN : P.TEXT;
+      o.fillText(text, x, y);
+      o.globalAlpha = 1;
+    }
+
+    if (w.introLineTicks > 0 && w.introLine.length > 0) {
+      o.globalAlpha = Math.min(1, w.introLineTicks / 24);
+      o.font = `${Math.round(7 * scale)}px ui-monospace, monospace`;
+      const text = `Kiếm khách: "${w.introLine}"`;
+      const tw = o.measureText(text).width;
+      const x = Math.round((o.canvas.width - tw) / 2);
+      const y = Math.round(o.canvas.height * 0.8);
+      o.fillStyle = P.VOID;
+      o.fillRect(x - 5, y - 3, tw + 10, Math.round(11 * scale));
+      o.fillStyle = P.TEXT;
       o.fillText(text, x, y);
       o.globalAlpha = 1;
     }
