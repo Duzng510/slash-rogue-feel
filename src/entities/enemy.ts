@@ -1,9 +1,11 @@
 import { CONFIG, enemyDef } from "../config.ts";
 import type { EnemyDef, EnemyKind } from "../config.ts";
 import { angleLerp, dist, normAngle } from "../mathx.ts";
+import { artifactText, sfx } from "../events.ts";
 import { createSwing, stepSwing } from "../systems/combat.ts";
 import { knockback, pulse } from "../systems/feelSim.ts";
 import { moveBody } from "../world/collision.ts";
+import type { SpatialGrid } from "../world/grid.ts";
 import type { Rect } from "../mathx.ts";
 import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
 
@@ -12,6 +14,8 @@ export const ENEMY_STATE = {
   CHASE: "chase",
   TELEGRAPH: "telegraph",
   ATTACK: "attack",
+  VANISH: "vanish",
+  APPEAR: "appear",
   HURT: "hurt",
   DEAD: "dead",
 } as const;
@@ -21,8 +25,10 @@ export type EnemyState = (typeof ENEMY_STATE)[keyof typeof ENEMY_STATE];
 /** one table for every archetype, so the transition law has a single source */
 export const ENEMY_TRANSITIONS: Record<EnemyState, EnemyState[]> = {
   idle: ["chase", "telegraph", "hurt", "dead"],
-  chase: ["idle", "telegraph", "hurt", "dead"],
+  chase: ["idle", "telegraph", "hurt", "dead", "vanish"],
   telegraph: ["attack", "hurt", "dead", "chase"],
+  vanish: ["appear", "dead"],
+  appear: ["telegraph", "hurt", "dead"],
   attack: ["idle", "telegraph", "hurt", "dead"],
   hurt: ["idle", "chase", "telegraph", "dead"],
   dead: [],
@@ -69,6 +75,8 @@ export class Enemy implements Unit {
   enraged = false;
   /** rings still owed by the current attack */
   followUps = 0;
+  /** boss phase 3: counts finished ring attacks so summons fire every 2 rings */
+  private attackRings = 0;
 
   /** telegraph geometry the renderer draws; locked halfway through so late dodges still work */
   telegraphDir = Math.PI;
@@ -107,7 +115,7 @@ export class Enemy implements Unit {
   }
 
   canBeHit(): boolean {
-    return !this.dead;
+    return !this.dead && this.state !== ENEMY_STATE.VANISH;
   }
 
   /** true when this enemy is in its vulnerable punish window */
@@ -133,7 +141,13 @@ export class Enemy implements Unit {
     if (this.hp === 0) {
       this.die();
       this.split(src);
-      if (playerOwned && src.boons.has("pursuit")) src.player.dashCd = Math.max(0, src.player.dashCd - 18);
+      src.runStats.enemiesKilled++;
+      src.runStats.killStreak++;
+      if (playerOwned && src.artifacts.has("heavy") && this.burnTicks === 0 && this.wetTicks === 0) src.runStats.heavyKills++;
+      if (playerOwned && src.artifacts.has("pursuit")) {
+        src.player.dashCd = Math.max(0, src.player.dashCd - 18);
+        sfx(src.queue, "pursuit_proc", 0.5, 1.2);
+      }
     } else if (this.def.ENRAGE_FRACTION > 0 && this.hp <= this.maxHp * this.def.ENRAGE_FRACTION) this.enraged = true;
   }
 
@@ -141,6 +155,7 @@ export class Enemy implements Unit {
     if (this.dead) return;
     if (status === "burn" && this.wetTicks > 0 || status === "wet" && this.burnTicks > 0) {
       this.burnTicks = this.wetTicks = this.burnPulse = 0;
+      src.runStats.comboSeen = true;
       this.takeDamage(2, src);
       src.particles.burstSpark(this.x, this.y - 5, 6, src.rng);
       src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 2 });
@@ -155,6 +170,8 @@ export class Enemy implements Unit {
       this.followUps = 0;
       this.hurtTicks = this.def.HURT_TICKS;
       this.setState(ENEMY_STATE.HURT);
+      sfx(src.queue, "shock_hit", 1, this.shockTicks > 30 ? 0.8 : 1.1);
+      artifactText(src.queue, this.x, this.y - 13, "CHOÁNG", "#ffe66b");
     }
   }
 
@@ -174,7 +191,7 @@ export class Enemy implements Unit {
     }
   }
 
-  tick(src: Sim): void {
+  tick(src: Sim, grid: SpatialGrid): void {
     const e = this.def;
     const dt = CONFIG.TIME.TICK;
     this.animTicks++;
@@ -193,6 +210,11 @@ export class Enemy implements Unit {
         this.burnPulse = 60;
         this.takeDamage(1, src);
         src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
+        for (let i = 0; i < 3; i++) {
+          src.particles.emit("spark", this.x + src.rng.range(-3, 3), this.y - 6, src.rng.range(-12, 12), src.rng.range(-42, -18), "#ff963f", { life: 0.28 });
+        }
+        sfx(src.queue, "burn_tick", 0.3, 1);
+        artifactText(src.queue, this.x, this.y - 13, "CHÁY", "#ff963f");
         if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 1 });
         if (this.dead) return;
       }
@@ -217,14 +239,23 @@ export class Enemy implements Unit {
 
       case ENEMY_STATE.CHASE: {
         const toPlayer = Math.atan2(src.player.y - this.y, src.player.x - this.x);
+        const d = dist(this.x, this.y, src.player.x, src.player.y);
         this.facing = angleLerp(this.facing, toPlayer, 0.18);
-        if (!src.player.dead && dist(this.x, this.y, src.player.x, src.player.y) <= e.ATTACK_REACH) {
-          this.beginTelegraph(toPlayer);
+        const canShoot = !e.RANGED || d >= e.STANDOFF_MIN;
+        if (!src.player.dead && d <= e.ATTACK_REACH && canShoot) {
+          if (e.TELEPORTER) this.beginVanish(src);
+          else this.beginTelegraph(src, toPlayer);
           break;
         }
-        this.separate(src);
-        this.vx += Math.cos(toPlayer) * e.ACCEL * dt;
-        this.vy += Math.sin(toPlayer) * e.ACCEL * dt;
+        let moveDir = toPlayer;
+        if (e.RANGED) {
+          if (d > e.STANDOFF_MAX) moveDir = toPlayer;
+          else if (d < e.STANDOFF_MIN) moveDir = toPlayer + Math.PI;
+          else moveDir = toPlayer + Math.PI / 2;
+        }
+        if (!e.RANGED) this.separate(grid);
+        this.vx += Math.cos(moveDir) * e.ACCEL * dt;
+        this.vy += Math.sin(moveDir) * e.ACCEL * dt;
         this.capSpeed(e.SPEED * speedScale);
         break;
       }
@@ -253,10 +284,24 @@ export class Enemy implements Unit {
           this.restTicks = e.REST_TICKS;
           if (this.followUps > 0) {
             this.followUps--;
-            this.beginTelegraph(this.telegraphDir);
+            this.beginTelegraph(src, this.telegraphDir);
           } else {
             this.setState(ENEMY_STATE.IDLE);
           }
+        }
+        break;
+      }
+
+      case ENEMY_STATE.VANISH:
+        this.brake(dt);
+        if (this.ticksInState >= e.VANISH_TICKS) this.doAppear(src);
+        break;
+
+      case ENEMY_STATE.APPEAR: {
+        this.brake(dt);
+        if (this.ticksInState >= e.APPEAR_TICKS) {
+          const toPlayer = Math.atan2(src.player.y - this.y, src.player.x - this.x);
+          this.beginTelegraph(src, toPlayer);
         }
         break;
       }
@@ -277,18 +322,38 @@ export class Enemy implements Unit {
     if (!this.dead) moveBody(this, src.room, dt);
   }
 
-  private beginTelegraph(dir: number): void {
+  /** 1 = calm, 2 = enraged rings, 3 = desperation + summons (boss only) */
+  bossPhase(): 1 | 2 | 3 {
+    if (this.kind !== "boss") return 1;
+    const frac = this.hp / this.maxHp;
+    if (this.def.PHASE3_FRACTION > 0 && frac <= this.def.PHASE3_FRACTION) return 3;
+    if (this.enraged || frac <= this.def.ENRAGE_FRACTION) return 2;
+    return 1;
+  }
+
+  private beginTelegraph(src: Sim, dir: number): void {
     const e = this.def;
-    const t = this.enraged && e.ENRAGED_TELEGRAPH_TICKS > 0 ? e.ENRAGED_TELEGRAPH_TICKS : e.TELEGRAPH_TICKS;
+    const phase = this.bossPhase();
+    const t = phase === 3 && e.PHASE3_TELEGRAPH_TICKS > 0
+      ? e.PHASE3_TELEGRAPH_TICKS
+      : phase === 2 && e.ENRAGED_TELEGRAPH_TICKS > 0
+        ? e.ENRAGED_TELEGRAPH_TICKS
+        : e.TELEGRAPH_TICKS;
     this.telegraphTotal = t;
     this.telegraphTicksLeft = t;
     this.telegraphDir = dir;
     this.facing = dir;
     this.setState(ENEMY_STATE.TELEGRAPH);
+    sfx(src.queue, "telegraph", 0.5, this.kind === "boss" ? 0.7 : this.kind === "small" ? 1.3 : 1);
   }
 
   private beginAttack(src: Sim): void {
     const e = this.def;
+    if (e.RANGED) {
+      this.fireShot(src);
+      this.setState(ENEMY_STATE.ATTACK);
+      return;
+    }
     this.swing = createSwing(src, {
       side: "enemy",
       combo: 1,
@@ -301,8 +366,65 @@ export class Enemy implements Unit {
       knockback: 0,
       fd: { startup: 1, active: e.ACTIVE_TICKS, recovery: e.RECOVERY_TICKS },
     });
-    this.followUps = this.enraged ? e.RING_FOLLOWUPS : 0;
+    const phase = this.bossPhase();
+    this.followUps = phase >= 2 ? phase - 1 : 0;
+    if (this.kind === "boss") {
+      this.attackRings++;
+      if (phase === 3 && this.attackRings % 2 === 0) {
+        for (let i = 0; i < 2; i++) {
+          const a = (i / 2) * Math.PI * 2 + src.rng.range(-0.4, 0.4);
+          src.spawnEnemy(this.x + Math.cos(a) * 22, this.y + Math.sin(a) * 22, "small");
+        }
+        artifactText(src.queue, this.x, this.y - 16, "TRIỆU HỒI", "#c99ae6");
+      }
+    }
     this.setState(ENEMY_STATE.ATTACK);
+  }
+
+  private fireShot(src: Sim): void {
+    const e = this.def;
+    const dir = this.telegraphDir;
+    src.projectiles.push({
+      x: this.x,
+      y: this.y - e.BODY_H * 0.5,
+      vx: Math.cos(dir) * e.SHOT_SPEED,
+      vy: Math.sin(dir) * e.SHOT_SPEED,
+      dmg: e.SHOT_DMG,
+      ticksLeft: e.SHOT_LIFE_TICKS,
+    });
+    sfx(src.queue, "shoot", 0.8, 1);
+  }
+
+  private beginVanish(src: Sim): void {
+    this.setState(ENEMY_STATE.VANISH);
+    src.particles.puffDust(this.x, this.y, 4, src.rng);
+    sfx(src.queue, "teleport", 0.6, 1.2);
+  }
+
+  /** blink to just behind the player, falling back to ringed offsets if that tile is solid */
+  private doAppear(src: Sim): void {
+    const e = this.def;
+    const pf = src.player.facing;
+    const d = e.APPEAR_DIST;
+    let tx = src.player.x - Math.cos(pf) * d;
+    let ty = src.player.y - Math.sin(pf) * d;
+    if (src.room.solidAtPx(tx, ty)) {
+      for (let k = 1; k <= 3; k++) {
+        const a = pf + Math.PI + (k * Math.PI) / 2;
+        const cx = src.player.x + Math.cos(a) * d;
+        const cy = src.player.y + Math.sin(a) * d;
+        if (!src.room.solidAtPx(cx, cy)) {
+          tx = cx;
+          ty = cy;
+          break;
+        }
+      }
+    }
+    this.x = tx;
+    this.y = ty;
+    this.setState(ENEMY_STATE.APPEAR);
+    src.particles.burstSpark(this.x, this.y - 5, 4, src.rng);
+    sfx(src.queue, "teleport", 0.7, 0.8);
   }
 
   private inRangeOfPlayer(src: Sim, range: number): boolean {
@@ -310,10 +432,10 @@ export class Enemy implements Unit {
     return dist(this.x, this.y, src.player.x, src.player.y) <= range;
   }
 
-  private separate(src: Sim): void {
+  private separate(grid: SpatialGrid): void {
     const e = this.def;
-    for (const other of src.enemies) {
-      if (other === this || other.dead) continue;
+    for (const other of grid.query(this.x, this.y, e.SEPARATION)) {
+      if (other === this || other.dead || other.side !== "enemy") continue;
       const d = dist(this.x, this.y, other.x, other.y);
       if (d > e.SEPARATION || d < 0.001) continue;
       const a = normAngle(Math.atan2(this.y - other.y, this.x - other.x));

@@ -4,8 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
-    "test": "node tests/laws.test.ts",
+    "test": "node --test tests/combat-regressions.test.ts && node tests/laws.test.ts",
+    "test:laws": "node tests/laws.test.ts",
+    "test:combat": "node --test tests/combat-regressions.test.ts",
     "preview": "vite preview"
   },
   "devDependencies": {

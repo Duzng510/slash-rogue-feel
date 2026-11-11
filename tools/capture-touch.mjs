@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9334;
 const URL = "http://localhost:5199/?manual=1&touch=1&seed=42";
-const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools";
+const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools/out";
 const chrome = spawn(CHROME, ["--headless=new","--disable-gpu","--no-sandbox","--hide-scrollbars",
   `--user-data-dir=${OUT}/cdp2`,`--remote-debugging-port=${PORT}`,"--window-size=820,720","about:blank"],{stdio:"ignore"});
 const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));

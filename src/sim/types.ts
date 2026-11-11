@@ -1,5 +1,7 @@
 import type { Rect, Rng } from "../mathx.ts";
-import type { BoonId, FireTrail } from "../systems/boons.ts";
+import type { ArtifactId, FireTrail } from "../systems/artifacts.ts";
+import type { RunStats, EndMode } from "../systems/runStats.ts";
+import type { Achievements } from "../systems/unlocks.ts";
 import type { EventQueue } from "../events.ts";
 import type { ParticlePool } from "../systems/particles.ts";
 import type { Enemy } from "../entities/enemy.ts";
@@ -30,6 +32,16 @@ export type Swing = {
   seen: Set<number>;
   aftershockDone?: boolean;
   status?: "burn" | "wet" | "shock";
+};
+
+/** a travelling enemy shot: its own entity, blocked by terrain, dodged by i-frames */
+export type Projectile = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  dmg: number;
+  ticksLeft: number;
 };
 
 export interface Unit {
@@ -64,8 +76,9 @@ export type Intent = {
 };
 
 export type Sim = {
-  boons: Set<BoonId>;
+  artifacts: Set<ArtifactId>;
   fireTrails: FireTrail[];
+  projectiles: Projectile[];
   units: Unit[];
   enemies: Enemy[];
   player: Player;
@@ -83,4 +96,7 @@ export type Sim = {
   bannerText: string;
   victory: boolean;
   playerDeadTicks: number;
+  runStats: RunStats;
+  pendingEnd: EndMode | null;
+  achievements: Achievements;
 };

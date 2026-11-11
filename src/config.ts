@@ -1,6 +1,6 @@
 export type FrameData = { startup: number; active: number; recovery: number };
 
-export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss";
+export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss" | "ranged" | "teleporter";
 
 const PALETTE = {
   VOID: "#05070b",
@@ -24,6 +24,11 @@ const PALETTE = {
   ENEMY_BOSS: "#a01820",
   ENEMY_BOSS_SHADE: "#5e0a12",
   ENEMY_BOSS_RIM: "#ffd166",
+  ENEMY_RANGED: "#3fbf6f",
+  ENEMY_RANGED_SHADE: "#1f7a44",
+  ENEMY_TELEPORTER: "#29c5d6",
+  ENEMY_TELEPORTER_SHADE: "#178a95",
+  PROJ: "#ffe08a",
   TELEGRAPH_FILL: "#ff3b3b",
   TELEGRAPH_EDGE: "#ff8a8a",
   FLASH: "#ffffff",
@@ -76,8 +81,25 @@ const ENEMY_BASE = {
   /** boss only: enraged below this fraction of max hp, 0 disables */
   ENRAGE_FRACTION: 0,
   ENRAGED_TELEGRAPH_TICKS: 0,
+  /** boss phase 3: below this fraction the ring pattern intensifies and summons start */
+  PHASE3_FRACTION: 0,
+  PHASE3_TELEGRAPH_TICKS: 0,
   /** extra rings committed back-to-back once enraged */
   RING_FOLLOWUPS: 0,
+
+  /** ranged only: fires a projectile instead of swinging, and holds a stand-off band */
+  RANGED: false,
+  SHOT_SPEED: 150,
+  SHOT_DMG: 1,
+  SHOT_LIFE_TICKS: 48,
+  STANDOFF_MIN: 55,
+  STANDOFF_MAX: 115,
+  /** teleporter only: blink behind the player, then telegraph a melee swing (0 disables) */
+  TELEPORTER: false,
+  VANISH_TICKS: 0,
+  APPEAR_TICKS: 0,
+  APPEAR_DIST: 20,
+
   /** splitter only */
   SPLIT_INTO: null as EnemyKind | null,
   SPLIT_COUNT: 0,
@@ -175,9 +197,55 @@ const ENEMY_OVERRIDES: Record<EnemyKind, Partial<typeof ENEMY_BASE>> = {
     BODY_COLOR: PALETTE.ENEMY_BOSS,
     RADIAL: true,
     ENRAGE_FRACTION: 0.5,
+    PHASE3_FRACTION: 0.25,
+    PHASE3_TELEGRAPH_TICKS: 18,
     RING_FOLLOWUPS: 1,
     HP_BAR: true,
     KILL_PITCH: 0.55,
+  },
+  ranged: {
+    HP: 2,
+    SPEED: 40,
+    ACCEL: 700,
+    BODY_W: 9,
+    BODY_H: 9,
+    HURT_W: 9,
+    HURT_H: 7,
+    TELEGRAPH_TICKS: 40,
+    ACTIVE_TICKS: 2,
+    RECOVERY_TICKS: 10,
+    REST_TICKS: 40,
+    ATTACK_REACH: 120,
+    ATTACK_ARC_DEG: 12,
+    DMG: 1,
+    CHASE_ACQUIRE: 240,
+    SPRITE_KEY: "enemy_ranged",
+    BODY_COLOR: PALETTE.ENEMY_RANGED,
+    RANGED: true,
+    KILL_PITCH: 1.1,
+  },
+  teleporter: {
+    HP: 2,
+    SPEED: 78,
+    ACCEL: 1000,
+    BODY_W: 9,
+    BODY_H: 9,
+    HURT_W: 9,
+    HURT_H: 7,
+    TELEGRAPH_TICKS: 21,
+    ACTIVE_TICKS: 3,
+    RECOVERY_TICKS: 14,
+    REST_TICKS: 26,
+    ATTACK_REACH: 22,
+    ATTACK_ARC_DEG: 90,
+    DMG: 1,
+    SPRITE_KEY: "enemy_teleporter",
+    BODY_COLOR: PALETTE.ENEMY_TELEPORTER,
+    TELEPORTER: true,
+    VANISH_TICKS: 30,
+    APPEAR_TICKS: 10,
+    APPEAR_DIST: 20,
+    KILL_PITCH: 1.2,
   },
 };
 
@@ -208,8 +276,8 @@ export const CONFIG = {
   },
 
   ROOMS: {
-    WAVES: [3, 4, 6, 8],
-    RESPAWN_DELAY: 50,
+    WAVES: [3, 4, 6, 8, 5, 10],
+    END_DELAY: 40,
   },
 
   SEED: 1337,

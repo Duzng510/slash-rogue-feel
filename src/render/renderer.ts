@@ -11,6 +11,7 @@ import type { World } from "../world/world.ts";
 const P = CONFIG.PALETTE;
 
 type Arc = { x: number; y: number; dir: number; reach: number; deg: number; left: number; total: number };
+type FloatText = { x: number; y: number; text: string; color: string; left: number; total: number };
 
 export type DrawFlags = { boxes: boolean; fps: boolean; hitStop: boolean };
 
@@ -37,6 +38,7 @@ export class Renderer {
   origin = { x: 0, y: 0 };
 
   private arcs: Arc[] = [];
+  private texts: FloatText[] = [];
   private flash = new Map<number, number>();
   private vignette = 0;
   private white: Record<string, HTMLCanvasElement> = {};
@@ -108,6 +110,10 @@ export class Renderer {
       else if (e.t === "flash") this.flash.set(e.ent, e.ticks);
       else if (e.t === "slashArc") this.arcs.push({ x: e.x, y: e.y, dir: e.dir, reach: e.reach, deg: e.deg, left: e.ticks, total: e.ticks });
       else if (e.t === "hurtVignette") this.vignette = Math.min(CONFIG.READABILITY.VIGNETTE_MAX, e.strength);
+      else if (e.t === "artifactText") {
+        if (this.texts.length >= 24) this.texts.shift();
+        this.texts.push({ x: e.x, y: e.y, text: e.text, color: e.color, left: 48, total: 48 });
+      }
     }
   }
 
@@ -115,6 +121,11 @@ export class Renderer {
     const ticks = dtReal * CONFIG.TIME.TICK_HZ;
     for (const a of this.arcs) a.left -= ticks;
     this.arcs = this.arcs.filter((a) => a.left > 0);
+    for (const ft of this.texts) {
+      ft.left -= ticks;
+      ft.y -= ticks * 0.09;
+    }
+    this.texts = this.texts.filter((ft) => ft.left > 0);
     for (const [k, v] of this.flash) {
       const n = v - ticks;
       if (n <= 0) this.flash.delete(k);
@@ -149,8 +160,10 @@ export class Renderer {
     this.drawShadows(g, ox, oy);
     this.drawArcs(g, ox, oy);
     this.drawEnemies(g, ox, oy);
+    this.drawProjectiles(g, ox, oy);
     this.drawPlayer(g, ox, oy);
     this.drawParticles(g, ox, oy);
+    this.drawTexts(g, ox, oy);
     this.drawVignette(g, flags);
   }
 
@@ -249,6 +262,7 @@ export class Renderer {
     const s = this.sprites.shadow;
     for (const en of this.world.enemies) {
       if (en.removed) continue;
+      if (en.state === ENEMY_STATE.VANISH) continue;
       const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
       const w = Math.max(s.w, Math.round(sp.w * 0.9));
       g.drawImage(s.c, Math.round(en.x - w / 2 - ox), Math.round(en.y - s.ay - oy), w, s.h);
@@ -275,15 +289,34 @@ export class Renderer {
         continue;
       }
 
+      if (en.state === ENEMY_STATE.VANISH) continue;
+      const appearTicks = en.def.APPEAR_TICKS;
+      const fade =
+        en.state === ENEMY_STATE.APPEAR && appearTicks > 0
+          ? 0.3 + 0.7 * Math.min(1, en.ticksInState / appearTicks)
+          : 1;
       if (flashing) g.drawImage(white, x, y);
       else {
+        g.globalAlpha = fade;
         g.drawImage(sp.c, x, y);
+        g.globalAlpha = 1;
         const status = en.shockTicks > 0 ? 2 : en.wetTicks > 0 ? 1 : en.burnTicks > 0 ? 0 : -1;
         if (status >= 0) {
-          g.globalAlpha = 0.55;
+          g.globalAlpha = 0.55 * fade;
           g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y);
           g.globalAlpha = 1;
         }
+      }
+      if (en.shockTicks > 0) {
+        const bx = x + Math.floor(sp.w / 2) - 1;
+        const by = y - 4;
+        g.globalAlpha = 0.9;
+        g.fillStyle = "#ffe66b";
+        g.fillRect(bx, by, 3, 1);
+        g.fillRect(bx - 1, by + 1, 3, 1);
+        g.fillRect(bx, by + 2, 2, 1);
+        g.fillRect(bx - 2, by + 3, 3, 1);
+        g.globalAlpha = 1;
       }
       const active = [en.burnTicks, en.wetTicks, en.shockTicks];
       const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100"];
@@ -320,6 +353,17 @@ export class Renderer {
         g.fillStyle = P.ENEMY_EYE;
         g.fillRect(x + Math.floor(sp.w / 2) - 1, y - 3, 3, 1);
       }
+    }
+  }
+
+  private drawProjectiles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    for (const p of this.world.projectiles) {
+      const x = Math.round(p.x - ox);
+      const y = Math.round(p.y - oy);
+      g.fillStyle = P.VOID;
+      g.fillRect(x - 2, y - 2, 4, 4);
+      g.fillStyle = P.PROJ;
+      g.fillRect(x - 1, y - 1, 2, 2);
     }
   }
 
@@ -360,6 +404,23 @@ export class Renderer {
       const sz = Math.max(1, Math.round(s.size));
       g.fillRect(Math.round(s.x - ox), Math.round(s.y - oy), sz, sz);
     });
+    g.globalAlpha = 1;
+  }
+
+  private drawTexts(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.texts.length === 0) return;
+    g.textAlign = "center";
+    g.textBaseline = "alphabetic";
+    g.font = "bold 5px ui-monospace, monospace";
+    for (const ft of this.texts) {
+      const x = Math.round(ft.x - ox);
+      const y = Math.round(ft.y - oy);
+      g.globalAlpha = Math.min(1, (ft.left / ft.total) * 1.8);
+      g.fillStyle = P.VOID;
+      g.fillText(ft.text, x + 1, y + 1);
+      g.fillStyle = ft.color;
+      g.fillText(ft.text, x, y);
+    }
     g.globalAlpha = 1;
   }
 

@@ -10,6 +10,7 @@ import { Camera } from "./render/camera.ts";
 import { Renderer } from "./render/renderer.ts";
 import { buildSprites } from "./render/pixelart.ts";
 import { Hud } from "./ui/hud.ts";
+import { EndScreen } from "./ui/endScreen.ts";
 import { isRotated, syncOrientation, tryImmersive } from "./ui/immersive.ts";
 import type { OrientationLike } from "./ui/immersive.ts";
 import { startDiag } from "./ui/diag.ts";
@@ -17,24 +18,53 @@ import { DebugHud, type DebugFlags } from "./ui/debug.ts";
 import { Sfx } from "./audio/sfx.ts";
 import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
-import type { BoonId } from "./systems/boons.ts";
+import type { ArtifactId } from "./systems/artifacts.ts";
+import type { RunStats, EndAction, EndMode } from "./systems/runStats.ts";
+import { parseAchievements, stringifyAchievements, emptyAchievements } from "./systems/unlocks.ts";
+import type { Achievements } from "./systems/unlocks.ts";
 
 const qs = new URLSearchParams(location.search);
 const autoplay = qs.get("autoplay") === "1";
 const seed = Number(qs.get("seed") ?? Math.floor(Math.random() * 0x100000000));
+
+/** unlocks live in localStorage only from the composition root; the sim never touches storage */
+const ACH_KEY = "ruby.achievements.v1";
+function readStore(): Achievements {
+  try {
+    return parseAchievements(localStorage.getItem(ACH_KEY));
+  } catch {
+    return emptyAchievements();
+  }
+}
+function persist(): void {
+  try {
+    localStorage.setItem(ACH_KEY, stringifyAchievements(world.achievements));
+  } catch {
+    /** private mode / quota: this session's unlocks simply won't survive a reload */
+  }
+}
+if (qs.get("resetAch") === "1") {
+  try {
+    localStorage.removeItem(ACH_KEY);
+  } catch {
+    /** nothing to clear */
+  }
+  location.reload();
+}
 
 const game = document.getElementById("game") as HTMLCanvasElement;
 const overlay = document.getElementById("overlay") as HTMLCanvasElement;
 const panel = document.getElementById("panel") as HTMLDivElement;
 
 const sprites = buildSprites();
-const world = new World(seed);
+const world = new World(seed, readStore());
 if (qs.get("room") !== null) world.loadRoom(Number(qs.get("room")));
 const cam = new Camera();
 cam.snap(world.player.x, world.player.y - 6);
 const renderer = new Renderer(game, overlay, world, cam, sprites);
 renderer.resize();
 const hud = new Hud(world, sprites);
+const endScreen = new EndScreen(overlay);
 const debug = new DebugHud();
 const sfx = new Sfx();
 const intent = new IntentSource();
@@ -46,7 +76,7 @@ const flags: DebugFlags = {
 };
 
 function applyHotkey(k: Hotkey): void {
-  if (world.boonChoices.length > 0) return;
+  if (world.artifactChoices.length > 0) return;
   switch (k) {
     case "panel":
       panel.classList.toggle("on");
@@ -83,7 +113,7 @@ function applyHotkey(k: Hotkey): void {
 
 const desk = new DesktopInput(intent, {
   tick: () => world.tickCount,
-  blocked: () => world.boonChoices.length > 0,
+  blocked: () => world.artifactChoices.length > 0 || endScreen.isOpen(),
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
@@ -113,53 +143,74 @@ function resetInput(): void {
   desk.reset();
   touch?.reset();
 }
-function syncBoonModal(): boolean {
-  const open = world.boonChoices.length > 0;
+function syncArtifactModal(): boolean {
+  const open = world.artifactChoices.length > 0;
   if (open !== modalOpen) {
     resetInput();
     modalOpen = open;
-    document.body.classList.toggle("boon-modal", open);
+    document.body.classList.toggle("artifact-modal", open);
   }
-  if (open) resetInput();
   return open;
 }
-function chooseBoon(id: BoonId): boolean {
-  const chosen = world.chooseBoon(id);
-  if (chosen) resetInput();
-  syncBoonModal();
+function chooseArtifact(id: ArtifactId): boolean {
+  const chosen = world.chooseArtifact(id);
+  if (chosen) {
+    resetInput();
+    suppressModalClick = false;
+  }
+  syncArtifactModal();
   return chosen;
 }
-function boonFromClient(x: number, y: number): BoonId | null {
+function artifactFromClient(x: number, y: number): ArtifactId | null {
   const r = overlay.getBoundingClientRect();
   if (r.width <= 0 || r.height <= 0) return null;
   const u = (x - r.left) / r.width;
   const v = (y - r.top) / r.height;
-  return isRotated() ? hud.boonAt(v * 320, (1 - u) * 180) : hud.boonAt(u * 320, v * 180);
+  return isRotated() ? hud.artifactAt(v * 320, (1 - u) * 180) : hud.artifactAt(u * 320, v * 180);
 }
-const modalPointers = new Map<number, BoonId | null>();
+const modalPointers = new Map<number, ArtifactId | null>();
+const endPointers = new Map<number, EndAction | null>();
+const endActionFromClient = (x: number, y: number): EndAction | null => endScreen.handlePointer(x, y, renderer.scale);
 let suppressModalClick = false;
 window.addEventListener("pointerdown", (e) => {
-  suppressModalClick = world.boonChoices.length > 0;
+  const end = endScreen.isOpen();
+  suppressModalClick = end || world.artifactChoices.length > 0;
   if (!suppressModalClick) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   sfx.unlock();
-  syncBoonModal();
-  modalPointers.set(e.pointerId, e.button === 0 ? boonFromClient(e.clientX, e.clientY) : null);
+  if (end) {
+    endPointers.set(e.pointerId, e.button === 0 ? endActionFromClient(e.clientX, e.clientY) : null);
+    return;
+  }
+  syncArtifactModal();
+  modalPointers.set(e.pointerId, e.button === 0 ? artifactFromClient(e.clientX, e.clientY) : null);
 }, { capture: true });
 for (const type of ["pointerup", "pointercancel"] as const) {
   window.addEventListener(type, (e) => {
-    if (!modalPointers.has(e.pointerId) && world.boonChoices.length === 0) return;
+    const hasEnd = endPointers.has(e.pointerId);
+    if (!hasEnd && !modalPointers.has(e.pointerId) && world.artifactChoices.length === 0 && !endScreen.isOpen()) return;
     e.preventDefault();
     e.stopImmediatePropagation();
+    if (hasEnd) {
+      const act = endPointers.get(e.pointerId);
+      endPointers.delete(e.pointerId);
+      if (type === "pointerup" && act != null && act === endActionFromClient(e.clientX, e.clientY)) {
+        endScreen.close();
+        resetInput();
+        if (act === "restart") world.restart();
+        else world.continueAfterWin();
+      }
+      return;
+    }
     const id = modalPointers.get(e.pointerId);
     modalPointers.delete(e.pointerId);
-    if (type === "pointerup" && id != null && id === boonFromClient(e.clientX, e.clientY)) chooseBoon(id);
+    if (type === "pointerup" && id != null && id === artifactFromClient(e.clientX, e.clientY)) chooseArtifact(id);
   }, { capture: true });
 }
 for (const type of ["mousedown", "mouseup", "click", "dblclick", "contextmenu"] as const) {
   window.addEventListener(type, (e) => {
-    if (!suppressModalClick && world.boonChoices.length === 0) return;
+    if (!suppressModalClick && world.artifactChoices.length === 0 && !endScreen.isOpen()) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   }, { capture: true });
@@ -205,6 +256,13 @@ let immersiveNote = "not tried";
 
 window.addEventListener("pointerdown", () => sfx.unlock());
 window.addEventListener("keydown", () => sfx.unlock());
+window.addEventListener("keydown", (e) => {
+  if (e.repeat || !endScreen.isOpen() || e.code.toLowerCase() !== "keyr") return;
+  e.preventDefault();
+  endScreen.close();
+  resetInput();
+  world.restart();
+});
 window.addEventListener("resize", onViewport);
 window.addEventListener("orientationchange", onViewport);
 document.addEventListener("fullscreenchange", onViewport);
@@ -237,7 +295,13 @@ function botIntent(): Intent {
 }
 
 function sim(): void {
-  if (syncBoonModal()) return;
+  if (endScreen.isOpen()) return;
+  if (world.pendingEnd !== null) {
+    endScreen.open(world.pendingEnd, world.runStats, [...world.artifacts], [...world.runAchievements]);
+    persist();
+    return;
+  }
+  if (syncArtifactModal()) return;
   /** hit-stop must not swallow presses: read(live=false) leaves them queued for the first tick after the freeze */
   const live = world.hitStopTicks === 0;
   if (!autoplay) {
@@ -255,7 +319,7 @@ function sim(): void {
 }
 
 function frame(dtReal: number): void {
-  syncBoonModal();
+  syncArtifactModal();
   diag.frame();
   const dtSim = dtReal * CONFIG.SLIDERS.timescale;
   world.particles.update(dtSim);
@@ -264,15 +328,26 @@ function frame(dtReal: number): void {
 
   const events = world.queue.drain();
   renderer.consume(events);
-  for (const e of events) if (e.t === "sfx") sfx.play(e.name, e.gain, e.pitch);
+  let earned = false;
+  for (const e of events) {
+    if (e.t === "sfx") sfx.play(e.name, e.gain, e.pitch);
+    else if (e.t === "achievement") {
+      hud.pushAchievement(e.id);
+      earned = true;
+    }
+  }
+  if (earned) persist();
 
   renderer.draw(dtSim, flags);
   const o = renderer.o;
   o.clearRect(0, 0, o.canvas.width, o.canvas.height);
   hud.draw(o, renderer.scale);
+  hud.drawOwnedArtifacts(o, renderer.scale);
   debug.measure(dtReal);
   debug.draw(o, renderer.scale, world, renderer, flags);
-  hud.drawBoons(o, renderer.scale);
+  hud.drawArtifacts(o, renderer.scale);
+  if (endScreen.isOpen()) endScreen.draw(o, renderer.scale);
+  hud.drawAchievementToast(o, renderer.scale);
 }
 
 const diag = startDiag(qs.get("diag") === "1", () => ({
@@ -322,14 +397,15 @@ type Harness = {
   damageEnemy: (id: number, dmg: number) => boolean;
   applyStatus: (id: number, status: "burn" | "wet" | "shock") => boolean;
   gotoRoom: (i: number) => void;
-  chooseBoon: (id: BoonId) => boolean;
+  chooseArtifact: (id: ArtifactId) => boolean;
+  forceEnd: (mode: EndMode) => void;
   state: () => {
     tick: number;
     hitStop: number;
     player: { x: number; y: number; hp: number; state: string; swing: string | null; invuln: boolean };
     roomIndex: number;
-    boons: BoonId[];
-    boonChoices: BoonId[];
+    artifacts: ArtifactId[];
+    artifactChoices: ArtifactId[];
     enemies: {
       id: number;
       x: number;
@@ -341,7 +417,10 @@ type Harness = {
       telegraphTicksLeft: number;
     }[];
     particles: number;
+    projectiles: number;
     fx: { arcs: number; flashes: number; vignette: number; shake: number };
+    runStats: RunStats;
+    pendingEnd: EndMode | null;
   };
 };
 
@@ -387,8 +466,12 @@ const harness: Harness = {
     e.applyStatus(status, world);
     return true;
   },
-  gotoRoom: (i) => { world.loadRoom(i); syncBoonModal(); },
-  chooseBoon,
+  gotoRoom: (i) => { world.loadRoom(i); syncArtifactModal(); },
+  chooseArtifact,
+  forceEnd: (mode) => {
+    if (mode === "won") world.runStats.roomsCleared = world.roomTotal;
+    world.pendingEnd = mode;
+  },
   state: () => ({
     tick: world.tickCount,
     hitStop: world.hitStopTicks,
@@ -401,8 +484,8 @@ const harness: Harness = {
       invuln: !world.player.canBeHit(),
     },
     roomIndex: world.roomIndex,
-    boons: [...world.boons],
-    boonChoices: world.boonChoices.map((boon) => boon.id),
+    artifacts: [...world.artifacts],
+    artifactChoices: world.artifactChoices.map((artifact) => artifact.id),
     enemies: world.enemies.map((e) => ({
       id: e.id,
       x: e.x,
@@ -414,7 +497,10 @@ const harness: Harness = {
       telegraphTicksLeft: e.telegraphTicksLeft,
     })),
     particles: world.particles.alive,
+    projectiles: world.projectiles.length,
     fx: renderer.fxInfo,
+    runStats: world.runStats,
+    pendingEnd: world.pendingEnd,
   }),
 };
 

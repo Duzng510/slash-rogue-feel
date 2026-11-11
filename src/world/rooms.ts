@@ -13,8 +13,15 @@ export const TILE = {
 
 export type Tile = (typeof TILE)[keyof typeof TILE];
 
-/** E chaser, C charger, T splitter, B boss; S stays the player start */
-export const MARKER_KIND: Record<string, EnemyKind> = { E: "chaser", C: "charger", T: "splitter", B: "boss" };
+/** E chaser, C charger, T splitter, B boss, R ranged, P teleporter; S stays the player start */
+export const MARKER_KIND: Record<string, EnemyKind> = {
+  E: "chaser",
+  C: "charger",
+  T: "splitter",
+  B: "boss",
+  R: "ranged",
+  P: "teleporter",
+};
 
 export type SpawnMark = { x: number; y: number; kind: EnemyKind };
 
@@ -49,7 +56,7 @@ export const TEMPLATES: Template[] = [
     rows: [
       "......................",
       "...OO.......OO........",
-      "....C..........T......",
+      "....C.....R....T......",
       "......................",
       ".........OO...........",
       "S......E....E.........",
@@ -65,7 +72,7 @@ export const TEMPLATES: Template[] = [
     name: "Sân cột",
     rows: [
       "....O....O....O....O..",
-      "..C..............T....",
+      "..C.......P......T....",
       "......................",
       "....O....O....O....O..",
       "S.....................",
@@ -83,16 +90,46 @@ export const TEMPLATES: Template[] = [
     rows: [
       "OOOO..............OOOO",
       "O..................O..",
-      "..C...E....E...T......",
+      "..C...E....R...T......",
       "O..................O..",
       "OOO....OOOO....OOO....",
       "S.....................",
-      "..E...T....C...E......",
+      "..P...T....C...E......",
       "OOO....OOOO....OOO....",
       "O..................O..",
       "..E.........C.........",
       "O..................O..",
       "OOOO..............OOOO",
+    ],
+  },
+  {
+    name: "Hành lang hẹp",
+    rows: [
+      "OOOOOOOOOOOOOOOOOOOOOO",
+      "S............OOOOOOOOO",
+      ".............OOOOOOOOO",
+      "OOOOOOOOOOOO........CR",
+      "OOOOOOOOOOOOT......E.P",
+      "OOOOOOOOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOOOOOOOO",
+      "OOOOOOOOOOOOOOOOOOOOOO",
+    ],
+  },
+  {
+    name: "Đấu trường",
+    rows: [
+      "......................",
+      "..E......E......E.....",
+      "......................",
+      "..C....OO....OO....T..",
+      "......................",
+      "S.......E..E.......R..",
+      "......................",
+      "..T....OO....OO....C..",
+      "......................",
+      "..E......E......E.....",
+      "......................",
+      ".........P............",
     ],
   },
   {

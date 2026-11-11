@@ -1,10 +1,11 @@
 import { CONFIG } from "../config.ts";
 import type { FrameData } from "../config.ts";
 import { pointInArc, rectsOverlap } from "../mathx.ts";
-import { shake, sfx } from "../events.ts";
+import { artifactText, shake, sfx } from "../events.ts";
 import { requestHitStop } from "./feelSim.ts";
 import type { Rect } from "../mathx.ts";
 import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
+import type { SpatialGrid } from "../world/grid.ts";
 
 export type SwingInit = {
   side: Side;
@@ -46,14 +47,14 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
   const scale = second ? a.COMBO2_REACH_SCALE : 1;
   return {
     side: "player",
-    status: combo === 1 && src.boons.has("water") ? "wet" : combo === 2 && src.boons.has("lightning") ? "shock" : undefined,
+    status: combo === 1 && src.artifacts.has("water") ? "wet" : combo === 2 && src.artifacts.has("lightning") ? "shock" : undefined,
     combo,
     dir,
     ox: src.player.x,
     oy: src.player.y,
     reach: a.REACH * scale,
     deg: Math.min(170, a.ARC_DEG * (second ? a.COMBO2_ARC_SCALE : 1)),
-    dmg: a.DMG * (src.boons.has("heavy") ? 1.5 : 1) + (src.player.reprisalTicks > 0 ? 1 : 0),
+    dmg: a.DMG * (src.artifacts.has("heavy") ? 1.5 : 1) + (src.player.reprisalTicks > 0 ? 1 : 0),
     knockback: a.KNOCKBACK * (src.player.impulseTicks > 0 ? 2 : 1),
     fd: a.COMBOS[Math.min(a.COMBOS.length, combo) - 1],
   };
@@ -88,7 +89,7 @@ export function hitboxOf(sw: Swing): Rect | null {
   return { x: sw.ox - r, y: sw.oy - r, w: r * 2, h: r * 2 };
 }
 
-export function resolveHits(src: Sim): void {
+export function resolveHits(src: Sim, grid: SpatialGrid): void {
   for (const attacker of src.units) {
     const sw = attacker.swing;
     if (sw === null || sw.phase !== "active") continue;
@@ -96,27 +97,31 @@ export function resolveHits(src: Sim): void {
     if (box === null) continue;
 
     let blast: { x: number; y: number } | null = null;
-    for (const target of src.units) {
+    const reach = hitReach(sw);
+    const cands = grid.query(attacker.x, attacker.y, reach);
+    for (const target of cands) {
       if (target === attacker || target.side === sw.side) continue;
       if (target.dead || !target.canBeHit()) continue;
       const hb = target.hurtRect();
       if (!rectsOverlap(box, hb)) continue;
       const cx = hb.x + hb.w / 2;
       const cy = hb.y + hb.h / 2;
-      if (!pointInArc(cx, cy, sw.ox, sw.oy, sw.dir, hitReach(sw), sw.deg, 0)) continue;
+      if (!pointInArc(cx, cy, sw.ox, sw.oy, sw.dir, reach, sw.deg, 0)) continue;
       if (sw.seen.has(target.id)) continue;
 
       sw.seen.add(target.id);
       const killed = target.onHit(sw, cx, cy, src);
       hitFeedback(src, target, sw, cx, cy, killed);
-      if (sw.side === "player" && sw.combo === 2 && src.boons.has("aftershock") && !sw.aftershockDone) {
+      if (sw.side === "player" && sw.combo === 2 && src.artifacts.has("aftershock") && !sw.aftershockDone) {
         sw.aftershockDone = true;
         blast = { x: cx, y: cy };
       }
     }
     if (blast !== null) {
       src.queue.push({ t: "slashArc", x: blast.x, y: blast.y, dir: 0, reach: 40, deg: 360, combo: 2, ticks: 12 });
-      const shock = { ...sw, dmg: 1, knockback: 0, status: undefined };
+      sfx(src.queue, "aftershock_boom", 1, 0.8);
+      artifactText(src.queue, blast.x, blast.y - 12, "DƯ CHẤN", "#ff963f");
+      const shock = { ...sw, dmg: 1, knockback: 0, status: undefined, seen: new Set<number>() };
       for (const enemy of src.enemies.slice()) {
         const hb = enemy.hurtRect();
         const cx = hb.x + hb.w / 2, cy = hb.y + hb.h / 2;
@@ -137,7 +142,7 @@ export function resolveFire(src: Sim): void {
       const hb = enemy.hurtRect();
       if (!trail.points.some(p => rectsOverlap({ x: p.x - 6, y: p.y - 6, w: 12, h: 12 }, hb))) continue;
       trail.seen.add(enemy.id);
-      const fire = createSwing(src, { side: "player", status: "burn", combo: 0, dir: 0, ox: enemy.x, oy: enemy.y, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+      const fire = createSwing(src, { side: "player", status: "burn", combo: 1, dir: 0, ox: enemy.x, oy: enemy.y, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
       const killed = enemy.onHit(fire, enemy.x, enemy.y, src);
       hitFeedback(src, enemy, fire, enemy.x, enemy.y, killed, false);
     }
@@ -148,6 +153,7 @@ export function resolveFire(src: Sim): void {
 function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
+    src.runStats.damageDealt += sw.dmg;
     const dir = sw.dir;
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
     src.particles.burstBlood(cx, cy, dir, killed ? f.DEATH_SHARDS : f.BLOOD, src.rng);
@@ -155,8 +161,10 @@ function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, 
     if (killed) src.particles.burstShards(cx, cy, f.DEATH_SHARDS, CONFIG.PALETTE.ENEMY_SHADE, src.rng);
     if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: cx, y: cy - 8, value: sw.dmg });
     shake(src.queue, cx, cy, dir, killed ? f.SHAKE_KILL_MULT : 1);
-    sfx(src.queue, killed ? "kill" : "slash_hit", killed ? 1.1 : 1, (killed ? 0.82 : 1) * (target.killPitch ?? 1));
-    if (stop) requestHitStop(src, (killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL) * (src.boons.has("heavy") ? 2 : 1));
+    const heavy = !killed && sw.side === "player" && src.artifacts.has("heavy");
+    const sname = killed ? "kill" : heavy ? "slash_hit_heavy" : "slash_hit";
+    sfx(src.queue, sname, killed ? 1.1 : 1, (killed ? 0.82 : heavy ? 0.85 : 1) * (target.killPitch ?? 1));
+    if (stop) requestHitStop(src, (killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL) * (src.artifacts.has("heavy") ? 2 : 1));
   } else {
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
     requestHitStop(src, CONFIG.FEEL.HIT_STOP_PLAYER_HURT);

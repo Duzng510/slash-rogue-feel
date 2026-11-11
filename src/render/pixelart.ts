@@ -84,6 +84,32 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 4, 7, 2, 1, P.VOID);
   });
 
+  const ranged = enemyDef("ranged");
+  S[ranged.SPRITE_KEY] = bake(9, 12, 4, 11, (g) => {
+    rect(g, 3, 0, 3, 1, P.ENEMY_RANGED_SHADE);
+    rect(g, 2, 1, 5, 3, ranged.BODY_COLOR);
+    rect(g, 1, 4, 7, 6, ranged.BODY_COLOR);
+    rect(g, 2, 10, 5, 1, P.ENEMY_RANGED_SHADE);
+    rect(g, 3, 2, 1, 1, P.ENEMY_EYE);
+    rect(g, 5, 2, 1, 1, P.ENEMY_EYE);
+    rect(g, 4, 6, 1, 2, P.PROJ);
+    rect(g, 2, 11, 2, 1, P.VOID);
+    rect(g, 5, 11, 2, 1, P.VOID);
+  });
+
+  const teleporter = enemyDef("teleporter");
+  S[teleporter.SPRITE_KEY] = bake(9, 11, 4, 10, (g) => {
+    rect(g, 4, 0, 1, 1, teleporter.BODY_COLOR);
+    rect(g, 3, 1, 3, 1, teleporter.BODY_COLOR);
+    rect(g, 2, 2, 5, 4, teleporter.BODY_COLOR);
+    rect(g, 3, 6, 3, 3, teleporter.BODY_COLOR);
+    rect(g, 1, 3, 1, 2, P.ENEMY_TELEPORTER_SHADE);
+    rect(g, 7, 3, 1, 2, P.ENEMY_TELEPORTER_SHADE);
+    rect(g, 3, 3, 1, 1, P.ENEMY_EYE);
+    rect(g, 5, 3, 1, 1, P.ENEMY_EYE);
+    rect(g, 3, 10, 3, 1, P.ENEMY_TELEPORTER_SHADE);
+  });
+
   const boss = enemyDef("boss");
   S[boss.SPRITE_KEY] = bake(20, 18, 10, 17, (g) => {
     rect(g, 0, 2, 20, 14, P.ENEMY_BOSS_RIM);

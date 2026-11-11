@@ -4,9 +4,13 @@ import { CONFIG, ENEMY_KINDS, enemyDef } from "../src/config.ts";
 import type { EnemyKind } from "../src/config.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
-import { TEMPLATES, MARKER_KIND } from "../src/world/rooms.ts";
+import { TEMPLATES, MARKER_KIND, Room, TILE, type Template } from "../src/world/rooms.ts";
 import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
 import { createSwing } from "../src/systems/combat.ts";
+import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS } from "../src/systems/artifacts.ts";
+import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
+import { checkAchievements } from "../src/systems/unlocks.ts";
+import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import { PLAYER_STATE } from "../src/entities/player.ts";
 import { requestHitStop } from "../src/systems/feelSim.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
@@ -44,6 +48,13 @@ function sandbox(): World {
   w.player.reset(w.room.start.x, w.room.start.y);
   w.room.openDoors();
   return w;
+}
+
+/** every artifact's gating achievement earned, so offer-size laws ignore the unlock filter */
+function allUnlocks(): Achievements {
+  const earned = new Set<AchievementId>();
+  for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
+  return { earned, best: null };
 }
 
 function duel(w: World, gap = 16): number {
@@ -106,6 +117,89 @@ heading("Hit registry");
     for (let i = 0; i < budget; i++) w.tick(intent());
     return w.enemies.find((x) => x.id === e2)!.hp < hp2;
   })(), `target ${id}`);
+}
+
+heading("Run stats");
+{
+  const w = sandbox();
+  ok(
+    "runStats starts hurtFree with zeroed counters",
+    w.runStats.hurtFree && w.runStats.enemiesKilled === 0 && w.runStats.damageDealt === 0 && w.runStats.roomsCleared === 0
+  );
+
+  const kill = sandbox();
+  const e = makeEnemy(kill.player.x + 20, kill.player.y);
+  withEnemy(kill, e);
+  e.onHit(jab(kill, 999), e.x, e.y, kill);
+  ok("a lethal enemy hit counts one kill", kill.runStats.enemiesKilled === 1, `k=${kill.runStats.enemiesKilled}`);
+
+  const dd = sandbox();
+  duel(dd);
+  const foe = dd.enemies[0];
+  dd.tick(intent({ attack: true, aimX: foe.x, aimY: foe.y }));
+  const budget = CONFIG.ATTACK.COMBOS[0].startup + CONFIG.ATTACK.COMBOS[0].active + CONFIG.ATTACK.COMBOS[0].recovery + CONFIG.FEEL.HIT_STOP_KILL + 4;
+  for (let i = 0; i < budget; i++) dd.tick(intent());
+  ok("a landed player swing adds its damage to the tally", dd.runStats.damageDealt === CONFIG.ATTACK.DMG, `dd=${dd.runStats.damageDealt}`);
+
+  const hurt = sandbox();
+  hurt.player.onHit({ ...jab(hurt, 3), side: "enemy" as const }, hurt.player.x, hurt.player.y, hurt);
+  ok("taking a hit clears hurtFree and counts damage taken", !hurt.runStats.hurtFree && hurt.runStats.damageTaken === 3, `dt=${hurt.runStats.damageTaken}`);
+
+  const frozen = sandbox();
+  frozen.hitStopTicks = 3;
+  const before = frozen.runStats.ticksElapsed;
+  frozen.tick(intent());
+  ok("run time does not accrue during hit-stop", frozen.runStats.ticksElapsed === before, `delta=${frozen.runStats.ticksElapsed - before}`);
+
+  const art = sandbox();
+  art.artifactChoices = ARTIFACTS.slice(0, 3);
+  const picked = art.artifactChoices[0].id;
+  ok("picking an artifact counts it", art.chooseArtifact(picked) && art.runStats.artifactsTaken === 1);
+
+  const exit = sandbox();
+  const T = CONFIG.WORLD.TILE;
+  exit.player.x = (exit.room.w - 1) * T + T / 2;
+  exit.player.y = Math.floor(exit.room.h / 2) * T + T / 2;
+  exit.runStats.enemiesKilled = 7;
+  ok("player is standing on the open door", exit.room.exitsAt(exit.player.x, exit.player.y));
+  exit.tick(intent());
+  ok("leaving a room counts one cleared room", exit.runStats.roomsCleared === 1, `rc=${exit.runStats.roomsCleared}`);
+  ok("loadRoom within a run keeps accumulated stats", exit.runStats.enemiesKilled === 7, `k=${exit.runStats.enemiesKilled}`);
+
+  ok("formatRunTime renders m:ss", formatRunTime(154 * 60) === "2:34", formatRunTime(154 * 60));
+}
+
+heading("Unlocks");
+{
+  const gates = Object.values(ARTIFACT_UNLOCKS);
+  ok("water and fire are unlocked from the first run", ARTIFACT_UNLOCKS.water === null && ARTIFACT_UNLOCKS.fire === null);
+  ok("every other artifact has a non-null achievement gate", gates.filter((g) => g !== null).length === ARTIFACTS.length - 2);
+
+  const oneKill = { ...emptyStats(), enemiesKilled: 1 };
+  ok("the first kill reports first_blood", checkAchievements(oneKill, "kill").includes("first_blood"));
+
+  const won = { ...emptyStats(), roomsCleared: 4, ticksElapsed: 60 };
+  const wonAchs = checkAchievements(won, "win");
+  ok("finishing the run reports full_run", wonAchs.includes("full_run"));
+  ok("a fast clear reports speedrun", wonAchs.includes("speedrun"));
+  ok("clearing three rooms on the way reports half_way", wonAchs.includes("half_way"));
+
+  const hurt = { ...emptyStats(), hurtFree: false, killStreak: 20 };
+  ok("a hit this run blocks the no-damage combo award", !checkAchievements(hurt, "kill").includes("combo_master"));
+}
+
+heading("Crowd separation (spatial grid)");
+{
+  const w = sandbox();
+  const x0 = w.player.x + 60;
+  const a = makeEnemy(x0, w.player.y);
+  const b = makeEnemy(x0 + 1, w.player.y);
+  w.enemies = [a, b];
+  w.syncUnits();
+  const d0 = Math.hypot(a.x - b.x, a.y - b.y);
+  for (let i = 0; i < 12; i++) w.tick(intent());
+  const d1 = Math.hypot(a.x - b.x, a.y - b.y);
+  ok("two overlapping enemies push apart through the grid", d1 > d0 + 2, `d0=${d0.toFixed(2)} d1=${d1.toFixed(2)}`);
 }
 
 heading("Hit-stop");
@@ -286,12 +380,12 @@ heading("Sim purity (tick() must stay testable in node)");
 
 heading("Room loop");
 {
-  const w = new World();
+  const w = new World(CONFIG.SEED, allUnlocks());
   ok("room starts with the door locked", !w.room.doorOpen);
   for (const e of w.enemies) e.die();
   w.tick(intent());
-  ok("clearing the room offers three artifacts before opening the door", !w.room.doorOpen && w.boonChoices.length === 3);
-  w.chooseBoon(w.boonChoices[0].id);
+  ok("clearing the room offers three artifacts before opening the door", !w.room.doorOpen && w.artifactChoices.length === 3);
+  w.chooseArtifact(w.artifactChoices[0].id);
   ok("choosing an artifact opens the door", w.room.doorOpen);
   const before = w.roomIndex;
   w.player.x = w.room.widthPx - 8;
@@ -503,6 +597,55 @@ heading("Authored content");
   ok("the boss walks into range and telegraphs", engaged);
 }
 
+heading("Room variety (P5)");
+{
+  const T = CONFIG.WORLD.TILE;
+  // flood-fill from the authored start to any opened door tile, stepping only on non-solid tiles
+  const reachesDoor = (t: Template): boolean => {
+    const room = new Room(t, 0);
+    room.openDoors();
+    const sx = Math.floor(room.start.x / T);
+    const sy = Math.floor(room.start.y / T);
+    const key = (x: number, y: number): number => y * room.w + x;
+    const seen = new Set<number>([key(sx, sy)]);
+    const queue: [number, number][] = [[sx, sy]];
+    const dirs = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ];
+    while (queue.length > 0) {
+      const [x, y] = queue.shift() as [number, number];
+      if (room.at(x, y) === TILE.DOOR_OPEN) return true;
+      for (const [dx, dy] of dirs) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= room.w || ny >= room.h) continue;
+        if (seen.has(key(nx, ny)) || room.isSolid(nx, ny)) continue;
+        seen.add(key(nx, ny));
+        queue.push([nx, ny]);
+      }
+    }
+    return false;
+  };
+  const stuck = TEMPLATES.map((t, i) => (reachesDoor(t) ? -1 : i)).filter((i) => i >= 0);
+  ok("every authored room has a reachable exit", stuck.length === 0, `stuck rooms ${stuck.join(",")}`);
+  ok("the run is now 7 rooms long", TEMPLATES.length === 7, `length ${TEMPLATES.length}`);
+  ok("the biggest authored wave fields 8+ enemies", Math.max(...CONFIG.ROOMS.WAVES) >= 8, `max ${Math.max(...CONFIG.ROOMS.WAVES)}`);
+  ok("every non-boss room has a wave entry", CONFIG.ROOMS.WAVES.length === TEMPLATES.length - 1, `waves ${CONFIG.ROOMS.WAVES.length}`);
+  // a full-reward run takes one artifact per room (rooms 0..roomTotal-1) and must still show a
+  // 3-choice offer on the last room — so pool >= (roomTotal-1) consumed + 3 remaining.
+  ok("the artifact pool can fill every reward room", ARTIFACTS.length >= TEMPLATES.length + 2, `have ${ARTIFACTS.length} need ${TEMPLATES.length + 2}`);
+}
+
+heading("Artifact HUD");
+{
+  const colors = ARTIFACTS.map((a) => ARTIFACT_COLORS[a.id]);
+  ok("every artifact has a HUD colour", colors.every((c) => /^#[0-9a-f]{6}$/i.test(c)));
+  ok("artifact HUD colours are pairwise distinct", new Set(colors).size === colors.length);
+}
+
 heading("Mobile landscape");
 {
   const r = rotateVec(1, 0, true);
@@ -642,6 +785,188 @@ heading("The player is never absent while alive");
   const a = CONFIG.READABILITY.IFRAME_ALPHA;
   ok("the dim reads as i-frames, not as a solid body", a > 0.1 && a < 0.9, `alpha ${a}`);
   ok("a corpse is still hidden", src.includes("pl.deadTicks > 12"));
+}
+
+heading("Artifact feedback events");
+{
+  const names = (w: World) => w.queue.drain().filter((e) => e.t === "sfx").map((e) => (e as { name: string }).name);
+
+  const shock = sandbox();
+  duel(shock);
+  shock.artifacts.add("lightning");
+  shock.enemies[0].applyStatus("shock", shock);
+  const shockEvs = shock.queue.drain();
+  ok("shocking an enemy queues the shock sfx", shockEvs.some((e) => e.t === "sfx" && e.name === "shock_hit"));
+  ok("shocking an enemy floats the shock label", shockEvs.some((e) => e.t === "artifactText" && e.text === "CHOÁNG"));
+
+  const burn = sandbox();
+  const burning = makeEnemy(burn.player.x + 200, burn.player.y);
+  burn.enemies.push(burning);
+  burn.syncUnits();
+  burn.artifacts.add("fire");
+  burning.applyStatus("burn", burn);
+  burn.queue.drain();
+  for (let i = 0; i < 66; i++) burn.tick(intent());
+  const burnEvs = burn.queue.drain();
+  ok("each burn second queues the burn sfx", burnEvs.some((e) => e.t === "sfx" && e.name === "burn_tick"));
+  ok("each burn second floats the burn label", burnEvs.some((e) => e.t === "artifactText" && e.text === "CHÁY"));
+
+  const heavy = sandbox();
+  duel(heavy);
+  heavy.artifacts.add("heavy");
+  const foe = heavy.enemies[0];
+  heavy.tick(intent({ attack: true, aimX: foe.x, aimY: foe.y }));
+  const hb = CONFIG.ATTACK.COMBOS[0].startup + CONFIG.ATTACK.COMBOS[0].active + CONFIG.ATTACK.COMBOS[0].recovery + CONFIG.FEEL.HIT_STOP_KILL + 4;
+  for (let i = 0; i < hb; i++) heavy.tick(intent());
+  ok("a non-lethal heavy swing uses the heavy hit sfx", names(heavy).includes("slash_hit_heavy"));
+
+  const repr = sandbox();
+  repr.artifacts.add("reprisal");
+  repr.player.onHit({ ...jab(repr, 1), side: "enemy" as const }, repr.player.x, repr.player.y, repr);
+  const reprEvs = repr.queue.drain();
+  ok("taking a hit with reprisal queues the ready sfx", reprEvs.some((e) => e.t === "sfx" && e.name === "reprisal_ready"));
+  ok("reprisal floats its label", reprEvs.some((e) => e.t === "artifactText" && e.text === "PHẢN KÍCH"));
+
+  const pur = sandbox();
+  duel(pur);
+  pur.artifacts.add("pursuit");
+  const doomed = pur.enemies[0];
+  doomed.onHit(jab(pur, 999), doomed.x, doomed.y, pur);
+  ok("a pursuit kill queues the proc sfx", names(pur).includes("pursuit_proc"));
+
+  const tel = sandbox();
+  duel(tel, 16);
+  let sawTelegraph = false;
+  for (let i = 0; i < 60 && !sawTelegraph; i++) {
+    tel.tick(intent());
+    sawTelegraph = names(tel).includes("telegraph");
+  }
+  ok("an enemy telegraph plays the audio cue", sawTelegraph);
+
+  const rsrc = readFileSync("src/render/renderer.ts", "utf8");
+  ok("the renderer floats artifact text from the event bus", rsrc.includes('e.t === "artifactText"') && rsrc.includes("drawTexts"));
+  ok("the renderer draws a shock bolt over stunned enemies", rsrc.includes("en.shockTicks > 0"));
+}
+
+heading("Boss phase 3");
+{
+  const bd = enemyDef("boss");
+  ok("phase 3 telegraphs for at least MIN_TELEGRAPH_S", bd.PHASE3_TELEGRAPH_TICKS / CONFIG.TIME.TICK_HZ >= CONFIG.LAWS.MIN_TELEGRAPH_S);
+  ok("phase 3 is authored inside the enraged band", bd.PHASE3_FRACTION > 0 && bd.PHASE3_FRACTION < bd.ENRAGE_FRACTION);
+
+  const w = sandbox();
+  const boss = makeEnemy(w.player.x + 40, w.player.y, "boss");
+  withEnemy(w, boss);
+  boss.hp = Math.ceil(boss.maxHp * 0.4);
+  ok("40% hp is phase 2", boss.bossPhase() === 2, `phase ${boss.bossPhase()}`);
+  boss.hp = Math.floor(boss.maxHp * 0.2);
+  ok("20% hp is phase 3", boss.bossPhase() === 3, `phase ${boss.bossPhase()}`);
+
+  let guard = 0;
+  while (boss.state !== ENEMY_STATE.TELEGRAPH && guard++ < 400) w.tick(intent());
+  const smallsBefore = w.enemies.filter((e) => e.kind === "small" && !e.dead).length;
+  let rings = 1;
+  let last = boss.state;
+  guard = 0;
+  while (boss.state !== ENEMY_STATE.IDLE && guard++ < 400) {
+    w.tick(intent());
+    if (boss.state === ENEMY_STATE.TELEGRAPH && last !== ENEMY_STATE.TELEGRAPH) rings++;
+    last = boss.state;
+  }
+  const smallsAfter = w.enemies.filter((e) => e.kind === "small" && !e.dead).length;
+  ok("phase 3 commits three rings before resting", rings >= 3, `rings ${rings}`);
+  ok("phase 3 summons smalls during the commit", smallsAfter > smallsBefore, `smalls ${smallsAfter}`);
+}
+
+heading("Priority 4 — ranged & teleporter");
+{
+  const T = CONFIG.WORLD.TILE;
+
+  // ranged: telegraph then a projectile aimed at the player
+  const w = sandbox();
+  const r = makeEnemy(w.player.x + 80, w.player.y, "ranged");
+  withEnemy(w, r);
+  let guard = 0;
+  while (w.projectiles.length === 0 && guard++ < 200) w.tick(intent());
+  ok("a ranged enemy telegraphs then fires a projectile", w.projectiles.length === 1 && guard < 200, `guard ${guard}`);
+  ok("the shot flies toward the player", (w.projectiles[0]?.vx ?? 0) < 0, `vx ${w.projectiles[0]?.vx}`);
+  const hpBefore = w.player.hp;
+  let hitGuard = 0;
+  while (w.player.hp === hpBefore && w.projectiles.length > 0 && hitGuard++ < 120) w.tick(intent());
+  ok("a ranged shot eventually damages the player", w.player.hp < hpBefore, `hp ${hpBefore}->${w.player.hp}`);
+
+  // projectile respects i-frames: no damage, and it passes through (kept)
+  const wi = sandbox();
+  const hpI = wi.player.hp;
+  wi.player.iframeTicks = 20;
+  wi.projectiles = [{ x: wi.player.x, y: wi.player.y - 3, vx: 0, vy: 0, dmg: 1, ticksLeft: 40 }];
+  wi.tick(intent());
+  ok("a shot during i-frames deals no damage", wi.player.hp === hpI, `hp ${hpI}->${wi.player.hp}`);
+  ok("a shot during i-frames passes through, not consumed", wi.projectiles.length === 1, `left ${wi.projectiles.length}`);
+
+  // projectile hits when the player is hittable
+  const wh = sandbox();
+  const hpH = wh.player.hp;
+  wh.projectiles = [{ x: wh.player.x, y: wh.player.y - 3, vx: 0, vy: 0, dmg: 1, ticksLeft: 40 }];
+  wh.tick(intent());
+  ok("a shot that overlaps a hittable player lands", wh.player.hp < hpH && wh.projectiles.length === 0, `hp ${wh.player.hp}`);
+
+  // projectile is blocked by a wall
+  const wwall = sandbox();
+  wwall.projectiles = [{ x: T + 1, y: 2 * T + 8, vx: -400, vy: 0, dmg: 1, ticksLeft: 400 }];
+  let wguard = 0;
+  while (wwall.projectiles.length > 0 && wguard++ < 20) wwall.tick(intent());
+  ok("a projectile is blocked by a wall before it expires", wwall.projectiles.length === 0 && wguard < 6, `ticks ${wguard}`);
+
+  // projectile expires on its own when it never overlaps
+  const wexp = sandbox();
+  const hpE = wexp.player.hp;
+  wexp.projectiles = [{ x: wexp.player.x, y: wexp.player.y - 100, vx: 0, vy: -150, dmg: 1, ticksLeft: 5 }];
+  let eguard = 0;
+  while (wexp.projectiles.length > 0 && eguard++ < 40) wexp.tick(intent());
+  ok("a stray projectile expires and never hurts the player", wexp.projectiles.length === 0 && wexp.player.hp === hpE, `ticks ${eguard}`);
+
+  // teleporter: enters VANISH and cannot be hit while vanished
+  const wt = sandbox();
+  const tp = makeEnemy(wt.player.x + 12, wt.player.y, "teleporter");
+  withEnemy(wt, tp);
+  let vg = 0;
+  while (tp.state !== ENEMY_STATE.VANISH && vg++ < 120) wt.tick(intent());
+  ok("a teleporter in range enters VANISH", tp.state === ENEMY_STATE.VANISH, `state ${tp.state}`);
+  ok("a vanished teleporter cannot be hit", !tp.canBeHit());
+
+  // teleporter cycle: VANISH -> APPEAR -> TELEGRAPH -> ATTACK, materialising at or behind the player
+  let sawAppear = false;
+  let sawTelegraph = false;
+  let dot = 999;
+  let apd = NaN;
+  let cg = 0;
+  while (!(sawTelegraph && tp.state === ENEMY_STATE.ATTACK) && cg++ < 200) {
+    wt.tick(intent());
+    if (tp.state === ENEMY_STATE.APPEAR && !sawAppear) {
+      sawAppear = true;
+      const fx = Math.cos(wt.player.facing);
+      const fy = Math.sin(wt.player.facing);
+      dot = (tp.x - wt.player.x) * fx + (tp.y - wt.player.y) * fy;
+      apd = Math.hypot(tp.x - wt.player.x, tp.y - wt.player.y);
+    }
+    if (sawAppear && tp.state === ENEMY_STATE.TELEGRAPH) sawTelegraph = true;
+  }
+  ok("a vanished teleporter reappears (APPEAR)", sawAppear, `cg ${cg}`);
+  ok("it reappears at its materialise distance", Math.abs(apd - enemyDef("teleporter").APPEAR_DIST) < 0.5, `dist ${apd}`);
+  ok("it never reappears in front of the player", dot <= 0.001, `dot ${dot.toFixed(2)}`);
+  ok("after reappearing it telegraphs an attack", sawTelegraph, `state ${tp.state}`);
+
+  // determinism: identical seeds fire the shot on the same tick
+  const d1 = sandbox();
+  withEnemy(d1, makeEnemy(d1.player.x + 80, d1.player.y, "ranged"));
+  const d2 = sandbox();
+  withEnemy(d2, makeEnemy(d2.player.x + 80, d2.player.y, "ranged"));
+  let g1 = 0;
+  while (d1.projectiles.length === 0 && g1++ < 200) d1.tick(intent());
+  let g2 = 0;
+  while (d2.projectiles.length === 0 && g2++ < 200) d2.tick(intent());
+  ok("the ranged shot is deterministic", g1 === g2 && Math.abs(d1.projectiles[0].vx - d2.projectiles[0].vx) < 1e-6, `g1 ${g1} g2 ${g2}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

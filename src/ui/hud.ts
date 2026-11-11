@@ -1,26 +1,58 @@
 import { CONFIG } from "../config.ts";
 import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
-import type { BoonId } from "../systems/boons.ts";
+import { ARTIFACT_COLORS, unlockArtifactFor, type ArtifactId } from "../systems/artifacts.ts";
+import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
 
 const P = CONFIG.PALETTE;
 
 export class Hud {
+  private toastText = "";
+  private toastUntil = 0;
+
   constructor(
     private readonly world: World,
     private readonly sprites: Record<string, Sprite>
   ) {}
 
-  boonAt(x: number, y: number): BoonId | null {
+  /** queue the top-right unlock/achievement toast for ~2s with a fade-out tail */
+  pushAchievement(id: AchievementId): void {
+    const artifact = unlockArtifactFor(id);
+    this.toastText = artifact !== null ? `MỞ KHÓA: ${artifact.name}` : `THÀNH TỰU: ${ACHIEVEMENT_NAMES[id]}`;
+    this.toastUntil = performance.now() + 2000;
+  }
+
+  drawAchievementToast(o: CanvasRenderingContext2D, scale: number): void {
+    const remaining = this.toastUntil - performance.now();
+    if (remaining <= 0) return;
+    const alpha = Math.min(1, remaining / 400);
+    o.save();
+    o.scale(scale, scale);
+    o.globalAlpha = alpha;
+    o.textBaseline = "top";
+    o.textAlign = "right";
+    o.font = "bold 8px sans-serif";
+    const padX = 4;
+    const tw = o.measureText(this.toastText).width;
+    const right = CONFIG.WORLD.INTERNAL_W - 6;
+    const top = 6;
+    o.fillStyle = "rgba(8, 9, 13, 0.9)";
+    o.fillRect(right - tw - padX * 2, top, tw + padX * 2, 15);
+    o.fillStyle = "#ffd166";
+    o.fillText(this.toastText, right - padX, top + 4);
+    o.restore();
+  }
+
+  artifactAt(x: number, y: number): ArtifactId | null {
     if (x < 16 || x > 304) return null;
     const i = Math.floor((y - 40) / 43);
     if (i < 0 || i > 2 || y > 40 + i * 43 + 38) return null;
-    const boon = this.world.boonChoices[i];
-    return boon && !this.world.boons.has(boon.id) ? boon.id : null;
+    const artifact = this.world.artifactChoices[i];
+    return artifact && !this.world.artifacts.has(artifact.id) ? artifact.id : null;
   }
 
-  drawBoons(o: CanvasRenderingContext2D, scale: number): void {
-    if (this.world.boonChoices.length === 0) return;
+  drawArtifacts(o: CanvasRenderingContext2D, scale: number): void {
+    if (this.world.artifactChoices.length === 0) return;
     o.save();
     o.scale(scale, scale);
     o.globalAlpha = 1;
@@ -35,21 +67,23 @@ export class Hud {
     o.fillStyle = "#a7b4c9";
     o.fillText("Đã sạch phòng · Chạm để chọn và tiếp tục", 160, 26);
     o.textAlign = "left";
-    this.world.boonChoices.slice(0, 3).forEach((boon, i) => {
+    this.world.artifactChoices.slice(0, 3).forEach((artifact, i) => {
       const y = 40 + i * 43;
       o.fillStyle = "#172233";
       o.fillRect(16, y, 288, 38);
+      o.fillStyle = ARTIFACT_COLORS[artifact.id];
+      o.fillRect(16, y, 2, 38);
       o.strokeStyle = "#537da6";
       o.lineWidth = 1;
       o.strokeRect(16.5, y + 0.5, 287, 37);
       o.font = "bold 9px sans-serif";
       o.fillStyle = "#d2e8ff";
-      o.fillText(boon.name, 24, y + 5, 272);
+      o.fillText(artifact.name, 24, y + 5, 272);
       o.font = "8px sans-serif";
       o.fillStyle = "#c3cddd";
       const lines: string[] = [];
       let line = "";
-      for (const word of boon.desc.split(/\s+/)) {
+      for (const word of artifact.desc.split(/\s+/)) {
         const next = line ? `${line} ${word}` : word;
         if (line && o.measureText(next).width > 272) {
           lines.push(line);
@@ -60,6 +94,34 @@ export class Hud {
       lines.forEach((text, j) => o.fillText(text, 24, y + 18 + j * 9, 272));
     });
     o.restore();
+  }
+
+  /** persistent strip of owned artifacts, tucked under the hearts so loot is reviewable at a glance */
+  drawOwnedArtifacts(o: CanvasRenderingContext2D, scale: number): void {
+    const ids = [...this.world.artifacts];
+    if (ids.length === 0) return;
+    const size = 6;
+    const gap = 2;
+    const pad = 2;
+    const left = 6;
+    const top = 26;
+    const width = ids.length * (size + gap) - gap;
+    o.fillStyle = "rgba(5, 7, 11, 0.72)";
+    o.fillRect(
+      Math.round((left - pad) * scale),
+      Math.round((top - pad) * scale),
+      Math.round((width + pad * 2) * scale),
+      Math.round((size + pad * 2) * scale)
+    );
+    ids.forEach((id, i) => {
+      o.fillStyle = ARTIFACT_COLORS[id];
+      o.fillRect(
+        Math.round((left + i * (size + gap)) * scale),
+        Math.round(top * scale),
+        Math.round(size * scale),
+        Math.round(size * scale)
+      );
+    });
   }
 
   draw(o: CanvasRenderingContext2D, scale: number): void {

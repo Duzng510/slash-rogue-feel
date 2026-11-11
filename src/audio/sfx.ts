@@ -13,6 +13,13 @@ const RECIPES: Record<SfxName, Recipe> = {
   door: { dur: 0.22, type: "tone", f0: 520, f1: 880, gain: 0.3 },
   death: { dur: 0.5, type: "tone", f0: 220, f1: 40, gain: 0.55 },
   telegraph: { dur: 0.06, type: "tone", f0: 880, f1: 660, gain: 0.16 },
+  burn_tick: { dur: 0.08, type: "noise", f0: 900, f1: 280, gain: 0.12, filter: 600 },
+  shock_hit: { dur: 0.09, type: "tone", f0: 1400, f1: 380, gain: 0.3 },
+  aftershock_boom: { dur: 0.28, type: "tone", f0: 120, f1: 40, gain: 0.5 },
+  pursuit_proc: { dur: 0.07, type: "tone", f0: 620, f1: 1050, gain: 0.2 },
+  reprisal_ready: { dur: 0.16, type: "tone", f0: 500, f1: 960, gain: 0.24 },
+  shoot: { dur: 0.06, type: "noise", f0: 1800, f1: 700, gain: 0.24, filter: 1400 },
+  teleport: { dur: 0.14, type: "tone", f0: 300, f1: 900, gain: 0.24 },
 };
 
 export class Sfx {

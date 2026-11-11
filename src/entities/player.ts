@@ -1,7 +1,8 @@
 import { CONFIG } from "../config.ts";
 import { angleLerp, normAngle } from "../mathx.ts";
-import { shake, sfx } from "../events.ts";
+import { artifactText, shake, sfx } from "../events.ts";
 import { createSwing, playerSwingInit, stepSwing } from "../systems/combat.ts";
+import { ENEMY_STATE } from "./enemy.ts";
 import { resolveAttackDir } from "../systems/aim.ts";
 import { knockback } from "../systems/feelSim.ts";
 import { moveBody } from "../world/collision.ts";
@@ -107,6 +108,8 @@ export class Player implements Unit {
   onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean {
     const p = CONFIG.PLAYER;
     this.hp -= sw.dmg;
+    src.runStats.damageTaken += sw.dmg;
+    src.runStats.hurtFree = false;
     this.swing = null;
     this.combo = 0;
     this.queuedAttackTicks = 0;
@@ -119,7 +122,13 @@ export class Player implements Unit {
       this.die(src);
       return true;
     }
-    this.reprisalTicks = src.boons.has("reprisal") ? 120 : 0;
+    if (src.artifacts.has("reprisal")) {
+      this.reprisalTicks = 120;
+      sfx(src.queue, "reprisal_ready", 0.8, 1);
+      artifactText(src.queue, this.x, this.y - 14, "PHẢN KÍCH", "#ffd166");
+    } else {
+      this.reprisalTicks = 0;
+    }
     this.iframeTicks = p.IFRAMES;
     this.hurtTicks = p.HURT_TICKS;
     this.setState(PLAYER_STATE.HURT);
@@ -184,7 +193,7 @@ export class Player implements Unit {
     const dashing = this.state === PLAYER_STATE.DASH;
     this.integrate(intent, src, dt);
     moveBody(this, src.room, dt);
-    if (dashing && src.boons.has("fire")) {
+    if (dashing && src.artifacts.has("fire")) {
       src.fireTrails.at(-1)?.points.push({ x: this.x, y: this.y - 3, ticks: 60 });
     }
 
@@ -230,14 +239,16 @@ export class Player implements Unit {
   private startDash(intent: Intent, src: Sim): void {
     const d = CONFIG.DASH;
     const dir = intent.moveX !== 0 || intent.moveY !== 0 ? Math.atan2(intent.moveY, intent.moveX) : this.facing;
+    src.runStats.dashCount++;
+    if (src.enemies.some(e => !e.dead && e.state === ENEMY_STATE.TELEGRAPH)) src.runStats.perfectDodges++;
     this.swing = null;
     this.combo = 0;
     this.queuedAttackTicks = 0;
     this.setState(PLAYER_STATE.DASH);
     this.dashTicks = d.TICKS;
     this.dashDir = dir;
-    this.impulseTicks = src.boons.has("impulse") ? 120 : 0;
-    if (src.boons.has("fire")) src.fireTrails.push({ points: [{ x: this.x, y: this.y - 3, ticks: 60 }], seen: new Set() });
+    this.impulseTicks = src.artifacts.has("impulse") ? 120 : 0;
+    if (src.artifacts.has("fire")) src.fireTrails.push({ points: [{ x: this.x, y: this.y - 3, ticks: 60 }], seen: new Set() });
     this.dashCd = d.COOLDOWN;
     this.dashIframeTicks = d.IFRAME_TICKS;
     this.facing = dir;
@@ -278,7 +289,7 @@ export class Player implements Unit {
 
     if (control > 0) {
       const speed = Math.hypot(this.vx, this.vy);
-      const maxSpeed = p.SPEED * (src.boons.has("desperate") && this.hp <= 2 ? 1.2 : 1);
+      const maxSpeed = p.SPEED * (src.artifacts.has("desperate") && this.hp <= 2 ? 1.2 : 1);
       if (speed > maxSpeed) {
         this.vx = (this.vx / speed) * maxSpeed;
         this.vy = (this.vy / speed) * maxSpeed;

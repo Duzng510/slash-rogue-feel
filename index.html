@@ -40,8 +40,8 @@
         position: absolute; image-rendering: pixelated;
       }
       #overlay { pointer-events: none; }
-      body.boon-modal #overlay { pointer-events: auto; cursor: pointer; }
-      body.boon-modal.touch #touch, body.boon-modal #panel, body.boon-modal #keys { display: none; }
+      body.artifact-modal #overlay { pointer-events: auto; cursor: pointer; }
+      body.artifact-modal.touch #touch, body.artifact-modal #panel, body.artifact-modal #keys { display: none; }
       #version { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); color: var(--dim); font-size: 11px; }
       #panel {
         position: fixed; left: 8px; top: 8px; z-index: 5; width: 236px;
@@ -90,7 +90,7 @@
   </head>
   <body class="starting">
     <div id="app">
-    <div id="start-screen"><button id="btn-start" type="button">START</button><span id="version">v0.1.0</span></div>
+    <div id="start-screen"><button id="btn-start" type="button">START</button><span id="version">v0.4.0</span></div>
     <div id="stage">
       <canvas id="game"></canvas>
       <canvas id="overlay"></canvas>

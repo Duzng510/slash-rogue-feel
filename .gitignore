@@ -23,6 +23,10 @@ tools/dev.log
 tools/shot-*.png
 tools/cdp*/
 
+# Harness scratch output (screenshots, CDP profiles) — keep dir, ignore contents
+tools/out/*
+!tools/out/.gitkeep
+
 # Environment variables & secrets
 .env
 .env.local

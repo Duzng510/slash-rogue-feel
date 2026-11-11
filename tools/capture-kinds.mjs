@@ -6,7 +6,7 @@ import { writeFileSync } from "node:fs";
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9334;
 const BASE = "http://localhost:5199/?manual=1&seed=42";
-const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools";
+const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools/out";
 
 const chrome = spawn(CHROME, [
   "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
@@ -98,7 +98,7 @@ const walk = (dx, dy, ticks) => `
 
 await shot(
   "kinds",
-  `g.gotoRoom(4); ${walk(1, 0, 55)} g.addEnemies(3, ["charger", "splitter", "small"]);`,
+  `g.gotoRoom(6); ${walk(1, 0, 55)} g.addEnemies(3, ["charger", "splitter", "small"]);`,
   `near("boss") && near("charger") && near("splitter") && near("small") && s.enemies.every(e => e.state !== "attack" && e.state !== "dead")`
 );
 
@@ -111,13 +111,13 @@ await shot(
 
 await shot(
   "boss-ring",
-  `g.gotoRoom(4);`,
+  `g.gotoRoom(6);`,
   `tele("boss", 4, 14) && !s.enemies.some(e => e.kind === "boss" && e.enraged)`
 );
 
 await shot(
   "boss-enraged",
-  `g.gotoRoom(4); const b = g.state().enemies.find(e => e.kind === "boss"); for (let i = 0; i < 13; i++) g.damageEnemy(b.id, 1);`,
+  `g.gotoRoom(6); const b = g.state().enemies.find(e => e.kind === "boss"); for (let i = 0; i < 13; i++) g.damageEnemy(b.id, 1);`,
   `s.enemies.some(e => e.kind === "boss" && e.enraged) && tele("boss", 4, 12)`
 );
 
@@ -125,6 +125,44 @@ await shot(
   "crowd",
   `g.gotoRoom(1); ${walk(1, 0, 40)} g.addEnemies(8);`,
   `s.enemies.filter(e => e.state === "telegraph").length >= 4`
+);
+
+await shot(
+  "ranged",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["ranged"]);`,
+  `tele("ranged", 1, 40)`
+);
+
+await shot(
+  "ranged-shot",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["ranged"]);`,
+  `s.projectiles > 0`
+);
+
+await shot(
+  "teleporter",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["teleporter"]);`,
+  `s.enemies.some(e => e.kind === "teleporter" && e.state !== "vanish" && e.state !== "dead")`
+);
+
+await shot(
+  "teleporter-vanish",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["teleporter"]);`,
+  `s.enemies.some(e => e.kind === "teleporter" && e.state === "vanish")`
+);
+
+await shot(
+  "room-corridor",
+  `g.gotoRoom(4);`,
+  `s.enemies.length === 5 && !s.player.dead`,
+  10
+);
+
+await shot(
+  "room-arena",
+  `g.gotoRoom(5);`,
+  `s.enemies.length === 10 && !s.player.dead`,
+  10
 );
 
 ws.close();
