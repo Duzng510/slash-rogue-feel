@@ -47,6 +47,7 @@ export class Renderer {
   private white: Record<string, HTMLCanvasElement> = {};
   private statusSprites: Record<string, HTMLCanvasElement[]> = {};
   private tileOf: Record<number, Sprite> = {};
+  private biomeTileOf: Record<string, Record<number, Sprite>> = {};
 
   constructor(
     private readonly game: HTMLCanvasElement,
@@ -79,6 +80,14 @@ export class Renderer {
     this.tileOf[TILE.DOOR_OPEN] = sprites.door_open;
     this.tileOf[TILE.TRAP] = sprites.trap;
     this.tileOf[TILE.TRAP_ARMED] = sprites.trap_spent;
+    for (const id of ["dungeon", "caverns", "forge", "void"] as const) {
+      this.biomeTileOf[id] = {
+        ...this.tileOf,
+        [TILE.FLOOR]: sprites[`floor_${id}`] ?? sprites.floor,
+        [TILE.ACCENT]: sprites[`accent_${id}`] ?? sprites.accent,
+        [TILE.WALL]: sprites[`wall_${id}`] ?? sprites.wall,
+      };
+    }
   }
 
   resize(): void {
@@ -194,14 +203,56 @@ export class Renderer {
     const py = Math.round(pl.y - 7 - oy);
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
+    const biome = this.world.currentBiome;
 
-    // Soft atmospheric vignette darkening screen corners
+    // Keep the original Dungeon vignette; other biomes add a light palette tint.
     const grad = g.createRadialGradient(px, py, 45, px, py, 175);
     grad.addColorStop(0, "rgba(5, 7, 11, 0)");
     grad.addColorStop(0.65, "rgba(5, 7, 11, 0.22)");
     grad.addColorStop(1, "rgba(5, 7, 11, 0.65)");
     g.fillStyle = grad;
     g.fillRect(0, 0, iw, ih);
+
+    if (biome.id !== "dungeon") {
+      const atmosphere = g.createRadialGradient(px, py, 10, px, py, 150);
+      atmosphere.addColorStop(0, "rgba(0, 0, 0, 0)");
+      atmosphere.addColorStop(0.62, biome.palette.ambient);
+      atmosphere.addColorStop(1, "rgba(0, 0, 0, 0)");
+      g.fillStyle = atmosphere;
+      g.fillRect(0, 0, iw, ih);
+    }
+
+    const time = performance.now() * 0.001;
+    for (let i = 0; i < 12; i++) {
+      let x = 0;
+      let y = 0;
+      let size = 1;
+      let alpha = 0.2;
+      if (biome.id === "caverns") {
+        x = (i * 37 + time * 2.5 + Math.sin(time + i) * 3) % iw;
+        y = (i * 29 + time * 8) % ih;
+        size = i % 3 === 0 ? 2 : 1;
+        alpha = 0.3;
+      } else if (biome.id === "forge") {
+        x = (i * 31 + Math.sin(time * 0.8 + i) * 8 + iw) % iw;
+        y = (ih - ((i * 19 + time * 18) % ih)) % ih;
+        size = i % 4 === 0 ? 2 : 1;
+        alpha = 0.42;
+      } else if (biome.id === "void") {
+        x = (i * 23 + 7) % iw;
+        y = (i * 17 + 3) % ih;
+        size = i % 5 === 0 ? 2 : 1;
+        alpha = 0.12 + (Math.sin(time * 1.8 + i) + 1) * 0.12;
+      } else {
+        x = (i * 23 + time * 1.5) % iw;
+        y = (i * 31 + Math.sin(time + i) * 2 + ih) % ih;
+        alpha = 0.1;
+      }
+      g.globalAlpha = alpha;
+      g.fillStyle = biome.palette.particle;
+      g.fillRect(Math.floor(x), Math.floor(y), size, size);
+    }
+    g.globalAlpha = 1;
   }
 
   private drawTiles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
@@ -211,9 +262,10 @@ export class Renderer {
     const y0 = Math.max(0, Math.floor(oy / T));
     const x1 = Math.min(room.w - 1, Math.ceil((ox + CONFIG.WORLD.INTERNAL_W) / T));
     const y1 = Math.min(room.h - 1, Math.ceil((oy + CONFIG.WORLD.INTERNAL_H) / T));
+    const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
-        const s = this.tileOf[room.at(tx, ty)] ?? this.tileOf[TILE.FLOOR];
+        const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
         g.drawImage(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy));
       }
     }

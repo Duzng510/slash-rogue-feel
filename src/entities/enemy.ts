@@ -113,7 +113,7 @@ export class Enemy implements Unit {
     this.hurtW = def.HURT_W * size;
     this.hurtH = def.HURT_H * size;
     this.killPitch = def.KILL_PITCH;
-    this.hp = def.HP * (elite ? 2 : 1);
+    this.hp = Math.ceil(def.HP * (elite ? 2 : 1) * CONFIG.ASCENSION.enemyHpMultiplier);
     this.maxHp = this.hp;
     this.corpseTicks = def.CORPSE_TICKS;
     this.telegraphTotal = def.TELEGRAPH_TICKS;
@@ -208,9 +208,10 @@ export class Enemy implements Unit {
       if (playerOwned && src.artifacts.has("vampire") && src.runStats.enemiesKilled % 5 === 0 && !src.player.dead) {
         const cap = src.player.maxHp;
         if (src.player.hp < cap) {
-          src.player.hp++;
+          const healing = CONFIG.ASCENSION.playerHealMultiplier;
+          src.player.hp = Math.min(cap, src.player.hp + healing);
           src.runStats.vampireHeals++;
-          artifactText(src.queue, src.player.x, src.player.y - 14, "+1 HP", "#e0455a");
+          artifactText(src.queue, src.player.x, src.player.y - 14, `+${healing} HP`, "#e0455a");
           sfx(src.queue, "pursuit_proc", 0.6, 0.9);
         }
       }
@@ -339,7 +340,7 @@ export class Enemy implements Unit {
       }
       sfx(src.queue, "pursuit_proc", 0.3, 1.4);
     }
-    const speedScale = this.wetTicks > 0 ? 0.7 : 1;
+    const speedScale = (this.wetTicks > 0 ? 0.7 : 1) * CONFIG.ASCENSION.enemySpeedMultiplier;
     if (this.wetTicks > 0) this.wetTicks--;
     if (this.bleedTicks > 0) this.bleedTicks--;
     if (this.bleedCd > 0) this.bleedCd--;
@@ -452,10 +453,11 @@ export class Enemy implements Unit {
     }
   }
 
-  /** 1 = calm, 2 = enraged rings, 3 = desperation + summons (boss only) */
-  bossPhase(): 1 | 2 | 3 {
+  /** 1 = calm, 2 = enraged rings, 3 = desperation + summons, 4 = ascension finale */
+  bossPhase(): 1 | 2 | 3 | 4 {
     if (this.kind !== "boss") return 1;
     const frac = this.hp / this.maxHp;
+    if (CONFIG.ASCENSION.bossExtraPhase && frac <= 0.1) return 4;
     if (this.def.PHASE3_FRACTION > 0 && frac <= this.def.PHASE3_FRACTION) return 3;
     if (this.enraged || frac <= this.def.ENRAGE_FRACTION) return 2;
     return 1;
@@ -467,7 +469,7 @@ export class Enemy implements Unit {
     if (this.kind === "warden") this.pattern = WARDEN_CYCLE[this.patternIndex++ % WARDEN_CYCLE.length];
     const t = this.kind === "warden" && this.pattern === "laser" && e.LASER_TELEGRAPH_TICKS > 0
       ? e.LASER_TELEGRAPH_TICKS
-      : phase === 3 && e.PHASE3_TELEGRAPH_TICKS > 0
+      : phase >= 3 && e.PHASE3_TELEGRAPH_TICKS > 0
       ? e.PHASE3_TELEGRAPH_TICKS
       : phase === 2 && e.ENRAGED_TELEGRAPH_TICKS > 0
         ? e.ENRAGED_TELEGRAPH_TICKS
@@ -527,7 +529,7 @@ export class Enemy implements Unit {
     this.followUps = phase >= 2 ? phase - 1 : 0;
     if (this.kind === "boss") {
       this.attackRings++;
-      if (phase === 3 && this.attackRings % 2 === 0) {
+      if (phase >= 3 && this.attackRings % 2 === 0) {
         for (let i = 0; i < 2; i++) {
           const a = (i / 2) * Math.PI * 2 + src.rng.range(-0.4, 0.4);
           src.spawnEnemy(this.x + Math.cos(a) * 22, this.y + Math.sin(a) * 22, "small");

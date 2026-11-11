@@ -182,6 +182,11 @@ function modalFromClient(x: number, y: number): string | null {
   return hud.modalAt(cx, cy);
 }
 function applyModal(key: string, from: ModalKey): void {
+  if (from === "q") {
+    if (key === "q:-") world.setAscensionLevel(world.ascensionLevel - 1);
+    else if (key === "q:+") world.setAscensionLevel(world.ascensionLevel + 1);
+    return;
+  }
   if (from === "w" || key.startsWith("w:")) {
     if (world.pickWeapon(key.slice(2) as WeaponId)) {
       resetInput();
@@ -216,7 +221,7 @@ function applyModal(key: string, from: ModalKey): void {
   } else chooseArtifact(key.slice(2) as ArtifactId);
 }
 /** which modal a pointer press landed in; the key after the prefix tells which id was hit */
-type ModalKey = "p" | "w" | "a" | "c" | "s" | "t";
+type ModalKey = "p" | "w" | "a" | "c" | "s" | "t" | "q";
 function modalKind(key: string | null): ModalKey | null {
   if (key === null) return null;
   return key[0] as ModalKey;

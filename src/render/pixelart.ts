@@ -18,6 +18,53 @@ function rect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
   g.fillRect(x, y, w, h);
 }
 
+function bakeBiomeTiles(S: Record<string, Sprite>, T: number, id: string, floor: string, wall: string, accent: string): void {
+  const dungeon = id === "dungeon";
+  const edge = dungeon ? "#181b22" : id === "caverns" ? "#1e2d39" : id === "forge" ? "#2a150e" : "#1b0f28";
+  const floorShadow = dungeon ? "#0d0f14" : id === "caverns" ? "#09111a" : id === "forge" ? "#0d0704" : "#06030b";
+  const shadow = dungeon ? P.VOID : floorShadow;
+  const wallTop = dungeon ? P.WALL_TOP : id === "caverns" ? "#2c4b64" : id === "forge" ? "#55271a" : "#321c47";
+  const wallRim = dungeon ? "#4d5975" : id === "caverns" ? "#527a94" : id === "forge" ? "#8b3f29" : "#58336f";
+
+  S[`floor_${id}`] = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, floor);
+    rect(g, 0, 0, T, 1, edge);
+    rect(g, 0, 0, 1, T, edge);
+    rect(g, 0, T - 1, T, 1, shadow);
+    rect(g, T - 1, 0, 1, T, shadow);
+    g.globalAlpha = 0.45;
+    rect(g, 3, 4, 2, 1, accent);
+    rect(g, 9, 8, 3, 1, accent);
+    rect(g, 12, 12, 2, 2, accent);
+    rect(g, 5, 11, 1, 2, accent);
+  });
+
+  S[`accent_${id}`] = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, floor);
+    rect(g, 0, 0, T, 1, accent);
+    rect(g, 0, 0, 1, T, accent);
+    rect(g, 0, T - 1, T, 1, shadow);
+    rect(g, T - 1, 0, 1, T, shadow);
+    g.globalAlpha = 0.6;
+    rect(g, 4, 4, 8, 8, accent);
+    rect(g, 6, 6, 4, 4, floor);
+  });
+
+  S[`wall_${id}`] = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, wall);
+    rect(g, 0, 0, T, 3, wallTop);
+    rect(g, 0, 0, T, 1, wallRim);
+    rect(g, 0, 3, T, 1, shadow);
+    g.globalAlpha = 0.55;
+    rect(g, 0, 8, T, 1, shadow);
+    rect(g, 7, 4, 1, 4, shadow);
+    rect(g, 3, 9, 1, 7, shadow);
+    rect(g, 12, 9, 1, 7, shadow);
+    g.globalAlpha = 0.8;
+    rect(g, 0, T - 2, T, 2, shadow);
+  });
+}
+
 /** bottom-centre anchored, feet at ay */
 export function buildSprites(): Record<string, Sprite> {
   const S: Record<string, Sprite> = {};
@@ -339,6 +386,11 @@ export function buildSprites(): Record<string, Sprite> {
     g.globalAlpha = 0.8;
     rect(g, 0, T - 2, T, 2, P.VOID);
   });
+
+  bakeBiomeTiles(S, T, "dungeon", "#121419", "#2b3242", "#1b1f28");
+  bakeBiomeTiles(S, T, "caverns", "#101822", "#1f3548", "#16304a");
+  bakeBiomeTiles(S, T, "forge", "#1a0e08", "#3a1a10", "#2a1410");
+  bakeBiomeTiles(S, T, "void", "#0a0512", "#1e0f2e", "#180a28");
 
   S.crate = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 2, T, T - 2, P.WALL);

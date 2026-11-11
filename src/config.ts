@@ -470,6 +470,17 @@ export const CONFIG = {
 
   ENEMY: ENEMY_BASE,
 
+  ASCENSION: {
+    enemyHpMultiplier: 1,
+    enemySpeedMultiplier: 1,
+    playerHealMultiplier: 1,
+    bossExtraPhase: false,
+    extraEnemiesPerWave: 0,
+    trapDamageMultiplier: 1,
+    artifactChoices: 3,
+    shopPriceMultiplier: 1,
+  },
+
   FEEL: {
     HIT_STOP_NORMAL: 3,
     HIT_STOP_KILL: 5,

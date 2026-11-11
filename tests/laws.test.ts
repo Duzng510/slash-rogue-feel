@@ -21,6 +21,8 @@ import { fitAxes, rotateVec, tryImmersive } from "../src/ui/immersive.ts";
 import { stalled } from "../src/ui/diag.ts";
 import { GameLoop } from "../src/loop.ts";
 import type { Intent } from "../src/sim/types.ts";
+import { biomeForRoom } from "../src/systems/biomes.ts";
+import { applyAscension } from "../src/systems/ascension.ts";
 
 let pass = 0;
 let fail = 0;
@@ -56,7 +58,7 @@ function sandbox(): World {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() };
+  return { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 };
 }
 
 function duel(w: World, gap = 16): number {
@@ -732,7 +734,7 @@ heading("Curse (P10)");
 {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() });
+  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
   w.clearEnemies();
   w.tick(intent());
   ok("the first clear offers a two-curse package", w.curseOffer !== null && w.curseOffer.curses.length === 2 && w.curseOffer.artifacts.length === 2);
@@ -1250,6 +1252,38 @@ heading("Characters (H2 build choice)");
   saved.weaponsWon.add("greatsword");
   const parsed = parseAchievements(stringifyAchievements(saved));
   ok("weaponsWon persists across serialization", parsed.weaponsWon.has("dagger") && parsed.weaponsWon.has("greatsword"));
+}
+
+heading("Biomes and Ascension");
+{
+  const expectedBiomes = ["dungeon", "dungeon", "dungeon", "caverns", "caverns", "caverns", "forge", "forge", "forge", "void", "void", "void"];
+  const rangesMatch = expectedBiomes.every((id, room) => biomeForRoom(room).id === id);
+  ok("the twelve room indices map to the four requested biomes", rangesMatch);
+
+  const world = new World(CONFIG.SEED, emptyAchievements());
+  let poolsMatch = true;
+  for (let roomIndex = 0; roomIndex < world.roomTotal; roomIndex++) {
+    world.loadRoom(roomIndex, false);
+    const pool = biomeForRoom(roomIndex).enemyPool;
+    if (world.currentBiome.id !== biomeForRoom(roomIndex).id || world.enemies.some((enemy) => enemy.kind !== "boss" && enemy.kind !== "warden" && !pool.includes(enemy.kind))) poolsMatch = false;
+  }
+  ok("normal enemies use biome pools while scripted bosses remain", poolsMatch);
+
+  const levelFive = new World(CONFIG.SEED, { ...emptyAchievements(), ascensionMax: 5 });
+  const baseline = new World(CONFIG.SEED, emptyAchievements());
+  ok("Ascension V adds two enemies to the opening wave", levelFive.enemies.length === baseline.enemies.length + 2);
+  ok("Ascension level selection stays within the unlocked maximum", levelFive.ascensionLevel === 5 && !levelFive.setAscensionLevel(6) && levelFive.setAscensionLevel(3));
+
+  const config = { ...CONFIG, ASCENSION: { ...CONFIG.ASCENSION } };
+  applyAscension(config, 8);
+  ok("Ascension VIII enables every cumulative modifier", config.ASCENSION.enemyHpMultiplier === 1.2 && config.ASCENSION.enemySpeedMultiplier === 1.1 && config.ASCENSION.playerHealMultiplier === 0.5 && config.ASCENSION.bossExtraPhase && config.ASCENSION.extraEnemiesPerWave === 2 && config.ASCENSION.trapDamageMultiplier === 2 && config.ASCENSION.artifactChoices === 2 && config.ASCENSION.shopPriceMultiplier === 1.5);
+  applyAscension(config, 0);
+  ok("Ascension 0 restores the base modifiers", config.ASCENSION.enemyHpMultiplier === 1 && config.ASCENSION.enemySpeedMultiplier === 1 && config.ASCENSION.playerHealMultiplier === 1 && !config.ASCENSION.bossExtraPhase && config.ASCENSION.extraEnemiesPerWave === 0 && config.ASCENSION.trapDamageMultiplier === 1 && config.ASCENSION.artifactChoices === 3 && config.ASCENSION.shopPriceMultiplier === 1);
+
+  const saved = emptyAchievements();
+  saved.ascensionMax = 8;
+  ok("Ascension unlock progress survives save serialization", parseAchievements(stringifyAchievements(saved)).ascensionMax === 8);
+  ok("legacy saves start with Ascension 0 unlocked", parseAchievements('{"earned":[],"best":null,"totalGold":5}').ascensionMax === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

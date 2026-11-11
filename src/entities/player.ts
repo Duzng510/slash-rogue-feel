@@ -401,8 +401,9 @@ export class Player implements Unit {
     if (++this.killsSinceHeal < 10) return;
     this.killsSinceHeal = 0;
     if (this.dead || this.hp >= this.maxHp) return;
-    this.hp++;
-    artifactText(src.queue, this.x, this.y - 14, "+1 HP", "#58ff8a");
+    const healing = CONFIG.ASCENSION.playerHealMultiplier;
+    this.hp = Math.min(this.maxHp, this.hp + healing);
+    artifactText(src.queue, this.x, this.y - 14, `+${healing} HP`, "#58ff8a");
     sfx(src.queue, "pursuit_proc", 0.6, 1.1);
   }
 

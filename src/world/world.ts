@@ -20,6 +20,8 @@ import { WEAPON_LIST, type WeaponId } from "../systems/weapons.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
 import { Room, TEMPLATES, TILE, type SpawnMark } from "../world/rooms.ts";
 import { SpatialGrid } from "./grid.ts";
+import { applyAscension, normalizeAscensionLevel, type AscensionLevel } from "../systems/ascension.ts";
+import { biomeForRoom, type Biome } from "../systems/biomes.ts";
 import type { Intent, Projectile, Sim, Unit } from "../sim/types.ts";
 
 export type ShopOffer = {
@@ -47,7 +49,10 @@ export class World implements Sim {
   hitStopTicks = 0;
   roomIndex = 0;
   readonly roomTotal = TEMPLATES.length;
+  currentBiome: Biome = biomeForRoom(0);
+  ascensionLevel: AscensionLevel = 0;
   bannerTicks = 0;
+  bannerDuration = 96;
   bannerText = "";
   /** run-start walk-in; >0 while the hero enters and enemies hold */
   introTicks = 0;
@@ -87,9 +92,24 @@ export class World implements Sim {
     this.rng = makeRng(seed);
     this.artifactRng = makeRng(seed ^ 0xb001);
     this.achievements = achievements;
+    this.ascensionLevel = normalizeAscensionLevel(achievements.ascensionMax);
+    applyAscension(CONFIG, this.ascensionLevel);
     this.room = new Room(TEMPLATES[0], 0);
     this.loadRoom(0, false);
     this.characterChoices = [...CHARACTER_LIST];
+  }
+
+  setAscensionLevel(level: number): boolean {
+    if (!Number.isFinite(level)) return false;
+    const next = normalizeAscensionLevel(level);
+    if (next > this.achievements.ascensionMax) return false;
+    if (next === this.ascensionLevel) {
+      applyAscension(CONFIG, next);
+      return false;
+    }
+    this.ascensionLevel = next;
+    applyAscension(CONFIG, next);
+    return true;
   }
 
   pickCharacter(id: CharacterId): boolean {
@@ -119,22 +139,44 @@ export class World implements Sim {
     this.enemies.push(makeEnemy(x, y, kind, elite));
   }
 
-  /** pick `count` trash markers, deterministic by seed; boss markers always field */
+  /** filter room markers by biome, then select a deterministic count from the eligible pool */
   private waveSpawns(index: number): SpawnMark[] {
-    const want = CONFIG.ROOMS.WAVES[index] ?? this.room.spawns.length;
-    const bosses = this.room.spawns.filter(s => s.kind === "boss" || s.kind === "warden");
-    const pool = this.room.spawns.filter(s => s.kind !== "boss" && s.kind !== "warden");
+    const fallback = this.currentBiome.enemyPool[0] ?? "chaser";
+  // Boss and warden markers are authored encounters, not ordinary biome-pool spawns.
+  const markers = this.room.spawns.map((spawn) => {
+  const isScriptedEncounter = spawn.kind === "boss" || spawn.kind === "warden";
+  return {
+  ...spawn,
+  kind: isScriptedEncounter || this.currentBiome.enemyPool.includes(spawn.kind) ? spawn.kind : fallback,
+  };
+  });
+    const bosses = markers.filter((spawn) => spawn.kind === "boss" || spawn.kind === "warden");
+    const pool = markers.filter((spawn) => spawn.kind !== "boss" && spawn.kind !== "warden");
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(this.rng.next() * (i + 1));
-      const t = pool[i];
-      pool[i] = pool[j];
-      pool[j] = t;
+      [pool[i], pool[j]] = [pool[j]!, pool[i]!];
     }
-    return [...bosses, ...pool.slice(0, Math.max(0, want - bosses.length))];
+    const want = CONFIG.ROOMS.WAVES[index] ?? pool.length;
+    const baseCount = Math.min(pool.length, Math.max(0, want - bosses.length));
+    const selected = pool.slice(0, baseCount);
+    const extra = this.room.shop ? 0 : CONFIG.ASCENSION.extraEnemiesPerWave;
+    for (let i = 0; i < extra && pool.length > 0; i++) {
+      const spawn = pool[i % pool.length]!;
+      const angle = (i + 1) * 2.399963229728653;
+      selected.push({
+        ...spawn,
+        x: spawn.x + Math.cos(angle) * 10,
+        y: spawn.y + Math.sin(angle) * 10,
+      });
+    }
+    return [...bosses, ...selected];
   }
 
   loadRoom(index: number, keepSweep = true): void {
+    const previousBiome = this.currentBiome.id;
     this.roomIndex = ((index % this.roomTotal) + this.roomTotal) % this.roomTotal;
+    this.currentBiome = biomeForRoom(this.roomIndex);
+    const biomeChanged = previousBiome !== this.currentBiome.id;
     this.room = new Room(TEMPLATES[this.roomIndex], this.roomIndex);
     resetEnemyIds();
     this.enemies = [];
@@ -153,12 +195,16 @@ export class World implements Sim {
     if (keepSweep) this.particles.reset();
     this.hitStopTicks = 0;
     this.victory = false;
-    this.banner(`${this.roomIndex + 1}/${this.roomTotal}  ${this.room.name}`);
+    this.banner(
+      biomeChanged ? `VÀO ${this.currentBiome.name.toLocaleUpperCase("vi-VN")}` : `${this.roomIndex + 1}/${this.roomTotal}  ${this.room.name}`,
+      biomeChanged ? 60 : 96,
+    );
   }
 
-  banner(text: string): void {
+  banner(text: string, duration = 96): void {
     this.bannerText = text;
-    this.bannerTicks = 96;
+    this.bannerTicks = duration;
+    this.bannerDuration = duration;
   }
 
   /** start the entrance: hero walks in through the gap in the left wall, then says their line */
@@ -185,6 +231,7 @@ export class World implements Sim {
   /** full run reset from the end screen: fresh stats, no artifacts, back to room 0 */
   restart(): void {
     this.resetRun();
+    this.setAscensionLevel(this.achievements.ascensionMax);
     this.artifacts.clear();
     this.curses.clear();
     this.player.maxHp = CHARACTERS[this.player.character].baseHp;
@@ -197,6 +244,7 @@ export class World implements Sim {
   /** after a win, keep the artifacts and start the next run from room 0 with fresh stats */
   continueAfterWin(): void {
     this.resetRun();
+    this.setAscensionLevel(this.achievements.ascensionMax);
     this.rewardedRooms.clear();
     this.characterChoices = [...CHARACTER_LIST];
     this.weaponChoices = null;
@@ -246,10 +294,10 @@ export class World implements Sim {
       }
       this.runStats.artifactsTaken++;
     } else if (offer.kind === "heal") {
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2 * CONFIG.ASCENSION.playerHealMultiplier);
     } else if (offer.kind === "maxhp") {
       this.player.maxHp++;
-      this.player.hp++;
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + CONFIG.ASCENSION.playerHealMultiplier);
     } else {
       const first = [...this.curses][0];
       if (first !== undefined) this.curses.delete(first);
@@ -282,7 +330,10 @@ export class World implements Sim {
       const j = Math.floor(this.artifactRng.next() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
-    return pool.slice(0, 3);
+    return pool.slice(0, 3).map((offer) => ({
+      ...offer,
+      price: Math.ceil(offer.price * CONFIG.ASCENSION.shopPriceMultiplier),
+    }));
   }
 
   /** bank this run's earnings into the persisted lifetime total, then check the rich achievement */
@@ -416,7 +467,7 @@ export class World implements Sim {
         oy: u.y,
         reach: 0,
         deg: 0,
-        dmg: CONFIG.ROOMS.TRAP_DMG,
+        dmg: CONFIG.ROOMS.TRAP_DMG * CONFIG.ASCENSION.trapDamageMultiplier,
         knockback: 0,
         fd: { startup: 0, active: 1, recovery: 0 },
       });
@@ -477,7 +528,7 @@ export class World implements Sim {
           const j = Math.floor(this.artifactRng.next() * (i + 1));
           [pool[i], pool[j]] = [pool[j], pool[i]];
         }
-        this.artifactChoices = pool.slice(0, 3);
+        this.artifactChoices = pool.slice(0, CONFIG.ASCENSION.artifactChoices);
         if (this.runStats.roomsCleared % CONFIG.CURSES.OFFER_EVERY === 0 &&
           this.curses.size < CONFIG.CURSES.MAX_CURSES && pool.length >= 5) {
           const cursePool = CURSES.filter(c => !this.curses.has(c.id) &&
@@ -503,6 +554,12 @@ export class World implements Sim {
         this.victory = true;
         this.endRun();
         this.awardAchievements(checkAchievements(this.runStats, "win"));
+        if (this.ascensionLevel >= 1) this.awardAchievements(["ascension_1"]);
+        if (this.ascensionLevel >= 4) this.awardAchievements(["ascension_4"]);
+        if (this.ascensionLevel >= 8) this.awardAchievements(["ascension_8"]);
+        if (this.ascensionLevel === this.achievements.ascensionMax && this.achievements.ascensionMax < 8) {
+          this.achievements.ascensionMax = (this.achievements.ascensionMax + 1) as AscensionLevel;
+        }
         this.saveBestRun();
         this.pendingEnd = "won";
         this.banner("Thắng!");
