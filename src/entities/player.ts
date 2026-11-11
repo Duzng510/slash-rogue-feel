@@ -3,6 +3,7 @@ import { angleLerp, dist, normAngle } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
 import { createSwing, hitFeedback, playerSwingInit, stepSwing } from "../systems/combat.ts";
 import { CHARACTERS, COMBO_HITS, COMBO_WINDOW, executeSkill, type CharacterId } from "../systems/characters.ts";
+import { WEAPONS, type WeaponId } from "../systems/weapons.ts";
 import { ENEMY_STATE } from "./enemy.ts";
 import { resolveAttackDir } from "../systems/aim.ts";
 import { knockback } from "../systems/feelSim.ts";
@@ -68,6 +69,7 @@ export class Player implements Unit {
   shieldCd = 0;
   autoTargetId = -1;
   character: CharacterId = "swordsman";
+  weapon: WeaponId = "katana";
   skillCd = 0;
   skillActiveTicks = 0;
   comboHits = 0;
@@ -220,7 +222,7 @@ export class Player implements Unit {
     const attackAllowed = this.state !== PLAYER_STATE.HURT;
     const freshRequest = intent.attack && attackAllowed && this.swing === null;
     if (this.queuedAttackTicks > 0) this.queuedAttackTicks--;
-    if (intent.attack && attackAllowed && this.swing !== null && this.combo < CONFIG.ATTACK.COMBOS.length) {
+    if (intent.attack && attackAllowed && this.swing !== null && this.combo < WEAPONS[this.weapon].combos.length) {
       this.queuedAttackTicks = CONFIG.INPUT.PRESS_BUFFER_TICKS;
     }
 
@@ -259,8 +261,9 @@ export class Player implements Unit {
   private canChain(): boolean {
     const sw = this.swing;
     if (sw === null) return false;
-    const maxCombo = CONFIG.ATTACK.COMBOS.length;
-    return sw.phase === "recover" && sw.ticksLeft <= CONFIG.ATTACK.CHAIN_CANCEL_WINDOW && sw.combo < maxCombo;
+    const w = WEAPONS[this.weapon];
+    const maxCombo = w.combos.length;
+    return sw.phase === "recover" && sw.ticksLeft <= w.chainWindow && sw.combo < maxCombo;
   }
 
   private startSwing(src: Sim, combo: number, intent: Intent, prevDir: number | null): void {

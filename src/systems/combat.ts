@@ -4,6 +4,7 @@ import { normAngle, pointInArc, rectsOverlap } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
 import { requestHitStop } from "./feelSim.ts";
 import { CHARACTERS } from "./characters.ts";
+import { WEAPONS } from "./weapons.ts";
 import type { Rect } from "../mathx.ts";
 import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
 import type { Enemy } from "../entities/enemy.ts";
@@ -46,31 +47,26 @@ export function createSwing(src: Sim, init: SwingInit): Swing {
 }
 
 export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit {
-  const a = CONFIG.ATTACK;
-  const second = combo >= 2;
-  const scale = second ? a.COMBO2_REACH_SCALE : 1;
+  const w = WEAPONS[src.player.weapon];
+  const cb = w.combos[Math.min(w.combos.length, combo) - 1];
   const berserk = src.artifacts.has("berserker") ? 1 + Math.min(0.5, (src.player.maxHp - src.player.hp) * 0.1) : 1;
   const chain = src.player.consumeCombo();
-  const base = a.COMBOS[Math.min(a.COMBOS.length, combo) - 1];
-  const fd = src.curses.has("slow_hand") ? { ...base, startup: base.startup + CONFIG.CURSES.STARTUP_TICKS } : base;
+  const slow = src.curses.has("slow_hand") ? CONFIG.CURSES.STARTUP_TICKS : 0;
   return {
     side: "player",
     status: combo === 1 ? (src.artifacts.has("water") ? "wet" : src.artifacts.has("poison") ? "poison" : undefined)
       : combo === 2 ? (src.artifacts.has("lightning") ? "shock" : src.artifacts.has("freeze") ? "freeze" : undefined)
       : undefined,
-    combo,
-    dir,
-    ox: src.player.x,
-    oy: src.player.y,
-    reach: a.REACH * scale,
-    deg: Math.min(170, a.ARC_DEG * (second ? a.COMBO2_ARC_SCALE : 1)),
+    combo, dir,
+    ox: src.player.x, oy: src.player.y,
+    reach: cb.reach, deg: cb.deg,
     dmg:
-      a.DMG * CHARACTERS[src.player.character].damageMult * (chain ? 1.5 : 1) *
+      cb.dmg * CHARACTERS[src.player.character].damageMult * (chain ? 1.5 : 1) *
       (src.artifacts.has("heavy") ? 1.3 : 1) * berserk * (src.artifacts.has("glasscannon") ? 1.75 : 1) *
       (src.curses.has("glass") ? CONFIG.CURSES.DEALT_MULT : 1) +
       (src.player.reprisalTicks > 0 ? 1 : 0),
-    knockback: a.KNOCKBACK * (src.player.impulseTicks > 0 ? 2 : 1),
-    fd,
+    knockback: cb.knockback * (src.player.impulseTicks > 0 ? 2 : 1),
+    fd: { startup: cb.fd.startup + slow, active: cb.fd.active, recovery: cb.fd.recovery },
   };
 }
 
@@ -226,7 +222,8 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     const heavy = !killed && sw.side === "player" && src.artifacts.has("heavy");
     const sname = killed ? "kill" : heavy ? "slash_hit_heavy" : "slash_hit";
     sfx(src.queue, sname, killed ? 1.1 : 1, (killed ? 0.82 : heavy ? 0.85 : 1) * (target.killPitch ?? 1));
-    if (stop) requestHitStop(src, (killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL) * (src.artifacts.has("heavy") ? 1.5 : 1));
+    const stopMult = sw.side === "player" ? WEAPONS[src.player.weapon].hitStopMult : 1;
+    if (stop) requestHitStop(src, (killed ? f.HIT_STOP_KILL : f.HIT_STOP_NORMAL) * (src.artifacts.has("heavy") ? 1.5 : 1) * stopMult);
   } else {
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
     requestHitStop(src, CONFIG.FEEL.HIT_STOP_PLAYER_HURT);

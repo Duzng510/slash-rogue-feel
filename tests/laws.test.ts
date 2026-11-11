@@ -8,6 +8,7 @@ import { TEMPLATES, MARKER_KIND, Room, TILE, type Template } from "../src/world/
 import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
 import { createSwing, hitFeedback, playerSwingInit } from "../src/systems/combat.ts";
 import { CHARACTERS, COMBO_HITS } from "../src/systems/characters.ts";
+import { WEAPONS, WEAPON_LIST } from "../src/systems/weapons.ts";
 import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS, CURSES } from "../src/systems/artifacts.ts";
 import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
 import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
@@ -55,7 +56,7 @@ function sandbox(): World {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null, totalGold: 0, charactersWon: new Set() };
+  return { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() };
 }
 
 function duel(w: World, gap = 16): number {
@@ -731,7 +732,7 @@ heading("Curse (P10)");
 {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set() });
+  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() });
   w.clearEnemies();
   w.tick(intent());
   ok("the first clear offers a two-curse package", w.curseOffer !== null && w.curseOffer.curses.length === 2 && w.curseOffer.artifacts.length === 2);
@@ -1145,6 +1146,7 @@ heading("Characters (H2 build choice)");
 {
   const g = sandbox();
   g.pickCharacter("mage");
+  g.pickWeapon("katana");
   g.introTicks = 0;
   g.player.reset(g.room.start.x, g.room.start.y);
   const foe = makeEnemy(g.player.x + 24, g.player.y, "chaser");
@@ -1172,6 +1174,7 @@ heading("Characters (H2 build choice)");
 {
   const t = sandbox();
   t.pickCharacter("tank");
+  t.pickWeapon("katana");
   t.introTicks = 0;
   t.player.reset(t.room.start.x, t.room.start.y);
   t.player.skillActiveTicks = 30;
@@ -1202,31 +1205,53 @@ heading("Characters (H2 build choice)");
 {
   const m = sandbox();
   m.pickCharacter("mage");
+  m.pickWeapon("katana");
   m.player.comboBonus = true;
   ok("mage cannot consume combo bonus", !m.player.consumeCombo());
   const t = sandbox();
   t.pickCharacter("tank");
+  t.pickWeapon("katana");
   t.player.comboBonus = true;
   ok("tank cannot consume combo bonus", !t.player.consumeCombo());
   const s = sandbox();
   s.pickCharacter("swordsman");
+  s.pickWeapon("katana");
   s.player.comboBonus = true;
   ok("swordsman can consume combo bonus", s.player.consumeCombo());
 
   const w1 = sandbox();
   w1.pickCharacter("swordsman");
+  w1.pickWeapon("katana");
   w1.introTicks = 1;
   w1.tick(intent());
   const w2 = sandbox();
   w2.pickCharacter("mage");
+  w2.pickWeapon("katana");
   w2.introTicks = 1;
   w2.tick(intent());
   const w3 = sandbox();
   w3.pickCharacter("tank");
+  w3.pickWeapon("katana");
   w3.introTicks = 1;
   w3.tick(intent());
   ok("each character has a distinct intro line", w1.introLine.length > 0 && w1.introLine !== w2.introLine && w2.introLine !== w3.introLine);
 }
+{
+  heading("Weapon System Laws");
+  ok("all 5 weapons defined", WEAPON_LIST.length === 5);
+  ok("greatsword does 2 dmg and 200 deg arc", WEAPONS.greatsword.combos[0]?.dmg === 2 && WEAPONS.greatsword.combos[0]?.deg === 200);
+  ok("dagger has 3 combos and 30% crit chance", WEAPONS.dagger.combos.length === 3 && WEAPONS.dagger.critChance === 0.3);
+  ok("spear has 40px reach and narrow 40 deg arc", WEAPONS.spear.combos[0]?.reach === 40 && WEAPONS.spear.combos[0]?.deg === 40);
+  ok("whip has 2 combos sweeping up to 180 deg", WEAPONS.whip.combos.length === 2 && WEAPONS.whip.combos[1]?.deg === 180);
+  ok("katana baseline remains 2-hit combo with chainWindow 6", WEAPONS.katana.combos.length === 2 && WEAPONS.katana.chainWindow === 6);
+
+  const saved = emptyAchievements();
+  saved.weaponsWon.add("dagger");
+  saved.weaponsWon.add("greatsword");
+  const parsed = parseAchievements(stringifyAchievements(saved));
+  ok("weaponsWon persists across serialization", parsed.weaponsWon.has("dagger") && parsed.weaponsWon.has("greatsword"));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail === 0 ? 0 : 1;
+

@@ -10,6 +10,7 @@ import { Camera } from "./render/camera.ts";
 import { Renderer } from "./render/renderer.ts";
 import { buildSprites } from "./render/pixelart.ts";
 import { Hud } from "./ui/hud.ts";
+import { WeaponSelect } from "./ui/weaponSelect.ts";
 import { EndScreen } from "./ui/endScreen.ts";
 import { isRotated, syncOrientation, tryImmersive } from "./ui/immersive.ts";
 import type { OrientationLike } from "./ui/immersive.ts";
@@ -20,6 +21,7 @@ import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
 import type { ArtifactId, CurseId } from "./systems/artifacts.ts";
 import type { CharacterId } from "./systems/characters.ts";
+import type { WeaponId } from "./systems/weapons.ts";
 import type { RunStats, EndAction, EndMode } from "./systems/runStats.ts";
 import { parseAchievements, stringifyAchievements, emptyAchievements } from "./systems/unlocks.ts";
 import type { Achievements } from "./systems/unlocks.ts";
@@ -65,6 +67,7 @@ cam.snap(world.player.x, world.player.y - 6);
 const renderer = new Renderer(game, overlay, world, cam, sprites);
 renderer.resize();
 const hud = new Hud(world, sprites);
+const weaponSelect = new WeaponSelect(world, sprites);
 const endScreen = new EndScreen(overlay);
 const debug = new DebugHud();
 const sfx = new Sfx();
@@ -77,7 +80,7 @@ const flags: DebugFlags = {
 };
 
 function applyHotkey(k: Hotkey): void {
-  if (world.artifactChoices.length > 0 || world.characterChoices.length > 0) return;
+  if (world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null) return;
   switch (k) {
     case "panel":
       panel.classList.toggle("on");
@@ -114,7 +117,7 @@ function applyHotkey(k: Hotkey): void {
 
 const desk = new DesktopInput(intent, {
   tick: () => world.tickCount,
-  blocked: () => world.artifactChoices.length > 0 || world.characterChoices.length > 0 || endScreen.isOpen(),
+  blocked: () => world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || endScreen.isOpen(),
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
@@ -146,7 +149,7 @@ function resetInput(): void {
   touch?.reset();
 }
 /** the start screen sits above the canvas, so its clicks must not be swallowed by the modal blocker */
-const modalActive = (): boolean => startScreen.hidden && (world.characterChoices.length > 0 || world.artifactChoices.length > 0 || world.shopOffers !== null);
+const modalActive = (): boolean => startScreen.hidden && (world.characterChoices.length > 0 || world.weaponChoices !== null || world.artifactChoices.length > 0 || world.shopOffers !== null);
 function syncArtifactModal(): boolean {
   const open = modalActive();
   if (open !== modalOpen) {
@@ -170,10 +173,22 @@ function modalFromClient(x: number, y: number): string | null {
   if (r.width <= 0 || r.height <= 0) return null;
   const u = (x - r.left) / r.width;
   const v = (y - r.top) / r.height;
-  return isRotated() ? hud.modalAt(v * 320, (1 - u) * 180) : hud.modalAt(u * 320, v * 180);
+  const cx = isRotated() ? v * 320 : u * 320;
+  const cy = isRotated() ? (1 - u) * 180 : v * 180;
+  if (world.weaponChoices !== null) {
+    const wid = weaponSelect.handlePointer(cx, cy);
+    if (wid !== null) return `w:${wid}`;
+  }
+  return hud.modalAt(cx, cy);
 }
 function applyModal(key: string, from: ModalKey): void {
-  if (from === "p") {
+  if (from === "w" || key.startsWith("w:")) {
+    if (world.pickWeapon(key.slice(2) as WeaponId)) {
+      resetInput();
+      suppressModalClick = false;
+    }
+    syncArtifactModal();
+  } else if (from === "p") {
     if (world.pickCharacter(key.slice(2) as CharacterId)) {
       resetInput();
       suppressModalClick = false;
@@ -201,7 +216,7 @@ function applyModal(key: string, from: ModalKey): void {
   } else chooseArtifact(key.slice(2) as ArtifactId);
 }
 /** which modal a pointer press landed in; the key after the prefix tells which id was hit */
-type ModalKey = "p" | "a" | "c" | "s" | "t";
+type ModalKey = "p" | "w" | "a" | "c" | "s" | "t";
 function modalKind(key: string | null): ModalKey | null {
   if (key === null) return null;
   return key[0] as ModalKey;
@@ -247,8 +262,21 @@ for (const type of ["pointerup", "pointercancel"] as const) {
     if (key !== null && kind !== null && kind === modalKind(key)) applyModal(key, kind);
   }, { capture: true });
 }
-// Keyboard selection shortcuts for character screen [1], [2], [3]
+// Keyboard selection shortcuts for character screen [1]-[3] and weapon screen [1]-[5]
 window.addEventListener("keydown", (e) => {
+  if (world.weaponChoices !== null && world.weaponChoices.length > 0) {
+    let pickWId: WeaponId | null = null;
+    if (e.code === "Digit1" || e.code === "Numpad1") pickWId = world.weaponChoices[0];
+    else if (e.code === "Digit2" || e.code === "Numpad2") pickWId = world.weaponChoices[1];
+    else if (e.code === "Digit3" || e.code === "Numpad3") pickWId = world.weaponChoices[2];
+    else if (e.code === "Digit4" || e.code === "Numpad4") pickWId = world.weaponChoices[3];
+    else if (e.code === "Digit5" || e.code === "Numpad5") pickWId = world.weaponChoices[4];
+    if (pickWId) {
+      e.preventDefault();
+      applyModal(`w:${pickWId}`, "w");
+      return;
+    }
+  }
   if (world.characterChoices.length > 0) {
     let pickId: CharacterId | null = null;
     if (e.code === "Digit1" || e.code === "Numpad1") pickId = world.characterChoices[0];
@@ -260,6 +288,19 @@ window.addEventListener("keydown", (e) => {
     }
   }
 }, { capture: true });
+
+window.addEventListener("pointermove", (e) => {
+  if (world.weaponChoices !== null) {
+    const r = overlay.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      const u = (e.clientX - r.left) / r.width;
+      const v = (e.clientY - r.top) / r.height;
+      const cx = isRotated() ? v * 320 : u * 320;
+      const cy = isRotated() ? (1 - u) * 180 : v * 180;
+      weaponSelect.updateHover(cx, cy);
+    }
+  }
+});
 
 for (const type of ["mousedown", "mouseup", "click", "dblclick", "contextmenu"] as const) {
   window.addEventListener(type, (e) => {
@@ -401,6 +442,7 @@ function frame(dtReal: number): void {
   debug.draw(o, renderer.scale, world, renderer, flags);
   hud.drawArtifacts(o, renderer.scale);
   hud.drawCharacters(o, renderer.scale);
+  if (weaponSelect.isOpen()) weaponSelect.draw(o, renderer.scale);
   if (endScreen.isOpen()) endScreen.draw(o, renderer.scale);
   hud.drawAchievementToast(o, renderer.scale);
 }
@@ -421,7 +463,10 @@ function startGame(): void {
   startScreen.hidden = true;
   document.body.classList.remove("starting");
   /** the capture harnesses assert on frames counted from the fight itself, so no intro walk there */
-  if (autoplay) world.characterChoices = [];
+  if (autoplay) {
+    world.characterChoices = [];
+    world.weaponChoices = null;
+  }
   if (!autoplay) {
     desk.attach();
     touch?.attach();
@@ -458,6 +503,7 @@ type Harness = {
   applyStatus: (id: number, status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed") => boolean;
   gotoRoom: (i: number) => void;
   chooseArtifact: (id: ArtifactId) => boolean;
+  chooseWeapon: (id: WeaponId) => boolean;
   buyShop: (i: number) => boolean;
   leaveShop: () => void;
   setCurseTab: (v: boolean) => void;
@@ -543,8 +589,13 @@ const harness: Harness = {
     e.applyStatus(status, world);
     return true;
   },
-  gotoRoom: (i) => { world.characterChoices = []; world.loadRoom(i); syncArtifactModal(); },
+  gotoRoom: (i) => { world.characterChoices = []; world.weaponChoices = null; world.loadRoom(i); syncArtifactModal(); },
   chooseArtifact,
+  chooseWeapon: (id: WeaponId) => {
+    const picked = world.pickWeapon(id);
+    syncArtifactModal();
+    return picked;
+  },
   buyShop: (i) => {
     const bought = world.chooseShop(i);
     syncArtifactModal();
@@ -569,7 +620,9 @@ const harness: Harness = {
     },
     roomIndex: world.roomIndex,
     character: world.player.character,
+    weapon: world.player.weapon,
     characterChoices: [...world.characterChoices],
+    weaponChoices: world.weaponChoices ? [...world.weaponChoices] : null,
     artifacts: [...world.artifacts],
     artifactChoices: world.artifactChoices.map((artifact) => artifact.id),
     curseOffer: world.curseOffer === null ? null : world.curseOffer.curses.map((c) => c.id),

@@ -4,6 +4,7 @@ import { angleLerp, dist, normAngle } from "../mathx.ts";
 import { artifactText, sfx, shake } from "../events.ts";
 import { createSwing, hitFeedback, stepSwing } from "../systems/combat.ts";
 import { knockback, pulse } from "../systems/feelSim.ts";
+import { WEAPONS } from "../systems/weapons.ts";
 import { moveBody } from "../world/collision.ts";
 import type { SpatialGrid } from "../world/grid.ts";
 import type { Rect } from "../mathx.ts";
@@ -149,7 +150,8 @@ export class Enemy implements Unit {
     if (this.dead) return false;
     knockback(this, sw.dir, sw.knockback);
     const playerHit = sw.side === "player";
-    const crit = playerHit && src.artifacts.has("crit") && src.rng.next() < 0.2;
+    const critChance = (src.artifacts.has("crit") ? 0.2 : 0) + (playerHit ? WEAPONS[src.player.weapon].critChance : 0);
+    const crit = playerHit && critChance > 0 && src.rng.next() < critChance;
     const frozen = this.freezeTicks > 0;
     const statused = frozen || this.burnTicks > 0 || this.wetTicks > 0 || this.shockTicks > 0 || this.poisonTicks > 0 || this.bleedTicks > 0;
     if (frozen) this.freezeTicks = 0;

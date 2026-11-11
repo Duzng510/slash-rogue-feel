@@ -3,6 +3,7 @@ import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
 import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
 import { CHARACTERS, COMBO_HITS } from "../systems/characters.ts";
+import { WEAPONS } from "../systems/weapons.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
 
 const P = CONFIG.PALETTE;
@@ -500,9 +501,21 @@ export class Hud {
     o.fillText(cdef.name, Math.round((badgeX + 8) * scale), Math.round(6 * scale));
     o.globalAlpha = 1;
 
+    const wdef = WEAPONS[w.player.weapon];
+    if (wdef) {
+      const wy = Math.round(14 * scale);
+      o.fillStyle = wdef.color;
+      o.fillRect(Math.round(badgeX * scale), wy + Math.round(1 * scale), Math.round(4 * scale), Math.round(4 * scale));
+      o.font = `${Math.round(5.5 * scale)}px sans-serif`;
+      o.globalAlpha = 0.9;
+      o.fillStyle = wdef.color;
+      o.fillText(wdef.name, Math.round((badgeX + 8) * scale), wy);
+      o.globalAlpha = 1;
+    }
+
     if (w.player.character === "swordsman") {
       const cx = Math.round(badgeX * scale);
-      const cy = Math.round(14 * scale);
+      const cy = Math.round(22 * scale);
       if (w.player.comboHits > 0 || w.player.comboBonus) {
         for (let i = 0; i < COMBO_HITS; i++) {
           o.fillStyle = (w.player.comboBonus || i < w.player.comboHits) ? "#ffd166" : "#2b3242";

@@ -16,6 +16,7 @@ import {
 } from "../systems/unlocks.ts";
 import { Player } from "../entities/player.ts";
 import { CHARACTERS, CHARACTER_LIST, type CharacterId } from "../systems/characters.ts";
+import { WEAPON_LIST, type WeaponId } from "../systems/weapons.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
 import { Room, TEMPLATES, TILE, type SpawnMark } from "../world/rooms.ts";
 import { SpatialGrid } from "./grid.ts";
@@ -67,6 +68,7 @@ export class World implements Sim {
   artifactChoices: Artifact[] = [];
   /** open build choice while non-empty; the composition root owns the modal */
   characterChoices: CharacterId[] = [];
+  weaponChoices: WeaponId[] | null = null;
   readonly curses = new Set<CurseId>();
   curseOffer: { artifacts: Artifact[]; curses: Curse[] } | null = null;
   curseTab = false;
@@ -96,6 +98,14 @@ export class World implements Sim {
     this.player.maxHp = CHARACTERS[id].baseHp;
     this.player.hp = this.player.maxHp;
     this.characterChoices = [];
+    this.weaponChoices = [...WEAPON_LIST];
+    return true;
+  }
+
+  pickWeapon(id: WeaponId): boolean {
+    if (this.weaponChoices === null || !this.weaponChoices.includes(id)) return false;
+    this.player.weapon = id;
+    this.weaponChoices = null;
     this.beginIntro();
     return true;
   }
@@ -180,6 +190,7 @@ export class World implements Sim {
     this.player.maxHp = CHARACTERS[this.player.character].baseHp;
     this.rewardedRooms.clear();
     this.characterChoices = [...CHARACTER_LIST];
+    this.weaponChoices = null;
     this.loadRoom(0);
   }
 
@@ -188,6 +199,7 @@ export class World implements Sim {
     this.resetRun();
     this.rewardedRooms.clear();
     this.characterChoices = [...CHARACTER_LIST];
+    this.weaponChoices = null;
     this.loadRoom(0);
   }
 
@@ -282,6 +294,10 @@ export class World implements Sim {
       if (this.achievements.charactersWon.size >= CHARACTER_LIST.length) {
         this.awardAchievements(["soul_collector"]);
       }
+      this.achievements.weaponsWon.add(this.player.weapon);
+      if (this.achievements.weaponsWon.size >= WEAPON_LIST.length) {
+        this.awardAchievements(["master_of_arms"]);
+      }
     }
     this.awardAchievements(checkAchievements(this.runStats, "end", this.achievements.totalGold));
   }
@@ -342,6 +358,7 @@ export class World implements Sim {
   }
 
   tick(input: Intent): void {
+    if (this.weaponChoices !== null) return;
     if (this.artifactChoices.length > 0) return;
     if (this.shopOffers !== null) return;
     if (this.pendingEnd !== null) return;

@@ -379,6 +379,80 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 3, 3, T - 6, T - 6, P.DOOR_OPEN);
   });
 
+  // --- 5 Weapon Icons (16x16) ---
+  S.weapon_katana = bake(16, 16, 8, 8, (g) => {
+    // Handle wrap (bottom-left)
+    rect(g, 2, 13, 2, 2, "#1a2233");
+    rect(g, 3, 12, 2, 2, "#2b3952");
+    // Gold Tsuba (guard)
+    rect(g, 4, 10, 3, 2, "#ffd166");
+    // Slender Katana Blade with cyan razor shine
+    rect(g, 6, 8, 2, 3, "#bfe8ff");
+    rect(g, 8, 6, 2, 3, "#bfe8ff");
+    rect(g, 10, 4, 2, 3, "#e0f4ff");
+    rect(g, 12, 2, 2, 3, "#ffffff");
+    rect(g, 13, 1, 1, 2, "#7fd1ff"); // tip
+  });
+
+  S.weapon_greatsword = bake(16, 16, 8, 8, (g) => {
+    // Pommel & grip
+    rect(g, 7, 13, 2, 2, "#ffd166");
+    rect(g, 7, 10, 2, 3, "#3d405b");
+    // Wide crossguard
+    rect(g, 4, 9, 8, 2, "#8d99ae");
+    // Broad heavy blade
+    rect(g, 5, 2, 6, 7, "#b8c0cc");
+    rect(g, 6, 2, 4, 7, "#e2e7ed");
+    rect(g, 7, 3, 2, 5, "#6c757d"); // center fuller
+    // Blade point
+    rect(g, 6, 0, 4, 2, "#ffffff");
+  });
+
+  S.weapon_dagger = bake(16, 16, 8, 8, (g) => {
+    // Left Dagger
+    rect(g, 2, 12, 2, 2, "#2b2d42");
+    rect(g, 3, 10, 3, 1, "#ffd166");
+    rect(g, 4, 7, 2, 3, "#ffda79");
+    rect(g, 5, 5, 2, 2, "#ffffff");
+    // Right Dagger
+    rect(g, 12, 12, 2, 2, "#2b2d42");
+    rect(g, 10, 10, 3, 1, "#ffd166");
+    rect(g, 9, 7, 2, 3, "#ffda79");
+    rect(g, 8, 5, 2, 2, "#ffffff");
+    // Twin glint
+    rect(g, 5, 4, 1, 1, "#ffd166");
+    rect(g, 8, 4, 1, 1, "#ffd166");
+  });
+
+  S.weapon_spear = bake(16, 16, 8, 8, (g) => {
+    // Long wooden pole
+    rect(g, 2, 13, 2, 2, "#6f4e37");
+    rect(g, 4, 11, 2, 2, "#8b5a2b");
+    rect(g, 6, 9, 2, 2, "#8b5a2b");
+    rect(g, 8, 7, 2, 2, "#8b5a2b");
+    // Emerald tassel
+    rect(g, 8, 9, 2, 2, "#06d6a0");
+    // Spearhead
+    rect(g, 10, 5, 3, 3, "#c8ff8a");
+    rect(g, 12, 3, 3, 3, "#e2f9b8");
+    rect(g, 14, 1, 2, 2, "#ffffff"); // sharp tip
+  });
+
+  S.weapon_whip = bake(16, 16, 8, 8, (g) => {
+    // Handle
+    rect(g, 1, 12, 3, 3, "#3d2b1f");
+    rect(g, 3, 11, 2, 2, "#d4a373");
+    // Coiling lash with crimson thorns
+    rect(g, 5, 10, 2, 2, "#e0455a");
+    rect(g, 7, 8, 2, 2, "#ff6b6b");
+    rect(g, 9, 5, 2, 3, "#e0455a");
+    rect(g, 11, 3, 3, 2, "#ff6b6b");
+    rect(g, 13, 4, 2, 2, "#e0455a");
+    rect(g, 12, 7, 2, 2, "#ff6b6b");
+    rect(g, 10, 9, 2, 2, "#e0455a");
+    rect(g, 8, 11, 2, 2, "#ffffff"); // crack tip
+  });
+
   return S;
 }
 

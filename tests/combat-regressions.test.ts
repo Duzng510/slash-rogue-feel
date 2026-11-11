@@ -26,7 +26,7 @@ function sandbox() {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null, totalGold: 0, charactersWon: new Set() };
+  return { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() };
 }
 
 function hits(w: World): void {
@@ -225,7 +225,7 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
 });
 
 test("a fresh save only offers the two unlocked artifacts, then gating opens more", () => {
-  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set() });
+  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() });
   fresh.clearEnemies();
   fresh.player.reset(160, 100);
   fresh.tick(idle);
@@ -234,7 +234,7 @@ test("a fresh save only offers the two unlocked artifacts, then gating opens mor
   assert.ok(offered.every(id => ARTIFACT_UNLOCKS[id] === null));
   assert.ok(!offered.includes("lightning"));
 
-  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0, charactersWon: new Set() });
+  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() });
   withFirstBlood.clearEnemies();
   withFirstBlood.player.reset(160, 100);
   withFirstBlood.tick(idle);
@@ -315,6 +315,7 @@ test("a victory banks its character, and three different characters earn soul_co
   w.achievements.charactersWon.add("swordsman");
   w.achievements.charactersWon.add("mage");
   assert.ok(w.pickCharacter("tank"));
+  assert.ok(w.pickWeapon("katana"));
   w.introTicks = 0;
   w.loadRoom(w.roomTotal - 1);
   w.clearEnemies();
@@ -327,6 +328,28 @@ test("a victory banks its character, and three different characters earn soul_co
   assert.equal(w.pendingEnd, "won");
   assert.ok(w.achievements.charactersWon.has("tank"));
   assert.ok(w.achievements.earned.has("soul_collector"));
+});
+
+test("a victory banks its weapon, and five different weapons earn master_of_arms", () => {
+  const w = sandbox();
+  w.pickCharacter("swordsman");
+  assert.ok(w.pickWeapon("whip"));
+  w.achievements.weaponsWon.add("katana");
+  w.achievements.weaponsWon.add("greatsword");
+  w.achievements.weaponsWon.add("dagger");
+  w.achievements.weaponsWon.add("spear");
+  w.introTicks = 0;
+  w.loadRoom(w.roomTotal - 1);
+  w.clearEnemies();
+  w.tick(idle);
+  w.chooseArtifact(w.artifactChoices[0].id);
+  w.runStats.roomsCleared = w.roomTotal - 1;
+  w.player.x = (w.room.w - 0.5) * 16;
+  w.player.y = Math.floor(w.room.h / 2) * 16;
+  w.tick(idle);
+  assert.equal(w.pendingEnd, "won");
+  assert.ok(w.achievements.weaponsWon.has("whip"));
+  assert.ok(w.achievements.earned.has("master_of_arms"));
 });
 
 test("artifact melee modifiers apply once without changing the base config", () => {
