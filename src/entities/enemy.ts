@@ -1,8 +1,8 @@
 import { CONFIG, enemyDef } from "../config.ts";
 import type { EnemyDef, EnemyKind } from "../config.ts";
 import { angleLerp, dist, normAngle } from "../mathx.ts";
-import { artifactText, sfx } from "../events.ts";
-import { createSwing, stepSwing } from "../systems/combat.ts";
+import { artifactText, sfx, shake } from "../events.ts";
+import { createSwing, hitFeedback, stepSwing } from "../systems/combat.ts";
 import { knockback, pulse } from "../systems/feelSim.ts";
 import { moveBody } from "../world/collision.ts";
 import type { SpatialGrid } from "../world/grid.ts";
@@ -40,6 +40,8 @@ export function canGoEnemy(from: EnemyState, to: EnemyState): boolean {
 
 let nextId = 1;
 
+const WARDEN_CYCLE = ["spiral", "laser", "summon"] as const;
+
 export class Enemy implements Unit {
   readonly id: number;
   readonly side: Side = "enemy";
@@ -48,6 +50,10 @@ export class Enemy implements Unit {
   readonly bodyW: number;
   readonly bodyH: number;
   readonly killPitch: number;
+  readonly isElite: boolean;
+  readonly dmgScale: number;
+  private readonly hurtW: number;
+  private readonly hurtH: number;
 
   x = 0;
   y = 0;
@@ -69,7 +75,13 @@ export class Enemy implements Unit {
   burnTicks = 0;
   wetTicks = 0;
   shockTicks = 0;
+  poisonTicks = 0;
+  freezeTicks = 0;
+  bleedTicks = 0;
   private burnPulse = 0;
+  private poisonPulse = 0;
+  private bleedCd = 0;
+  private healTicks = 0;
 
   /** boss only: never reverts, and shortens the telegraph / commits a second ring */
   enraged = false;
@@ -78,21 +90,30 @@ export class Enemy implements Unit {
   /** boss phase 3: counts finished ring attacks so summons fire every 2 rings */
   private attackRings = 0;
 
+  /** warden only: the pattern the current telegraph commits to */
+  pattern: (typeof WARDEN_CYCLE)[number] = "spiral";
+  private patternIndex = 0;
+
   /** telegraph geometry the renderer draws; locked halfway through so late dodges still work */
   telegraphDir = Math.PI;
   telegraphTicksLeft = 0;
   telegraphTotal: number;
 
-  constructor(x: number, y: number, id: number, kind: EnemyKind = "chaser") {
+  constructor(x: number, y: number, id: number, kind: EnemyKind = "chaser", elite = false) {
     const def = enemyDef(kind);
     this.kind = kind;
     this.def = def;
     this.id = id;
-    this.bodyW = def.BODY_W;
-    this.bodyH = def.BODY_H;
+    this.isElite = elite;
+    this.dmgScale = elite ? 1.5 : 1;
+    const size = elite ? 1.3 : 1;
+    this.bodyW = def.BODY_W * size;
+    this.bodyH = def.BODY_H * size;
+    this.hurtW = def.HURT_W * size;
+    this.hurtH = def.HURT_H * size;
     this.killPitch = def.KILL_PITCH;
-    this.hp = def.HP;
-    this.maxHp = def.HP;
+    this.hp = def.HP * (elite ? 2 : 1);
+    this.maxHp = this.hp;
     this.corpseTicks = def.CORPSE_TICKS;
     this.telegraphTotal = def.TELEGRAPH_TICKS;
     this.telegraphTicksLeft = def.TELEGRAPH_TICKS;
@@ -109,8 +130,8 @@ export class Enemy implements Unit {
   }
 
   hurtRect(): Rect {
-    const w = this.def.HURT_W;
-    const h = this.def.HURT_H;
+    const w = this.hurtW;
+    const h = this.hurtH;
     return { x: this.x - w / 2, y: this.y - h, w, h };
   }
 
@@ -127,8 +148,29 @@ export class Enemy implements Unit {
     const e = this.def;
     if (this.dead) return false;
     knockback(this, sw.dir, sw.knockback);
-    this.takeDamage(sw.dmg, src, sw.side === "player");
+    const playerHit = sw.side === "player";
+    const crit = playerHit && src.artifacts.has("crit") && src.rng.next() < 0.2;
+    const frozen = this.freezeTicks > 0;
+    if (frozen) this.freezeTicks = 0;
+    let dmg = crit ? sw.dmg * 2 : sw.dmg;
+    if (e.SHIELD && playerHit && Math.abs(normAngle(sw.dir - this.facing)) > Math.PI / 2) {
+      dmg *= 0.5;
+      src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
+      sfx(src.queue, "shock_hit", 0.4, 0.6);
+    }
+    if (frozen) {
+      dmg += 2;
+      if (playerHit) artifactText(src.queue, this.x, this.y - 16, "PHÁ BĂNG", "#a8e8ff");
+    }
+    if (playerHit && src.artifacts.has("executioner") && this.hp < this.maxHp * 0.3) dmg = this.hp;
+    this.takeDamage(dmg, src, playerHit);
+    if (crit) {
+      src.runStats.critHits++;
+      src.queue.push({ t: "artifactText", x: this.x, y: this.y - 16, text: "CRIT", color: "#ffe66b" });
+      sfx(src.queue, "kill", 0.6, 1.4);
+    }
     if (!this.dead && sw.status) this.applyStatus(sw.status, src);
+    if (!this.dead && playerHit && sw.reach > 0 && src.artifacts.has("bleed")) this.applyStatus("bleed", src);
     if (this.dead) return true;
     this.swing = null;
     this.hurtTicks = e.HURT_TICKS;
@@ -137,21 +179,57 @@ export class Enemy implements Unit {
   }
 
   private takeDamage(dmg: number, src: Sim, playerOwned = true): void {
+    if (this.wetTicks > 0 && src.artifacts.has("corrode")) dmg *= 1.5;
     this.hp = Math.max(0, this.hp - dmg);
     if (this.hp === 0) {
       this.die();
       this.split(src);
       src.runStats.enemiesKilled++;
       src.runStats.killStreak++;
+      const bounty = this.isElite ? 3 : this.kind === "boss" ? 20 : 1;
+      src.runStats.gold += bounty;
+      src.runStats.totalGoldEarned += bounty;
+      if (this.isElite) src.runStats.eliteKills++;
+      if (this.kind === "warden") src.runStats.wardenKills++;
+      if (playerOwned) {
+        src.runStats.roomKills++;
+        if (this.poisonTicks > 0) src.runStats.poisonKills++;
+      }
       if (playerOwned && src.artifacts.has("heavy") && this.burnTicks === 0 && this.wetTicks === 0) src.runStats.heavyKills++;
       if (playerOwned && src.artifacts.has("pursuit")) {
         src.player.dashCd = Math.max(0, src.player.dashCd - 18);
         sfx(src.queue, "pursuit_proc", 0.5, 1.2);
       }
+      if (playerOwned && src.artifacts.has("vampire") && src.runStats.enemiesKilled % 5 === 0 && !src.player.dead) {
+        const cap = src.player.maxHp;
+        if (src.player.hp < cap) {
+          src.player.hp++;
+          src.runStats.vampireHeals++;
+          artifactText(src.queue, src.player.x, src.player.y - 14, "+1 HP", "#e0455a");
+          sfx(src.queue, "pursuit_proc", 0.6, 0.9);
+        }
+      }
+      if (playerOwned && src.artifacts.has("detonate") && this.burnTicks > 0) this.detonate(src);
     } else if (this.def.ENRAGE_FRACTION > 0 && this.hp <= this.maxHp * this.def.ENRAGE_FRACTION) this.enraged = true;
   }
 
-  applyStatus(status: "burn" | "wet" | "shock", src: Sim): void {
+  private detonate(src: Sim): void {
+    src.queue.push({ t: "slashArc", x: this.x, y: this.y, dir: 0, reach: 50, deg: 360, combo: 2, ticks: 12 });
+    sfx(src.queue, "aftershock_boom", 1, 0.7);
+    artifactText(src.queue, this.x, this.y - 12, "BỘC HỎA", "#ff7a3c");
+    const blast = createSwing(src, { side: "player", combo: 0, dir: 0, ox: this.x, oy: this.y, reach: 0, deg: 0, dmg: 3, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+    for (const other of src.enemies.slice()) {
+      if (other === this || other.dead) continue;
+      const hb = other.hurtRect();
+      const cx = hb.x + hb.w / 2, cy = hb.y + hb.h / 2;
+      if (Math.hypot(cx - this.x, cy - this.y) > 50) continue;
+      const killed = other.onHit(blast, cx, cy, src);
+      hitFeedback(src, other, blast, cx, cy, killed, false);
+      if (!other.dead) other.applyStatus("burn", src);
+    }
+  }
+
+  applyStatus(status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed", src: Sim): void {
     if (this.dead) return;
     if (status === "burn" && this.wetTicks > 0 || status === "wet" && this.burnTicks > 0) {
       this.burnTicks = this.wetTicks = this.burnPulse = 0;
@@ -162,7 +240,21 @@ export class Enemy implements Unit {
     } else if (status === "burn") {
       if (this.burnTicks === 0) this.burnPulse = 60;
       this.burnTicks = 120;
-    } else if (status === "wet") this.wetTicks = 180;
+    } else if (status === "wet") this.wetTicks = src.artifacts.has("corrode") ? 300 : 180;
+    else if (status === "poison") {
+      if (this.poisonTicks === 0) this.poisonPulse = 60;
+      this.poisonTicks = 240;
+    } else if (status === "freeze") {
+      if (this.freezeTicks === 0) {
+        this.freezeTicks = 48;
+        this.swing = null;
+        this.followUps = 0;
+        this.hurtTicks = this.def.HURT_TICKS;
+        this.setState(ENEMY_STATE.HURT);
+        sfx(src.queue, "shock_hit", 0.8, 1.5);
+        artifactText(src.queue, this.x, this.y - 13, "ĐÓNG BĂNG", "#a8e8ff");
+      }
+    } else if (status === "bleed") this.bleedTicks = 300;
     else if (this.shockTicks === 0) {
       this.shockTicks = this.wetTicks > 0 ? 48 : 15;
       this.wetTicks = 0;
@@ -219,10 +311,37 @@ export class Enemy implements Unit {
         if (this.dead) return;
       }
     }
+    if (this.poisonTicks > 0) {
+      this.poisonTicks--;
+      if (--this.poisonPulse === 0) {
+        this.poisonPulse = 60;
+        const dmg = this.burnTicks > 0 ? 2 : 1;
+        this.takeDamage(dmg, src);
+        src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
+        sfx(src.queue, "burn_tick", 0.3, 0.7);
+        artifactText(src.queue, this.x, this.y - 13, "ĐỘC", "#8f63ae");
+        if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: dmg });
+        if (this.dead) return;
+      }
+    }
+    if (e.HEAL_INTERVAL > 0 && ++this.healTicks >= e.HEAL_INTERVAL) {
+      this.healTicks = 0;
+      for (const other of src.enemies) {
+        if (other === this || other.dead || other.hp >= other.maxHp) continue;
+        if (dist(this.x, this.y, other.x, other.y) > e.HEAL_RADIUS) continue;
+        other.hp = Math.min(other.maxHp, other.hp + e.HEAL_AMOUNT);
+        src.particles.emit("spark", other.x, other.y - 6, 0, -30, "#58ff8a");
+      }
+      sfx(src.queue, "pursuit_proc", 0.3, 1.4);
+    }
     const speedScale = this.wetTicks > 0 ? 0.7 : 1;
     if (this.wetTicks > 0) this.wetTicks--;
-    if (this.shockTicks > 0) {
-      this.shockTicks--;
+    if (this.bleedTicks > 0) this.bleedTicks--;
+    if (this.bleedCd > 0) this.bleedCd--;
+    const stunned = this.shockTicks > 0 || this.freezeTicks > 0;
+    if (this.shockTicks > 0) this.shockTicks--;
+    if (this.freezeTicks > 0) this.freezeTicks--;
+    if (stunned) {
       this.vx = this.vy = 0;
       return;
     }
@@ -320,6 +439,12 @@ export class Enemy implements Unit {
     }
 
     if (!this.dead) moveBody(this, src.room, dt);
+    if (!this.dead && this.bleedTicks > 0 && this.bleedCd <= 0 && (Math.hypot(this.vx, this.vy) > 10 || this.state === ENEMY_STATE.ATTACK)) {
+      this.bleedCd = 30;
+      this.takeDamage(1, src);
+      artifactText(src.queue, this.x, this.y - 13, "MÁU", "#c2182b");
+      if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 1 });
+    }
   }
 
   /** 1 = calm, 2 = enraged rings, 3 = desperation + summons (boss only) */
@@ -334,7 +459,10 @@ export class Enemy implements Unit {
   private beginTelegraph(src: Sim, dir: number): void {
     const e = this.def;
     const phase = this.bossPhase();
-    const t = phase === 3 && e.PHASE3_TELEGRAPH_TICKS > 0
+    if (this.kind === "warden") this.pattern = WARDEN_CYCLE[this.patternIndex++ % WARDEN_CYCLE.length];
+    const t = this.kind === "warden" && this.pattern === "laser" && e.LASER_TELEGRAPH_TICKS > 0
+      ? e.LASER_TELEGRAPH_TICKS
+      : phase === 3 && e.PHASE3_TELEGRAPH_TICKS > 0
       ? e.PHASE3_TELEGRAPH_TICKS
       : phase === 2 && e.ENRAGED_TELEGRAPH_TICKS > 0
         ? e.ENRAGED_TELEGRAPH_TICKS
@@ -349,6 +477,29 @@ export class Enemy implements Unit {
 
   private beginAttack(src: Sim): void {
     const e = this.def;
+    if (e.EXPLODE_RADIUS > 0) {
+      const dir = Math.atan2(src.player.y - this.y, src.player.x - this.x);
+      if (!src.player.dead && dist(this.x, this.y, src.player.x, src.player.y) <= e.EXPLODE_RADIUS) {
+        src.player.onHit({ side: "enemy", kind: this.kind, dmg: e.EXPLODE_DMG * this.dmgScale, dir } as unknown as Swing, this.x, this.y, src);
+      }
+      src.particles.burstSpark(this.x, this.y - 5, 12, src.rng);
+      shake(src.queue, this.x, this.y, dir, 1.2);
+      sfx(src.queue, "aftershock_boom", 1, 1.1);
+      this.die();
+      return;
+    }
+    if (this.kind === "warden") {
+      if (this.pattern === "spiral") this.fireSpiral(src);
+      else if (this.pattern === "laser") this.fireBeam(src);
+      else this.summonMinions(src);
+      this.setState(ENEMY_STATE.ATTACK);
+      return;
+    }
+    if (e.SNIPER) {
+      this.fireBeam(src);
+      this.setState(ENEMY_STATE.ATTACK);
+      return;
+    }
     if (e.RANGED) {
       this.fireShot(src);
       this.setState(ENEMY_STATE.ATTACK);
@@ -356,13 +507,14 @@ export class Enemy implements Unit {
     }
     this.swing = createSwing(src, {
       side: "enemy",
+      kind: this.kind,
       combo: 1,
       dir: this.telegraphDir,
       ox: this.x,
       oy: this.y - (e.RADIAL ? e.BODY_H * 0.5 : 0),
       reach: e.ATTACK_REACH,
       deg: e.ATTACK_ARC_DEG,
-      dmg: e.DMG,
+      dmg: e.DMG * this.dmgScale,
       knockback: 0,
       fd: { startup: 1, active: e.ACTIVE_TICKS, recovery: e.RECOVERY_TICKS },
     });
@@ -389,10 +541,51 @@ export class Enemy implements Unit {
       y: this.y - e.BODY_H * 0.5,
       vx: Math.cos(dir) * e.SHOT_SPEED,
       vy: Math.sin(dir) * e.SHOT_SPEED,
-      dmg: e.SHOT_DMG,
+      dmg: e.SHOT_DMG * this.dmgScale,
       ticksLeft: e.SHOT_LIFE_TICKS,
     });
     sfx(src.queue, "shoot", 0.8, 1);
+  }
+
+  private fireSpiral(src: Sim): void {
+    const e = this.def;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + this.animTicks * 0.05;
+      src.projectiles.push({
+        x: this.x,
+        y: this.y - e.BODY_H * 0.5,
+        vx: Math.cos(a) * e.SHOT_SPEED,
+        vy: Math.sin(a) * e.SHOT_SPEED,
+        dmg: e.SHOT_DMG * this.dmgScale,
+        ticksLeft: e.SHOT_LIFE_TICKS,
+      });
+    }
+    sfx(src.queue, "shoot", 0.8, 0.7);
+  }
+
+  private summonMinions(src: Sim): void {
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2;
+      src.spawnEnemy(this.x + Math.cos(a) * 30, this.y + Math.sin(a) * 30, "small");
+    }
+    artifactText(src.queue, this.x, this.y - 18, "TRIỆU HỒI", "#c99ae6");
+  }
+
+  private fireBeam(src: Sim): void {
+    const dir = this.telegraphDir;
+    const len = Math.hypot(src.room.widthPx, src.room.heightPx);
+    const ox = this.x;
+    const oy = this.y - this.def.BODY_H * 0.5;
+    const px = src.player.x - ox;
+    const py = src.player.y - oy;
+    const along = px * Math.cos(dir) + py * Math.sin(dir);
+    const perp = Math.abs(-px * Math.sin(dir) + py * Math.cos(dir));
+    if (src.player.canBeHit() && along >= 0 && along <= len && perp <= 4) {
+      src.player.onHit({ side: "enemy", kind: this.kind, dmg: 3 * this.dmgScale, dir } as unknown as Swing, src.player.x, src.player.y, src);
+    }
+    src.queue.push({ t: "beam", x: ox, y: oy, dir, len });
+    shake(src.queue, ox, oy, dir, 0.8);
+    sfx(src.queue, "shoot", 1, 0.5);
   }
 
   private beginVanish(src: Sim): void {
@@ -476,6 +669,6 @@ export function resetEnemyIds(): void {
   nextId = 1;
 }
 
-export function makeEnemy(x: number, y: number, kind: EnemyKind = "chaser"): Enemy {
-  return new Enemy(x, y, nextId++, kind);
+export function makeEnemy(x: number, y: number, kind: EnemyKind = "chaser", elite = false): Enemy {
+  return new Enemy(x, y, nextId++, kind, elite);
 }

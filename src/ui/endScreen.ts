@@ -94,6 +94,7 @@ export class EndScreen {
       ["Sát thương gây ra", `${this.stats.damageDealt}`],
       ["Sát thương nhận vào", `${this.stats.damageTaken}`],
       ["Cổ vật thu thập", `${this.stats.artifactsTaken}`],
+      ["Vàng kiếm được", `${this.stats.totalGoldEarned}`],
     ];
     if (this.stats.hurtFree) rows.push(["Không trúng đòn", "CÓ"]);
 

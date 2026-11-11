@@ -1,5 +1,5 @@
 import type { Rect, Rng } from "../mathx.ts";
-import type { ArtifactId, FireTrail } from "../systems/artifacts.ts";
+import type { ArtifactId, CurseId, FireTrail } from "../systems/artifacts.ts";
 import type { RunStats, EndMode } from "../systems/runStats.ts";
 import type { Achievements } from "../systems/unlocks.ts";
 import type { EventQueue } from "../events.ts";
@@ -31,7 +31,9 @@ export type Swing = {
   /** per-swing-instance: a swing can never hit the same unit twice, whatever hit-stop does */
   seen: Set<number>;
   aftershockDone?: boolean;
-  status?: "burn" | "wet" | "shock";
+  chainDone?: boolean;
+  status?: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed";
+  kind?: string;
 };
 
 /** a travelling enemy shot: its own entity, blocked by terrain, dodged by i-frames */
@@ -77,6 +79,7 @@ export type Intent = {
 
 export type Sim = {
   artifacts: Set<ArtifactId>;
+  curses: Set<CurseId>;
   fireTrails: FireTrail[];
   projectiles: Projectile[];
   units: Unit[];
@@ -88,7 +91,7 @@ export type Sim = {
   rng: Rng;
   hitStopTicks: number;
   nextSwingId(): number;
-  spawnEnemy(x: number, y: number, kind?: EnemyKind): void;
+  spawnEnemy(x: number, y: number, kind?: EnemyKind, elite?: boolean): void;
   loadRoom(index: number, respawnAtDoor: boolean): void;
   roomIndex: number;
   roomTotal: number;

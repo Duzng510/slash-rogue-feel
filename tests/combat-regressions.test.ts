@@ -7,7 +7,9 @@ import { createSwing, hitboxOf, playerSwingInit, resolveHits } from "../src/syst
 import { makeEnemy, ENEMY_STATE } from "../src/entities/enemy.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
-import { ARTIFACT_UNLOCKS } from "../src/systems/artifacts.ts";
+import { ARTIFACTS, ARTIFACT_UNLOCKS } from "../src/systems/artifacts.ts";
+import { emptyStats } from "../src/systems/runStats.ts";
+import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import type { Intent } from "../src/sim/types.ts";
 
@@ -24,7 +26,7 @@ function sandbox() {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null };
+  return { earned, best: null, totalGold: 0 };
 }
 
 function hits(w: World): void {
@@ -211,6 +213,11 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
     w.loadRoom(room);
     w.clearEnemies();
     w.tick(idle);
+    if (w.room.shop) {
+      assert.equal(w.shopOffers!.length, 3);
+      w.leaveShop();
+      continue;
+    }
     assert.equal(w.artifactChoices.length, 3);
     assert.ok(w.artifactChoices.every(b => !w.artifacts.has(b.id)));
     w.chooseArtifact(w.artifactChoices[0].id);
@@ -218,7 +225,7 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
 });
 
 test("a fresh save only offers the two unlocked artifacts, then gating opens more", () => {
-  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null });
+  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0 });
   fresh.clearEnemies();
   fresh.player.reset(160, 100);
   fresh.tick(idle);
@@ -227,7 +234,7 @@ test("a fresh save only offers the two unlocked artifacts, then gating opens mor
   assert.ok(offered.every(id => ARTIFACT_UNLOCKS[id] === null));
   assert.ok(!offered.includes("lightning"));
 
-  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null });
+  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0 });
   withFirstBlood.clearEnemies();
   withFirstBlood.player.reset(160, 100);
   withFirstBlood.tick(idle);
@@ -465,4 +472,384 @@ test("missing or truncated start selects a walkable tile; solid rooms reject", (
     assert.equal(room.solidAtPx(room.start.x, room.start.y), false);
   }
   assert.throws(() => new Room({ name: "solid", rows: ["OOOO", "OOOO"] }, 0), /walkable/i);
+});
+
+const jab = (w: World, dmg: number, side: "player" | "enemy" = "player") =>
+  createSwing(w, { side, combo: 1, dir: 0, ox: 0, oy: 0, reach: 20, deg: 90, dmg, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+
+test("berserker scales with lost HP and glasscannon doubles damage", () => {
+  const w = sandbox();
+  const base = playerSwingInit(w, 1, 0).dmg;
+  w.artifacts.add("berserker");
+  assert.equal(playerSwingInit(w, 1, 0).dmg, base);
+  w.player.hp = 1;
+  const low = base * (1 + (CONFIG.PLAYER.HP - 1) * 0.1);
+  assert.equal(playerSwingInit(w, 1, 0).dmg, low);
+  w.artifacts.add("glasscannon");
+  assert.equal(playerSwingInit(w, 1, 0).dmg, low * 2);
+});
+
+test("status priority keeps water over poison and lightning over freeze", () => {
+  const w = sandbox();
+  w.artifacts.add("poison");
+  w.artifacts.add("freeze");
+  assert.equal(playerSwingInit(w, 1, 0).status, "poison");
+  assert.equal(playerSwingInit(w, 2, 0).status, "freeze");
+  w.artifacts.add("water");
+  w.artifacts.add("lightning");
+  assert.equal(playerSwingInit(w, 1, 0).status, "wet");
+  assert.equal(playerSwingInit(w, 2, 0).status, "shock");
+});
+
+test("poison ticks 1/s, doubles while burning and is not consumed by wet", () => {
+  const w = sandbox();
+  const e = makeEnemy(175, 103, "boss");
+  e.restTicks = 1000;
+  w.enemies = [e];
+  w.syncUnits();
+  e.applyStatus("poison", w);
+  e.applyStatus("wet", w);
+  assert.ok(e.poisonTicks > 0);
+  for (let i = 0; i < 60; i++) e.tick(w, w.grid);
+  assert.equal(e.hp, 23);
+  const f = makeEnemy(175, 103, "boss");
+  f.restTicks = 1000;
+  f.applyStatus("burn", w);
+  f.applyStatus("poison", w);
+  for (let i = 0; i < 60; i++) f.tick(w, w.grid);
+  assert.equal(f.hp, 21);
+});
+
+test("freeze stuns briefly and the next hit shatters for +2 damage", () => {
+  const w = sandbox();
+  const e = makeEnemy(175, 103, "boss");
+  w.enemies = [e];
+  w.syncUnits();
+  e.applyStatus("freeze", w);
+  assert.equal(e.freezeTicks, 48);
+  const x = e.x;
+  for (let i = 0; i < 10; i++) e.tick(w, w.grid);
+  assert.equal(e.x, x);
+  e.onHit(jab(w, 1), e.x, e.y, w);
+  assert.deepEqual([e.hp, e.freezeTicks], [21, 0]);
+});
+
+test("bleed damages moving enemies on a cooldown, not over time", () => {
+  const w = sandbox();
+  w.artifacts.add("bleed");
+  const e = makeEnemy(220, 100, "boss");
+  w.enemies = [e];
+  w.syncUnits();
+  e.onHit(jab(w, 0), e.x, e.y, w);
+  assert.equal(e.bleedTicks, 300);
+  e.vx = 60;
+  e.tick(w, w.grid);
+  assert.equal(e.hp, 23);
+  e.vx = 60;
+  e.tick(w, w.grid);
+  assert.equal(e.hp, 23);
+});
+
+test("detonate blasts 3 dmg and burn within 50px when a burning enemy dies", () => {
+  const w = sandbox();
+  w.artifacts.add("detonate");
+  const a = makeEnemy(200, 100);
+  const b = makeEnemy(230, 100, "boss");
+  const c = makeEnemy(280, 100, "boss");
+  w.enemies = [a, b, c];
+  w.syncUnits();
+  a.applyStatus("burn", w);
+  a.onHit(jab(w, 99), a.x, a.y, w);
+  assert.ok(a.dead);
+  assert.deepEqual([b.hp, b.burnTicks > 0], [21, true]);
+  assert.equal(c.hp, c.maxHp);
+});
+
+test("corrode extends wet to 5s and amplifies damage taken by 50%", () => {
+  const w = sandbox();
+  w.artifacts.add("corrode");
+  const e = makeEnemy(220, 100, "boss");
+  w.enemies = [e];
+  w.syncUnits();
+  e.applyStatus("wet", w);
+  assert.equal(e.wetTicks, 300);
+  e.onHit(jab(w, 2), e.x, e.y, w);
+  assert.equal(e.hp, 21);
+});
+
+test("vampire heals 1 HP every 5 kills, capped at max", () => {
+  const w = sandbox();
+  w.artifacts.add("vampire");
+  w.player.hp = 1;
+  for (let i = 0; i < 10; i++) {
+    const e = makeEnemy(220, 100);
+    w.enemies = [e];
+    w.syncUnits();
+    e.onHit(jab(w, 99), e.x, e.y, w);
+    assert.equal(w.player.hp, i === 4 ? 2 : i === 9 ? 3 : w.player.hp);
+  }
+  assert.equal(w.player.hp, 3);
+});
+
+test("executioner instantly kills below 30% HP without hit-stop", () => {
+  const w = sandbox();
+  w.artifacts.add("executioner");
+  const e = makeEnemy(175, 103, "boss");
+  e.hp = 7;
+  w.enemies = [e];
+  w.syncUnits();
+  const sw = createSwing(w, playerSwingInit(w, 1, 0));
+  sw.phase = "active";
+  const hb = e.hurtRect();
+  sw.ox = hb.x + hb.w / 2;
+  sw.oy = hb.y + hb.h / 2;
+  w.player.swing = sw;
+  hits(w);
+  assert.deepEqual([e.dead, w.hitStopTicks], [true, 0]);
+});
+
+test("twin blades combo 2 also hits behind the player", () => {
+  for (const owned of [false, true]) {
+    const w = sandbox();
+    if (owned) w.artifacts.add("twin_blades");
+    const front = makeEnemy(w.player.x + 15, w.player.y);
+    const back = makeEnemy(w.player.x - 15, w.player.y);
+    w.enemies = [front, back];
+    w.syncUnits();
+    const sw = createSwing(w, playerSwingInit(w, 2, 0));
+    sw.phase = "active";
+    w.player.swing = sw;
+    hits(w);
+    assert.ok(front.hp < front.maxHp);
+    assert.equal(back.hp < back.maxHp, owned);
+  }
+});
+
+test("chain lightning jumps once to the nearest enemy within 60px", () => {
+  const w = sandbox();
+  w.artifacts.add("chain_lightning");
+  const a = makeEnemy(w.player.x + 15, w.player.y);
+  const b = makeEnemy(w.player.x + 45, w.player.y);
+  const c = makeEnemy(w.player.x + 120, w.player.y);
+  w.enemies = [a, b, c];
+  w.syncUnits();
+  const sw = createSwing(w, playerSwingInit(w, 2, 0));
+  sw.phase = "active";
+  w.player.swing = sw;
+  hits(w);
+  assert.equal(b.hp, b.maxHp - 1);
+  assert.equal(c.hp, c.maxHp);
+});
+
+test("shield blocks one hit without damage and recharges after 5s", () => {
+  const w = sandbox();
+  w.artifacts.add("shield");
+  const hp = w.player.hp;
+  w.player.onHit(jab(w, 1, "enemy"), w.player.x, w.player.y, w);
+  assert.deepEqual([w.player.hp, w.player.state], [hp, "idle"]);
+  w.player.onHit(jab(w, 1, "enemy"), w.player.x, w.player.y, w);
+  assert.equal(w.player.hp, hp - 1);
+  for (let i = 0; i < 300; i++) w.player.tick(idle, w);
+  assert.ok(w.player.shieldReady);
+});
+
+test("phantom dash teleports 60px without i-frames and cuts through enemies", () => {
+  const w = sandbox();
+  w.artifacts.add("phantom_dash");
+  const e = makeEnemy(w.player.x + 30, w.player.y);
+  w.enemies = [e];
+  w.syncUnits();
+  const x0 = w.player.x;
+  w.player.tick({ ...idle, dash: true }, w);
+  assert.equal(w.player.x, x0 + 60);
+  assert.equal(w.player.dashIframeTicks, 0);
+  assert.ok(w.player.canBeHit());
+  assert.equal(e.hp, e.maxHp - 2);
+});
+
+test("glasscannon clamps current HP to 2 when picked", () => {
+  const w = sandbox();
+  w.artifactChoices = ARTIFACTS.filter(a => a.id === "glasscannon");
+  assert.ok(w.chooseArtifact("glasscannon"));
+  assert.equal(w.player.hp, 2);
+});
+
+test("healer pulses 1 HP to nearby allies every 3s, never itself or far allies", () => {
+  const w = sandbox();
+  const h = makeEnemy(200, 100, "healer");
+  h.restTicks = 1000;
+  const near = makeEnemy(230, 100, "boss");
+  const far = makeEnemy(320, 100, "boss");
+  near.hp = 20;
+  far.hp = 20;
+  h.hp = 1;
+  w.enemies = [h, near, far];
+  w.syncUnits();
+  for (let i = 0; i < 179; i++) h.tick(w, w.grid);
+  assert.equal(near.hp, 20);
+  h.tick(w, w.grid);
+  assert.deepEqual([near.hp, far.hp, h.hp], [21, 20, 1]);
+});
+
+test("exploder detonates for 3 dmg within 50px, spares outsiders, dies without kill credit", () => {
+  const w = sandbox();
+  const e = makeEnemy(w.player.x + 40, w.player.y, "exploder");
+  w.enemies = [e];
+  w.syncUnits();
+  const hp = w.player.hp;
+  for (let i = 0; i < 200 && !e.dead; i++) e.tick(w, w.grid);
+  assert.ok(e.dead);
+  assert.equal(w.player.hp, hp - 3);
+  assert.equal(w.runStats.enemiesKilled, 0);
+
+  const w2 = sandbox();
+  const f = makeEnemy(w2.player.x + 90, w2.player.y, "exploder");
+  f.setState(ENEMY_STATE.CHASE);
+  f.setState(ENEMY_STATE.TELEGRAPH);
+  f.telegraphDir = Math.PI;
+  f.telegraphTotal = 60;
+  f.telegraphTicksLeft = 1;
+  w2.enemies = [f];
+  w2.syncUnits();
+  f.tick(w2, w2.grid);
+  assert.ok(f.dead);
+  assert.equal(w2.player.hp, CONFIG.PLAYER.HP);
+});
+
+test("shielder halves frontal damage but takes full from behind", () => {
+  const w = sandbox();
+  const e = makeEnemy(200, 100, "shielder");
+  w.enemies = [e];
+  w.syncUnits();
+  e.facing = Math.PI;
+  const front = jab(w, 2);
+  front.dir = 0;
+  e.onHit(front, e.x, e.y, w);
+  assert.equal(e.hp, 3);
+  const back = jab(w, 2);
+  back.dir = Math.PI;
+  e.onHit(back, e.x, e.y, w);
+  assert.equal(e.hp, 1);
+});
+
+test("sniper beam hits along its line for 3 dmg and misses off-axis", () => {
+  const w = sandbox();
+  const e = makeEnemy(w.player.x + 100, w.player.y + 4, "sniper");
+  e.setState(ENEMY_STATE.CHASE);
+  e.setState(ENEMY_STATE.TELEGRAPH);
+  e.telegraphDir = Math.PI;
+  e.telegraphTotal = 120;
+  e.telegraphTicksLeft = 1;
+  w.enemies = [e];
+  w.syncUnits();
+  const hp = w.player.hp;
+  e.tick(w, w.grid);
+  assert.equal(w.player.hp, hp - 3);
+
+  const w2 = sandbox();
+  const f = makeEnemy(w2.player.x + 100, w2.player.y + 20, "sniper");
+  f.setState(ENEMY_STATE.CHASE);
+  f.setState(ENEMY_STATE.TELEGRAPH);
+  f.telegraphDir = Math.PI;
+  f.telegraphTotal = 120;
+  f.telegraphTicksLeft = 1;
+  w2.enemies = [f];
+  w2.syncUnits();
+  f.tick(w2, w2.grid);
+  assert.equal(w2.player.hp, CONFIG.PLAYER.HP);
+});
+
+test("elites double HP, hit 1.5x and drop 3 gold instead of 1", () => {
+  const w = sandbox();
+  const e = makeEnemy(200, 100, "chaser", true);
+  assert.equal(e.hp, 6);
+  e.setState(ENEMY_STATE.CHASE);
+  e.setState(ENEMY_STATE.TELEGRAPH);
+  e.telegraphTicksLeft = 1;
+  e.telegraphTotal = 27;
+  e.tick(w, w.grid);
+  assert.equal(e.swing!.dmg, 1.5);
+  w.enemies = [e];
+  w.syncUnits();
+  e.onHit(jab(w, 99), e.x, e.y, w);
+  assert.deepEqual([w.runStats.gold, w.runStats.eliteKills], [3, 1]);
+  const n = makeEnemy(200, 100);
+  w.enemies = [n];
+  w.syncUnits();
+  n.onHit(jab(w, 99), n.x, n.y, w);
+  assert.deepEqual([w.runStats.gold, w.runStats.eliteKills], [4, 1]);
+});
+
+test("elite_slayer unlocks at 5 elite kills", () => {
+  const s = emptyStats();
+  s.eliteKills = 4;
+  assert.ok(!checkAchievements(s, "kill").includes("elite_slayer"));
+  s.eliteKills = 5;
+  assert.ok(checkAchievements(s, "kill").includes("elite_slayer"));
+});
+
+test("boss death pays 20 gold into both run and lifetime counters", () => {
+  const w = sandbox();
+  const b = makeEnemy(200, 100, "boss");
+  w.enemies = [b];
+  w.syncUnits();
+  b.onHit(jab(w, 999), b.x, b.y, w);
+  assert.deepEqual([w.runStats.gold, w.runStats.totalGoldEarned], [20, 20]);
+});
+
+test("shop offers three goods, purchases deduct gold and reject when broke", () => {
+  const w = sandbox();
+  w.loadRoom(w.roomTotal - 2);
+  w.player.hp = 1;
+  w.runStats.gold = 20;
+  w.tick(idle);
+  assert.equal(w.shopOffers!.length, 3);
+  const heal = w.shopOffers!.findIndex(o => o.kind === "heal");
+  assert.ok(heal >= 0);
+  assert.ok(w.chooseShop(heal));
+  assert.deepEqual([w.player.hp, w.runStats.gold], [3, 12]);
+  const maxhp = w.shopOffers!.findIndex(o => o.kind === "maxhp");
+  assert.ok(maxhp >= 0 && !w.chooseShop(maxhp));
+  w.leaveShop();
+  assert.equal(w.shopOffers, null);
+});
+
+test("shop curse removal deletes one curse and charges 30 gold", () => {
+  const w = sandbox();
+  w.curses.add("glass");
+  w.loadRoom(w.roomTotal - 2);
+  w.runStats.gold = 50;
+  w.tick(idle);
+  const i = w.shopOffers!.findIndex(o => o.kind === "curse");
+  assert.ok(i >= 0);
+  assert.ok(w.chooseShop(i));
+  assert.deepEqual([w.curses.size, w.runStats.gold], [0, 20]);
+});
+
+test("rich unlocks at 100 lifetime gold and totalGold survives a save round-trip", () => {
+  assert.ok(!checkAchievements(emptyStats(), "end", 99).includes("rich"));
+  assert.ok(checkAchievements(emptyStats(), "end", 100).includes("rich"));
+  const a = emptyAchievements();
+  a.totalGold = 123;
+  assert.equal(parseAchievements(stringifyAchievements(a)).totalGold, 123);
+});
+
+test("drop 8 achievements fire on their win, kill, room and artifact signals", () => {
+  const s = emptyStats();
+  Object.assign(s, { finalHp: 1, cursesTaken: 1, ticksElapsed: 4 * 60 * 60, roomsCleared: 12 });
+  const win = checkAchievements(s, "win");
+  for (const id of ["speedrun_sub_5", "no_dash_win", "one_hp_win", "curse_bearer", "perfect_boss"] as const) {
+    assert.ok(win.includes(id), id);
+  }
+  assert.ok(!checkAchievements({ ...s, dashCount: 1 }, "win").includes("no_dash_win"));
+  assert.ok(!checkAchievements({ ...s, bossDamageTaken: 1 }, "win").includes("perfect_boss"));
+  const k = emptyStats();
+  Object.assign(k, { poisonKills: 10, critHits: 15, wardenKills: 1, phantomKills: 5, vampireHeals: 5, perfectDodges: 10 });
+  const kill = checkAchievements(k, "kill");
+  for (const id of ["poison_master", "crit_king", "warden_slayer", "phantom_master", "vampire_lord", "dodge_king"] as const) {
+    assert.ok(kill.includes(id), id);
+  }
+  assert.ok(checkAchievements({ ...emptyStats(), roomsCleared: 1 }, "room").includes("pacifist_room"));
+  assert.ok(!checkAchievements({ ...emptyStats(), roomsCleared: 1, roomKills: 2 }, "room").includes("pacifist_room"));
+  assert.ok(checkAchievements({ ...emptyStats(), artifactsTaken: 10 }, "artifact").includes("collector_10"));
 });

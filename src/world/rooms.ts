@@ -9,11 +9,13 @@ export const TILE = {
   CRATE: 3,
   DOOR: 4,
   DOOR_OPEN: 5,
+  TRAP: 6,
+  TRAP_ARMED: 7,
 } as const;
 
 export type Tile = (typeof TILE)[keyof typeof TILE];
 
-/** E chaser, C charger, T splitter, B boss, R ranged, P teleporter; S stays the player start */
+/** E chaser, C charger, T splitter, B boss, R ranged, P teleporter, H healer, X exploder, D shielder, N sniper, J jumper; S stays the player start, O crate, ^ spike trap */
 export const MARKER_KIND: Record<string, EnemyKind> = {
   E: "chaser",
   C: "charger",
@@ -21,6 +23,12 @@ export const MARKER_KIND: Record<string, EnemyKind> = {
   B: "boss",
   R: "ranged",
   P: "teleporter",
+  H: "healer",
+  X: "exploder",
+  D: "shielder",
+  N: "sniper",
+  J: "jumper",
+  W: "warden",
 };
 
 export type SpawnMark = { x: number; y: number; kind: EnemyKind };
@@ -29,6 +37,7 @@ export type Template = {
   name: string;
   /** interior rows only; a wall border is added automatically, short rows are padded with floor */
   rows: string[];
+  shop?: boolean;
 };
 
 const FLOOR_ROW = ".".repeat(22);
@@ -65,7 +74,7 @@ export const TEMPLATES: Template[] = [
       "....O...........O.....",
       "......................",
       ".........E............",
-      "......................",
+      "..............H....D..",
     ],
   },
   {
@@ -82,7 +91,7 @@ export const TEMPLATES: Template[] = [
       "..T..............C....",
       "....O....O....O....O..",
       "......................",
-      ".........E............",
+      ".........E.......X..J.",
     ],
   },
   {
@@ -99,7 +108,7 @@ export const TEMPLATES: Template[] = [
       "O..................O..",
       "..E.........C.........",
       "O..................O..",
-      "OOOO..............OOOO",
+      "OOOO.......N......OOOO",
     ],
   },
   {
@@ -107,7 +116,7 @@ export const TEMPLATES: Template[] = [
     rows: [
       "OOOOOOOOOOOOOOOOOOOOOO",
       "S............OOOOOOOOO",
-      ".............OOOOOOOOO",
+      "...........D.OOOOOOOOO",
       "OOOOOOOOOOOO........CR",
       "OOOOOOOOOOOOT......E.P",
       "OOOOOOOOOOOOOOOOOOOOOO",
@@ -123,13 +132,99 @@ export const TEMPLATES: Template[] = [
       "......................",
       "..C....OO....OO....T..",
       "......................",
-      "S.......E..E.......R..",
+      "S.......E..E.......W..",
       "......................",
       "..T....OO....OO....C..",
       "......................",
       "..E......E......E.....",
       "......................",
-      ".........P............",
+      ".........P.......H..X.",
+    ],
+  },
+  {
+    name: "Mê cung",
+    rows: [
+      "......................",
+      ".....O.....O.....O....",
+      ".....O.....O.....O....",
+      "..E..O..C..O..T..O....",
+      ".....O.....O.....O....",
+      ".....O.....O.....O....",
+      "S....O.....O.....O....",
+      ".....O.....O.....O....",
+      "..T..O..E..O..C..O..R.",
+      ".....O.....O.....O....",
+      ".....O..H..O.....O....",
+      "......................",
+    ],
+  },
+  {
+    name: "Đấu trường mở",
+    rows: [
+      "......................",
+      "..E....E....E....E....",
+      "......................",
+      "..C....T....R....C....",
+      "......................",
+      "S.....................",
+      "......................",
+      "..E....X....E....T....",
+      "......................",
+      "..P....E....C....E....",
+      "......................",
+      "......................",
+    ],
+  },
+  {
+    name: "Phòng kho báu",
+    rows: [
+      "......................",
+      "..OO..............OO..",
+      "......................",
+      "......................",
+      "......................",
+      "S.....................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "..OO..............OO..",
+      "......................",
+    ],
+  },
+  {
+    name: "Bẫy",
+    rows: [
+      "......................",
+      "...^^^^......^^^^.....",
+      "......................",
+      "..E...^^^..T...^^^....",
+      "......................",
+      "S.....^^^^^^^^........",
+      "......................",
+      "..C...^^^..E...^^^....",
+      "......................",
+      "...^^^^......^^^^.....",
+      "......................",
+      "......................",
+    ],
+  },
+  {
+    name: "Cửa hàng",
+    shop: true,
+    rows: [
+      "......................",
+      "..OO..............OO..",
+      "......................",
+      "....OO..........OO....",
+      "......................",
+      "S.....................",
+      "......................",
+      "....OO..........OO....",
+      "......................",
+      "......................",
+      "..OO..............OO..",
+      "......................",
     ],
   },
   {
@@ -156,6 +251,7 @@ export class Room {
   readonly h: number;
   readonly index: number;
   readonly name: string;
+  readonly shop: boolean;
   readonly tiles: Uint8Array;
   readonly spawns: SpawnMark[] = [];
   readonly start: { x: number; y: number } = { x: 0, y: 0 };
@@ -171,6 +267,7 @@ export class Room {
     this.h = innerH + 2;
     this.index = index;
     this.name = template.name;
+    this.shop = template.shop ?? false;
     this.tiles = new Uint8Array(this.w * this.h);
 
     const rng = makeRng(0x9e37 + index * 7919);
@@ -182,6 +279,7 @@ export class Room {
           const line = (rows[ty - 1] ?? "").padEnd(innerW, ".").slice(0, innerW);
           const ch = line[tx - 1];
           if (ch === "O") t = TILE.CRATE;
+          else if (ch === "^") t = TILE.TRAP;
           else if (rng.next() < 0.14) t = TILE.ACCENT;
           const cx = tx * CONFIG.WORLD.TILE;
           const cy = ty * CONFIG.WORLD.TILE;
@@ -227,6 +325,11 @@ export class Room {
   at(tx: number, ty: number): Tile {
     if (tx < 0 || ty < 0 || tx >= this.w || ty >= this.h) return TILE.WALL;
     return this.tiles[ty * this.w + tx] as Tile;
+  }
+
+  setTile(tx: number, ty: number, t: Tile): void {
+    if (tx < 0 || ty < 0 || tx >= this.w || ty >= this.h) return;
+    this.tiles[ty * this.w + tx] = t;
   }
 
   isSolid(tx: number, ty: number): boolean {

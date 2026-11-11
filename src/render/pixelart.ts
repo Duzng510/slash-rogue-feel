@@ -110,6 +110,81 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 3, 10, 3, 1, P.ENEMY_TELEPORTER_SHADE);
   });
 
+  const healer = enemyDef("healer");
+  S[healer.SPRITE_KEY] = bake(9, 11, 4, 10, (g) => {
+    rect(g, 2, 0, 5, 2, healer.BODY_COLOR);
+    rect(g, 1, 2, 7, 7, healer.BODY_COLOR);
+    rect(g, 1, 8, 7, 1, P.ENEMY_HEALER_SHADE);
+    rect(g, 4, 3, 1, 5, "#eafff0");
+    rect(g, 2, 5, 5, 1, "#eafff0");
+    rect(g, 2, 10, 2, 1, P.VOID);
+    rect(g, 5, 10, 2, 1, P.VOID);
+  });
+
+  const exploder = enemyDef("exploder");
+  S[exploder.SPRITE_KEY] = bake(11, 12, 5, 11, (g) => {
+    rect(g, 5, 0, 1, 2, P.ENEMY_EYE);
+    rect(g, 3, 2, 5, 1, exploder.BODY_COLOR);
+    rect(g, 1, 3, 9, 6, exploder.BODY_COLOR);
+    rect(g, 3, 9, 5, 1, exploder.BODY_COLOR);
+    rect(g, 1, 7, 9, 2, P.ENEMY_EXPLODER_SHADE);
+    rect(g, 4, 4, 3, 3, P.ENEMY_EXPLODER_SHADE);
+    rect(g, 5, 5, 1, 1, P.ENEMY_EYE);
+    rect(g, 2, 10, 2, 1, P.VOID);
+    rect(g, 7, 10, 2, 1, P.VOID);
+  });
+
+  const shielder = enemyDef("shielder");
+  S[shielder.SPRITE_KEY] = bake(12, 11, 6, 10, (g) => {
+    rect(g, 2, 0, 8, 9, shielder.BODY_COLOR);
+    rect(g, 2, 7, 8, 2, P.ENEMY_SHIELDER_SHADE);
+    rect(g, 0, 1, 2, 7, P.ENEMY_SHIELDER_SHADE);
+    rect(g, 10, 1, 2, 7, P.ENEMY_SHIELDER_SHADE);
+    rect(g, 4, 3, 2, 2, P.ENEMY_EYE);
+    rect(g, 7, 3, 1, 2, P.ENEMY_EYE);
+    rect(g, 3, 10, 2, 1, P.VOID);
+    rect(g, 7, 10, 2, 1, P.VOID);
+  });
+
+  const sniper = enemyDef("sniper");
+  S[sniper.SPRITE_KEY] = bake(9, 13, 4, 12, (g) => {
+    rect(g, 3, 0, 3, 2, P.ENEMY_SNIPER_SHADE);
+    rect(g, 2, 2, 5, 4, sniper.BODY_COLOR);
+    rect(g, 3, 6, 3, 5, sniper.BODY_COLOR);
+    rect(g, 3, 3, 3, 1, P.ENEMY_EYE);
+    rect(g, 4, 8, 1, 3, P.ENEMY_SNIPER_SHADE);
+    rect(g, 2, 12, 2, 1, P.VOID);
+    rect(g, 5, 12, 2, 1, P.VOID);
+  });
+
+  const jumper = enemyDef("jumper");
+  S[jumper.SPRITE_KEY] = bake(9, 10, 4, 9, (g) => {
+    rect(g, 3, 0, 3, 1, jumper.BODY_COLOR);
+    rect(g, 2, 1, 5, 4, jumper.BODY_COLOR);
+    rect(g, 1, 2, 1, 2, P.ENEMY_JUMPER_SHADE);
+    rect(g, 7, 2, 1, 2, P.ENEMY_JUMPER_SHADE);
+    rect(g, 3, 2, 1, 1, P.ENEMY_EYE);
+    rect(g, 5, 2, 1, 1, P.ENEMY_EYE);
+    rect(g, 2, 5, 2, 3, P.ENEMY_JUMPER_SHADE);
+    rect(g, 5, 5, 2, 3, P.ENEMY_JUMPER_SHADE);
+    rect(g, 1, 8, 3, 1, jumper.BODY_COLOR);
+    rect(g, 5, 8, 3, 1, jumper.BODY_COLOR);
+  });
+
+  const warden = enemyDef("warden");
+  S[warden.SPRITE_KEY] = bake(16, 16, 8, 15, (g) => {
+    rect(g, 0, 2, 16, 12, P.ENEMY_WARDEN_SHADE);
+    rect(g, 1, 1, 14, 12, warden.BODY_COLOR);
+    rect(g, 1, 1, 14, 2, P.ENEMY_WARDEN_SHADE);
+    rect(g, 2, 0, 2, 2, P.ENEMY_WARDEN_SHADE);
+    rect(g, 12, 0, 2, 2, P.ENEMY_WARDEN_SHADE);
+    rect(g, 3, 5, 3, 3, P.ENEMY_EYE);
+    rect(g, 10, 5, 3, 3, P.ENEMY_EYE);
+    rect(g, 6, 9, 4, 2, P.ENEMY_WARDEN_SHADE);
+    rect(g, 3, 14, 3, 2, P.VOID);
+    rect(g, 10, 14, 3, 2, P.VOID);
+  });
+
   const boss = enemyDef("boss");
   S[boss.SPRITE_KEY] = bake(20, 18, 10, 17, (g) => {
     rect(g, 0, 2, 20, 14, P.ENEMY_BOSS_RIM);
@@ -181,6 +256,22 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 3, 7, T - 6, 4, P.WALL_TOP);
     rect(g, 0, 2, 1, T - 2, P.VOID);
     rect(g, T - 1, 2, 1, T - 2, P.VOID);
+  });
+
+  S.trap = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.FLOOR);
+    rect(g, 1, 13, T - 2, 2, P.WALL);
+    for (const x of [2, 7, 12]) {
+      rect(g, x + 1, 5, 1, 3, P.ENEMY_BODY);
+      rect(g, x, 8, 3, 5, P.ENEMY_BODY);
+      rect(g, x, 12, 3, 1, P.ENEMY_SHADE);
+    }
+  });
+
+  S.trap_spent = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.FLOOR);
+    rect(g, 1, 13, T - 2, 2, P.WALL);
+    for (const x of [2, 7, 12]) rect(g, x, 11, 3, 2, P.DOOR_LOCKED);
   });
 
   S.door_locked = bake(T, T, 0, 0, (g) => {

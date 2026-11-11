@@ -1,14 +1,16 @@
 import { CONFIG } from "../config.ts";
 import type { FrameData } from "../config.ts";
-import { pointInArc, rectsOverlap } from "../mathx.ts";
+import { normAngle, pointInArc, rectsOverlap } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
 import { requestHitStop } from "./feelSim.ts";
 import type { Rect } from "../mathx.ts";
 import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
+import type { Enemy } from "../entities/enemy.ts";
 import type { SpatialGrid } from "../world/grid.ts";
 
 export type SwingInit = {
   side: Side;
+  kind?: string;
   combo: number;
   dir: number;
   ox: number;
@@ -25,6 +27,7 @@ export function createSwing(src: Sim, init: SwingInit): Swing {
   return {
     id: src.nextSwingId(),
     side: init.side,
+    kind: init.kind,
     combo: init.combo,
     dir: init.dir,
     phase: "startup",
@@ -45,18 +48,26 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
   const a = CONFIG.ATTACK;
   const second = combo >= 2;
   const scale = second ? a.COMBO2_REACH_SCALE : 1;
+  const berserk = src.artifacts.has("berserker") ? 1 + Math.min(0.5, (src.player.maxHp - src.player.hp) * 0.1) : 1;
+  const base = a.COMBOS[Math.min(a.COMBOS.length, combo) - 1];
+  const fd = src.curses.has("slow_hand") ? { ...base, startup: base.startup + CONFIG.CURSES.STARTUP_TICKS } : base;
   return {
     side: "player",
-    status: combo === 1 && src.artifacts.has("water") ? "wet" : combo === 2 && src.artifacts.has("lightning") ? "shock" : undefined,
+    status: combo === 1 ? (src.artifacts.has("water") ? "wet" : src.artifacts.has("poison") ? "poison" : undefined)
+      : combo === 2 ? (src.artifacts.has("lightning") ? "shock" : src.artifacts.has("freeze") ? "freeze" : undefined)
+      : undefined,
     combo,
     dir,
     ox: src.player.x,
     oy: src.player.y,
     reach: a.REACH * scale,
     deg: Math.min(170, a.ARC_DEG * (second ? a.COMBO2_ARC_SCALE : 1)),
-    dmg: a.DMG * (src.artifacts.has("heavy") ? 1.5 : 1) + (src.player.reprisalTicks > 0 ? 1 : 0),
+    dmg:
+      a.DMG * (src.artifacts.has("heavy") ? 1.5 : 1) * berserk * (src.artifacts.has("glasscannon") ? 2 : 1) *
+      (src.curses.has("glass") ? CONFIG.CURSES.DEALT_MULT : 1) +
+      (src.player.reprisalTicks > 0 ? 1 : 0),
     knockback: a.KNOCKBACK * (src.player.impulseTicks > 0 ? 2 : 1),
-    fd: a.COMBOS[Math.min(a.COMBOS.length, combo) - 1],
+    fd,
   };
 }
 
@@ -95,9 +106,13 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
     if (sw === null || sw.phase !== "active") continue;
     const box = hitboxOf(sw);
     if (box === null) continue;
+    // a whiffed swing loses its arc entirely, so the miss reads on screen too
+    if (sw.side === "player" && sw.ticksLeft === sw.fd.active && src.curses.has("butterfingers") &&
+      src.rng.next() < CONFIG.CURSES.WHIFF_CHANCE) sw.deg = 0;
 
     let blast: { x: number; y: number } | null = null;
     const reach = hitReach(sw);
+    const twin = sw.side === "player" && sw.combo === 2 && src.artifacts.has("twin_blades");
     const cands = grid.query(attacker.x, attacker.y, reach);
     for (const target of cands) {
       if (target === attacker || target.side === sw.side) continue;
@@ -106,15 +121,54 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
       if (!rectsOverlap(box, hb)) continue;
       const cx = hb.x + hb.w / 2;
       const cy = hb.y + hb.h / 2;
-      if (!pointInArc(cx, cy, sw.ox, sw.oy, sw.dir, reach, sw.deg, 0)) continue;
+      if (!pointInArc(cx, cy, sw.ox, sw.oy, sw.dir, reach, sw.deg, 0) &&
+        !(twin && pointInArc(cx, cy, sw.ox, sw.oy, normAngle(sw.dir + Math.PI), reach, sw.deg, 0))) continue;
       if (sw.seen.has(target.id)) continue;
 
       sw.seen.add(target.id);
+      const exec = sw.side === "player" && target.side === "enemy" && src.artifacts.has("executioner") &&
+        (target as Enemy).hp < (target as Enemy).maxHp * 0.3;
       const killed = target.onHit(sw, cx, cy, src);
-      hitFeedback(src, target, sw, cx, cy, killed);
+      hitFeedback(src, target, sw, cx, cy, killed, !exec);
+      if (target.side === "player" && src.artifacts.has("thorns") && !attacker.dead) {
+        const dir = Math.atan2(attacker.y - target.y, attacker.x - target.x);
+        const thornsSwing = createSwing(src, {
+          side: "player",
+          combo: 0,
+          dir,
+          ox: target.x,
+          oy: target.y,
+          reach: 0,
+          deg: 0,
+          dmg: 1,
+          knockback: 30,
+          fd: { startup: 0, active: 1, recovery: 0 },
+        });
+        attacker.onHit(thornsSwing, attacker.x, attacker.y, src);
+        src.queue.push({ t: "artifactText", x: attacker.x, y: attacker.y - 14, text: "GAI", color: "#c8ff8a" });
+        sfx(src.queue, "slash_hit", 0.5, 1.4);
+      }
       if (sw.side === "player" && sw.combo === 2 && src.artifacts.has("aftershock") && !sw.aftershockDone) {
         sw.aftershockDone = true;
         blast = { x: cx, y: cy };
+      }
+      if (sw.side === "player" && sw.combo === 2 && src.artifacts.has("chain_lightning") && !sw.chainDone) {
+        sw.chainDone = true;
+        let best: Enemy | null = null;
+        let bestD = 60;
+        for (const other of src.enemies) {
+          if (other === target || other.dead || !other.canBeHit()) continue;
+          const d = Math.hypot(other.x - cx, other.y - cy);
+          if (d < bestD) { bestD = d; best = other; }
+        }
+        if (best !== null) {
+          const zap = { ...sw, dmg: 1, knockback: 0, status: undefined, seen: new Set<number>() };
+          const zapped = best.onHit(zap, best.x, best.y, src);
+          hitFeedback(src, best, zap, best.x, best.y, zapped, false);
+          src.queue.push({ t: "slashArc", x: best.x, y: best.y, dir: 0, reach: 15, deg: 360, combo: 2, ticks: 8 });
+          sfx(src.queue, "shock_hit", 0.6, 1.5);
+          artifactText(src.queue, best.x, best.y - 12, "LIÊN LÔI", "#ffe66b");
+        }
       }
     }
     if (blast !== null) {
@@ -150,7 +204,7 @@ export function resolveFire(src: Sim): void {
   src.fireTrails = src.fireTrails.filter(t => t.points.length > 0);
 }
 
-function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
+export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
     src.runStats.damageDealt += sw.dmg;

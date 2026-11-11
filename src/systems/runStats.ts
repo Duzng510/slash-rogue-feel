@@ -12,6 +12,18 @@ export type RunStats = {
   killStreak: number;
   heavyKills: number;
   comboSeen: boolean;
+  gold: number;
+  totalGoldEarned: number;
+  eliteKills: number;
+  critHits: number;
+  poisonKills: number;
+  wardenKills: number;
+  phantomKills: number;
+  vampireHeals: number;
+  bossDamageTaken: number;
+  roomKills: number;
+  cursesTaken: number;
+  finalHp: number;
 };
 
 export function emptyStats(): RunStats {
@@ -28,6 +40,18 @@ export function emptyStats(): RunStats {
     killStreak: 0,
     heavyKills: 0,
     comboSeen: false,
+    gold: 0,
+    totalGoldEarned: 0,
+    eliteKills: 0,
+    critHits: 0,
+    poisonKills: 0,
+    wardenKills: 0,
+    phantomKills: 0,
+    vampireHeals: 0,
+    bossDamageTaken: 0,
+    roomKills: 0,
+    cursesTaken: 0,
+    finalHp: 0,
   };
 }
 

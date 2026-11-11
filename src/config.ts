@@ -1,6 +1,6 @@
 export type FrameData = { startup: number; active: number; recovery: number };
 
-export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss" | "ranged" | "teleporter";
+export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss" | "ranged" | "teleporter" | "healer" | "exploder" | "shielder" | "sniper" | "jumper" | "warden";
 
 const PALETTE = {
   VOID: "#05070b",
@@ -28,6 +28,18 @@ const PALETTE = {
   ENEMY_RANGED_SHADE: "#1f7a44",
   ENEMY_TELEPORTER: "#29c5d6",
   ENEMY_TELEPORTER_SHADE: "#178a95",
+  ENEMY_HEALER: "#58d68d",
+  ENEMY_HEALER_SHADE: "#2e8b57",
+  ENEMY_EXPLODER: "#ff7043",
+  ENEMY_EXPLODER_SHADE: "#b23c17",
+  ENEMY_SHIELDER: "#8fa8c8",
+  ENEMY_SHIELDER_SHADE: "#4a6076",
+  ENEMY_SNIPER: "#d64545",
+  ENEMY_SNIPER_SHADE: "#8f1f26",
+  ENEMY_JUMPER: "#7df0c8",
+  ENEMY_JUMPER_SHADE: "#3fa884",
+  ENEMY_WARDEN: "#e0c341",
+  ENEMY_WARDEN_SHADE: "#8a6a1a",
   PROJ: "#ffe08a",
   TELEGRAPH_FILL: "#ff3b3b",
   TELEGRAPH_EDGE: "#ff8a8a",
@@ -100,13 +112,27 @@ const ENEMY_BASE = {
   APPEAR_TICKS: 0,
   APPEAR_DIST: 20,
 
+  /** healer only: pulses hp back to nearby allies (0 disables) */
+  HEAL_RADIUS: 0,
+  HEAL_INTERVAL: 0,
+  HEAL_AMOUNT: 0,
+  /** exploder only: detonates instead of swinging, then dies (0 disables) */
+  EXPLODE_RADIUS: 0,
+  EXPLODE_DMG: 0,
+  /** shielder only: halves damage arriving from the front */
+  SHIELD: false,
+  /** sniper only: fires a room-crossing beam instead of a projectile */
+  SNIPER: false,
+  /** warden only: the laser pattern telegraphs longer than the other two (0 disables) */
+  LASER_TELEGRAPH_TICKS: 0,
+
   /** splitter only */
   SPLIT_INTO: null as EnemyKind | null,
   SPLIT_COUNT: 0,
   HP_BAR: false,
   KILL_PITCH: 1,
   /** hard ceiling on living enemies, enforced at spawn */
-  MAX_ALIVE: 12,
+  MAX_ALIVE: 14,
 };
 
 export type EnemyDef = typeof ENEMY_BASE & { kind: EnemyKind };
@@ -247,6 +273,102 @@ const ENEMY_OVERRIDES: Record<EnemyKind, Partial<typeof ENEMY_BASE>> = {
     APPEAR_DIST: 20,
     KILL_PITCH: 1.2,
   },
+  healer: {
+    HP: 2,
+    SPEED: 50,
+    ATTACK_REACH: 0,
+    HEAL_RADIUS: 60,
+    HEAL_INTERVAL: 180,
+    HEAL_AMOUNT: 1,
+    SPRITE_KEY: "enemy_healer",
+    BODY_COLOR: PALETTE.ENEMY_HEALER,
+    KILL_PITCH: 1.15,
+  },
+  exploder: {
+    HP: 2,
+    SPEED: 70,
+    TELEGRAPH_TICKS: 60,
+    ACTIVE_TICKS: 1,
+    RECOVERY_TICKS: 1,
+    ATTACK_REACH: 50,
+    RADIAL: true,
+    EXPLODE_RADIUS: 50,
+    EXPLODE_DMG: 3,
+    SPRITE_KEY: "enemy_exploder",
+    BODY_COLOR: PALETTE.ENEMY_EXPLODER,
+    KILL_PITCH: 0.85,
+  },
+  shielder: {
+    HP: 4,
+    SPEED: 56,
+    BODY_W: 11,
+    BODY_H: 9,
+    HURT_W: 11,
+    SHIELD: true,
+    SPRITE_KEY: "enemy_shielder",
+    BODY_COLOR: PALETTE.ENEMY_SHIELDER,
+    KILL_PITCH: 0.8,
+  },
+  sniper: {
+    HP: 1,
+    SPEED: 0,
+    ACCEL: 0,
+    TELEGRAPH_TICKS: 120,
+    ACTIVE_TICKS: 1,
+    RECOVERY_TICKS: 20,
+    REST_TICKS: 60,
+    ATTACK_REACH: 400,
+    ATTACK_ARC_DEG: 4,
+    CHASE_ACQUIRE: 400,
+    SNIPER: true,
+    SPRITE_KEY: "enemy_sniper",
+    BODY_COLOR: PALETTE.ENEMY_SNIPER,
+    KILL_PITCH: 1.25,
+  },
+  jumper: {
+    HP: 3,
+    SPEED: 84,
+    ACCEL: 1000,
+    TELEGRAPH_TICKS: 18,
+    ACTIVE_TICKS: 3,
+    RECOVERY_TICKS: 12,
+    REST_TICKS: 20,
+    ATTACK_REACH: 22,
+    ATTACK_ARC_DEG: 90,
+    TELEPORTER: true,
+    VANISH_TICKS: 14,
+    APPEAR_TICKS: 8,
+    APPEAR_DIST: 30,
+    SPRITE_KEY: "enemy_jumper",
+    BODY_COLOR: PALETTE.ENEMY_JUMPER,
+    KILL_PITCH: 1.1,
+  },
+  warden: {
+    HP: 15,
+    SPEED: 50,
+    ACCEL: 700,
+    BODY_W: 16,
+    BODY_H: 14,
+    HURT_W: 16,
+    HURT_H: 12,
+    TELEGRAPH_TICKS: 36,
+    LASER_TELEGRAPH_TICKS: 120,
+    ACTIVE_TICKS: 1,
+    RECOVERY_TICKS: 20,
+    REST_TICKS: 60,
+    ATTACK_REACH: 120,
+    ATTACK_ARC_DEG: 360,
+    DMG: 1,
+    CHASE_ACQUIRE: 400,
+    SEPARATION: 0,
+    SHOT_SPEED: 90,
+    SHOT_DMG: 1,
+    SHOT_LIFE_TICKS: 120,
+    SPRITE_KEY: "enemy_warden",
+    BODY_COLOR: PALETTE.ENEMY_WARDEN,
+    HP_BAR: true,
+    KILL_PITCH: 0.7,
+  },
 };
 
 const defCache = new Map<EnemyKind, EnemyDef>();
@@ -276,8 +398,27 @@ export const CONFIG = {
   },
 
   ROOMS: {
-    WAVES: [3, 4, 6, 8, 5, 10],
+    WAVES: [3, 4, 6, 8, 5, 10, 6, 12, 0, 8, 0],
     END_DELAY: 40,
+    TRAP_DMG: 1,
+  },
+
+  CURSES: {
+    OFFER_EVERY: 3,
+    MAX_CURSES: 3,
+    FRAIL_HP: 2,
+    SPEED_MULT: 0.8,
+    STARTUP_TICKS: 2,
+    WHIFF_CHANCE: 0.1,
+    TAKEN_MULT: 2,
+    DEALT_MULT: 1.5,
+  },
+
+  SHOP: {
+    ARTIFACT: 15,
+    HEAL: 8,
+    MAXHP: 25,
+    CURSE: 30,
   },
 
   SEED: 1337,

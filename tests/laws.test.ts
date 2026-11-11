@@ -6,8 +6,8 @@ import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
 import { TEMPLATES, MARKER_KIND, Room, TILE, type Template } from "../src/world/rooms.ts";
 import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
-import { createSwing } from "../src/systems/combat.ts";
-import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS } from "../src/systems/artifacts.ts";
+import { createSwing, playerSwingInit } from "../src/systems/combat.ts";
+import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS, CURSES } from "../src/systems/artifacts.ts";
 import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
 import { checkAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
@@ -54,7 +54,7 @@ function sandbox(): World {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null };
+  return { earned, best: null, totalGold: 0 };
 }
 
 function duel(w: World, gap = 16): number {
@@ -404,7 +404,10 @@ heading("Archetype readability");
     ENEMY_KINDS.map((k) => `${k}:${(enemyDef(k).TELEGRAPH_TICKS / hz).toFixed(2)}s`).join(" ")
   );
   ok("the boss stays readable in phase 2", enemyDef("boss").ENRAGED_TELEGRAPH_TICKS / hz >= CONFIG.LAWS.MIN_TELEGRAPH_S);
-  ok("every archetype leaves a reactable punish window", ENEMY_KINDS.every((k) => enemyDef(k).RECOVERY_TICKS / hz >= 0.15));
+  ok(
+    "every archetype that survives its attack leaves a reactable punish window",
+    ENEMY_KINDS.filter((k) => enemyDef(k).EXPLODE_RADIUS === 0).every((k) => enemyDef(k).RECOVERY_TICKS / hz >= 0.15)
+  );
 
   const colors = ENEMY_KINDS.map((k) => enemyDef(k).BODY_COLOR);
   ok("body colours are pairwise distinct", new Set(colors).size === colors.length, colors.join(" "));
@@ -631,12 +634,157 @@ heading("Room variety (P5)");
   };
   const stuck = TEMPLATES.map((t, i) => (reachesDoor(t) ? -1 : i)).filter((i) => i >= 0);
   ok("every authored room has a reachable exit", stuck.length === 0, `stuck rooms ${stuck.join(",")}`);
-  ok("the run is now 7 rooms long", TEMPLATES.length === 7, `length ${TEMPLATES.length}`);
+  ok("the run is now 12 rooms long", TEMPLATES.length === 12, `length ${TEMPLATES.length}`);
   ok("the biggest authored wave fields 8+ enemies", Math.max(...CONFIG.ROOMS.WAVES) >= 8, `max ${Math.max(...CONFIG.ROOMS.WAVES)}`);
   ok("every non-boss room has a wave entry", CONFIG.ROOMS.WAVES.length === TEMPLATES.length - 1, `waves ${CONFIG.ROOMS.WAVES.length}`);
   // a full-reward run takes one artifact per room (rooms 0..roomTotal-1) and must still show a
   // 3-choice offer on the last room — so pool >= (roomTotal-1) consumed + 3 remaining.
-  ok("the artifact pool can fill every reward room", ARTIFACTS.length >= TEMPLATES.length + 2, `have ${ARTIFACTS.length} need ${TEMPLATES.length + 2}`);
+  ok("the artifact pool can fill every reward room", ARTIFACTS.length >= TEMPLATES.length + 2 * CONFIG.CURSES.MAX_CURSES + 2, `have ${ARTIFACTS.length} need ${TEMPLATES.length + 2 * CONFIG.CURSES.MAX_CURSES + 2}`);
+}
+
+heading("Rooms (P8)");
+{
+  const T = CONFIG.WORLD.TILE;
+  const trapIndex = TEMPLATES.findIndex(t => t.rows.join("").includes("^"));
+  const treasureIndex = TEMPLATES.findIndex(t => t.name === "Phòng kho báu");
+  ok("a spike room is authored", trapIndex >= 0);
+  ok("a treasure room is authored", treasureIndex >= 0);
+  ok("the treasure room fields no enemies", TEMPLATES[treasureIndex].rows.join("").match(/[ECTBRPHXDNJ]/) === null);
+
+  const w = new World(CONFIG.SEED);
+  w.loadRoom(trapIndex);
+  w.clearEnemies();
+  w.room.openDoors();
+  const spots: { x: number; y: number; tx: number; ty: number }[] = [];
+  for (let ty = 1; ty < w.room.h - 1; ty++) {
+    for (let tx = 1; tx < w.room.w - 1; tx++) {
+      if (w.room.at(tx, ty) === TILE.TRAP) spots.push({ x: (tx + 0.5) * T, y: (ty + 0.5) * T, tx, ty });
+    }
+  }
+  ok("the spike room arms several tiles", spots.length >= 2, `spots ${spots.length}`);
+  const [a, b] = spots;
+  w.player.x = a.x;
+  w.player.y = a.y;
+  const hp0 = w.player.hp;
+  w.tick(intent());
+  ok("a spike bites the player", w.player.hp === hp0 - CONFIG.ROOMS.TRAP_DMG, `hp ${w.player.hp}`);
+  ok("a triggered spike is spent", w.room.at(a.tx, a.ty) === TILE.TRAP_ARMED);
+  w.player.x = a.x;
+  w.player.y = a.y;
+  w.player.vx = 0;
+  w.player.vy = 0;
+  w.player.iframeTicks = 0;
+  w.hitStopTicks = 0;
+  const hp1 = w.player.hp;
+  w.tick(intent());
+  ok("a spent spike never bites twice", w.player.hp === hp1, `hp ${w.player.hp}`);
+
+  const e = makeEnemy(b.x, b.y, "chaser");
+  w.enemies.push(e);
+  w.syncUnits();
+  w.hitStopTicks = 0;
+  const ehp0 = e.hp;
+  w.tick(intent());
+  ok("a spike bites enemies too", e.hp === ehp0 - CONFIG.ROOMS.TRAP_DMG, `hp ${e.hp}`);
+  ok("the enemy trigger spends the tile as well", w.room.at(b.tx, b.ty) === TILE.TRAP_ARMED);
+
+  const safe = new World(CONFIG.SEED);
+  safe.loadRoom(treasureIndex);
+  ok("the treasure room spawns nothing", safe.enemies.length === 0);
+  safe.tick(intent());
+  ok("the treasure room rewards without a fight", safe.artifactChoices.length > 0 || safe.room.doorOpen);
+}
+
+heading("Warden (P9)");
+{
+  ok("the warden is a 15 HP mid-boss", enemyDef("warden").HP === 15);
+  ok("the warden laser telegraphs for 2s", enemyDef("warden").LASER_TELEGRAPH_TICKS / CONFIG.TIME.TICK_HZ === 2);
+  const mid = TEMPLATES.findIndex(t => t.rows.join("").includes("W"));
+  ok("a mid-boss room is authored before the finale", mid >= 0 && mid < TEMPLATES.length - 1);
+  const fielded = new World(CONFIG.SEED);
+  fielded.loadRoom(mid);
+  ok("the mid-boss room always fields the warden", fielded.enemies.some(e => e.kind === "warden"));
+
+  const shopIdx = TEMPLATES.findIndex(t => t.shop === true);
+  ok("a shop room is authored before the finale", shopIdx >= 0 && shopIdx < TEMPLATES.length - 1, `shop at ${shopIdx}`);
+  ok("the shop room fields no enemies", shopIdx >= 0 && TEMPLATES[shopIdx].rows.join("").split("").every(ch => MARKER_KIND[ch] === undefined));
+  ok("shop prices are ordered heal < artifact < maxhp < curse", CONFIG.SHOP.HEAL < CONFIG.SHOP.ARTIFACT && CONFIG.SHOP.ARTIFACT < CONFIG.SHOP.MAXHP && CONFIG.SHOP.MAXHP < CONFIG.SHOP.CURSE);
+
+  const w = sandbox();
+  w.clearEnemies();
+  w.spawnEnemy(w.player.x + 70, w.player.y, "warden");
+  w.player.iframeTicks = 10000;
+  let spiral = false;
+  let laser = false;
+  let summon = false;
+  for (let i = 0; i < 900; i++) {
+    w.tick(intent());
+    for (const ev of w.queue.drain()) if (ev.t === "beam") laser = true;
+    if (w.projectiles.length > 0) spiral = true;
+    if (w.enemies.some(e => e.kind === "small")) summon = true;
+  }
+  ok("the warden cycles spiral, laser and summon", spiral && laser && summon, `spiral=${spiral} laser=${laser} summon=${summon}`);
+}
+
+heading("Curse (P10)");
+{
+  const earned = new Set<AchievementId>();
+  for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
+  const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0 });
+  w.clearEnemies();
+  w.tick(intent());
+  ok("the first clear offers a two-curse package", w.curseOffer !== null && w.curseOffer.curses.length === 2 && w.curseOffer.artifacts.length === 2);
+  const offer = w.curseOffer!;
+  const bundle = offer.artifacts.map(a => a.id);
+  ok("choosing a curse grants both bundled artifacts", w.chooseCurse(offer.curses[0].id) && bundle.every(id => w.artifacts.has(id)));
+  ok("the curse package opens the door and closes the modal", w.room.doorOpen && w.artifactChoices.length === 0 && w.curseOffer === null);
+  ok("a spent curse offer cannot be chosen again", w.chooseCurse(offer.curses[0].id) === false);
+
+  const f = new World(CONFIG.SEED);
+  f.curseOffer = { artifacts: [], curses: CURSES.filter(c => c.id === "frail") };
+  f.chooseCurse("frail");
+  ok("frail cuts max HP by 2", f.player.maxHp === CONFIG.PLAYER.HP - CONFIG.CURSES.FRAIL_HP && f.player.hp === f.player.maxHp);
+
+  const g = new World(CONFIG.SEED);
+  g.curseOffer = { artifacts: [], curses: CURSES.filter(c => c.id === "glass") };
+  g.chooseCurse("glass");
+  const hp0 = g.player.hp;
+  g.player.onHit(createSwing(g, { side: "enemy", combo: 0, dir: 0, ox: 0, oy: 0, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } }), g.player.x, g.player.y, g);
+  ok("glass doubles damage taken", g.player.hp === hp0 - CONFIG.CURSES.TAKEN_MULT, `hp ${g.player.hp}`);
+  ok("glass multiplies damage dealt", playerSwingInit(g, 1, 0).dmg === CONFIG.ATTACK.DMG * CONFIG.CURSES.DEALT_MULT);
+
+  const s = new World(CONFIG.SEED);
+  s.curses.add("slow_hand");
+  ok("slow_hand adds 2 startup ticks", playerSwingInit(s, 1, 0).fd.startup === CONFIG.ATTACK.COMBOS[0].startup + CONFIG.CURSES.STARTUP_TICKS);
+
+  const run = (cursed: boolean): number => {
+    const wr = new World(CONFIG.SEED);
+    wr.clearEnemies();
+    if (cursed) wr.curses.add("heavy_legs");
+    const x0 = wr.player.x;
+    for (let i = 0; i < 60; i++) wr.tick(intent({ moveX: 1 }));
+    return wr.player.x - x0;
+  };
+  const plain = run(false);
+  ok("heavy_legs slows the run by 20%", Math.abs(run(true) - plain * CONFIG.CURSES.SPEED_MULT) < 1, `plain ${plain.toFixed(1)}`);
+
+  const b = new World(CONFIG.SEED);
+  b.clearEnemies();
+  b.curses.add("butterfingers");
+  b.spawnEnemy(b.player.x + 20, b.player.y, "chaser");
+  b.enemies[0].hp = 999;
+  b.player.iframeTicks = 10000;
+  let whiff = 0;
+  let landed = 0;
+  for (let i = 0; i < 600; i++) {
+    b.tick(intent({ attack: true }));
+    const sw = b.player.swing;
+    if (sw !== null && sw.phase === "active" && sw.ticksLeft === sw.fd.active) {
+      if (sw.deg === 0) whiff++;
+      else landed++;
+    }
+  }
+  ok("butterfingers whiffs some swings but not all", whiff > 0 && landed > 0, `whiff=${whiff} landed=${landed}`);
 }
 
 heading("Artifact HUD");

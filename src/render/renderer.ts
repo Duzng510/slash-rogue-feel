@@ -38,6 +38,7 @@ export class Renderer {
   origin = { x: 0, y: 0 };
 
   private arcs: Arc[] = [];
+  private beams: { x: number; y: number; dir: number; len: number; left: number; total: number }[] = [];
   private texts: FloatText[] = [];
   private flash = new Map<number, number>();
   private vignette = 0;
@@ -71,6 +72,8 @@ export class Renderer {
     this.tileOf[TILE.CRATE] = sprites.crate;
     this.tileOf[TILE.DOOR] = sprites.door_locked;
     this.tileOf[TILE.DOOR_OPEN] = sprites.door_open;
+    this.tileOf[TILE.TRAP] = sprites.trap;
+    this.tileOf[TILE.TRAP_ARMED] = sprites.trap_spent;
   }
 
   resize(): void {
@@ -110,6 +113,7 @@ export class Renderer {
       else if (e.t === "flash") this.flash.set(e.ent, e.ticks);
       else if (e.t === "slashArc") this.arcs.push({ x: e.x, y: e.y, dir: e.dir, reach: e.reach, deg: e.deg, left: e.ticks, total: e.ticks });
       else if (e.t === "hurtVignette") this.vignette = Math.min(CONFIG.READABILITY.VIGNETTE_MAX, e.strength);
+      else if (e.t === "beam") this.beams.push({ x: e.x, y: e.y, dir: e.dir, len: e.len, left: 20, total: 20 });
       else if (e.t === "artifactText") {
         if (this.texts.length >= 24) this.texts.shift();
         this.texts.push({ x: e.x, y: e.y, text: e.text, color: e.color, left: 48, total: 48 });
@@ -121,6 +125,8 @@ export class Renderer {
     const ticks = dtReal * CONFIG.TIME.TICK_HZ;
     for (const a of this.arcs) a.left -= ticks;
     this.arcs = this.arcs.filter((a) => a.left > 0);
+    for (const b of this.beams) b.left -= ticks;
+    this.beams = this.beams.filter((b) => b.left > 0);
     for (const ft of this.texts) {
       ft.left -= ticks;
       ft.y -= ticks * 0.09;
@@ -161,6 +167,7 @@ export class Renderer {
     this.drawArcs(g, ox, oy);
     this.drawEnemies(g, ox, oy);
     this.drawProjectiles(g, ox, oy);
+    this.drawBeams(g, ox, oy);
     this.drawPlayer(g, ox, oy);
     this.drawParticles(g, ox, oy);
     this.drawTexts(g, ox, oy);
@@ -227,7 +234,7 @@ export class Renderer {
       g.setLineDash([3, 2]);
       g.lineDashOffset = -this.world.tickCount % 5;
 
-      if (e.RADIAL) {
+      if (e.RADIAL || (en.kind === "warden" && en.pattern !== "laser")) {
         /** the disc grows into a fixed rim: read the rim, that is the line you must cross */
         g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.55 + 0.45 * prog);
         g.fillStyle = P.TELEGRAPH_FILL;
@@ -246,12 +253,15 @@ export class Renderer {
 
       g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.55 + 0.45 * prog);
       g.fillStyle = P.TELEGRAPH_FILL;
-      this.wedge(g, cx, cy, en.telegraphDir, e.ATTACK_REACH, e.ATTACK_ARC_DEG, 0.1);
+      const laser = en.kind === "warden" && en.pattern === "laser";
+      const reach = laser ? Math.hypot(this.world.room.widthPx, this.world.room.heightPx) : e.ATTACK_REACH;
+      const deg = laser ? 8 : e.ATTACK_ARC_DEG;
+      this.wedge(g, cx, cy, en.telegraphDir, reach, deg, 0.1);
       g.fill();
 
       g.globalAlpha = 0.55 + 0.45 * prog;
       g.strokeStyle = P.TELEGRAPH_EDGE;
-      this.wedge(g, cx, cy, en.telegraphDir, e.ATTACK_REACH, e.ATTACK_ARC_DEG, 0.1);
+      this.wedge(g, cx, cy, en.telegraphDir, reach, deg, 0.1);
       g.stroke();
       g.setLineDash([]);
       g.globalAlpha = 1;
@@ -277,14 +287,17 @@ export class Renderer {
       if (en.removed) continue;
       const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
       const white = this.white[en.def.SPRITE_KEY] ?? this.white.enemy;
-      const x = Math.round(en.x - sp.ax - ox);
-      const y = Math.round(en.y - sp.ay - oy);
+      const sc = en.isElite ? 1.3 : 1;
+      const w = Math.round(sp.w * sc);
+      const h = Math.round(sp.h * sc);
+      const x = Math.round(en.x - sp.ax * sc - ox);
+      const y = Math.round(en.y - sp.ay * sc - oy);
       const flashing = (this.flash.get(en.id) ?? 0) > 0;
 
       if (en.dead) {
         const total = en.def.CORPSE_TICKS;
         g.globalAlpha = Math.max(0, en.corpseTicks / total);
-        g.drawImage(sp.c, x, y + (total - en.corpseTicks));
+        g.drawImage(sp.c, x, y + (total - en.corpseTicks), w, h);
         g.globalAlpha = 1;
         continue;
       }
@@ -295,15 +308,15 @@ export class Renderer {
         en.state === ENEMY_STATE.APPEAR && appearTicks > 0
           ? 0.3 + 0.7 * Math.min(1, en.ticksInState / appearTicks)
           : 1;
-      if (flashing) g.drawImage(white, x, y);
+      if (flashing) g.drawImage(white, x, y, w, h);
       else {
         g.globalAlpha = fade;
-        g.drawImage(sp.c, x, y);
+        g.drawImage(sp.c, x, y, w, h);
         g.globalAlpha = 1;
         const status = en.shockTicks > 0 ? 2 : en.wetTicks > 0 ? 1 : en.burnTicks > 0 ? 0 : -1;
         if (status >= 0) {
           g.globalAlpha = 0.55 * fade;
-          g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y);
+          g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y, w, h);
           g.globalAlpha = 1;
         }
       }
@@ -318,14 +331,14 @@ export class Renderer {
         g.fillRect(bx - 2, by + 3, 3, 1);
         g.globalAlpha = 1;
       }
-      const active = [en.burnTicks, en.wetTicks, en.shockTicks];
-      const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100"];
+      const active = [en.burnTicks, en.wetTicks, en.shockTicks, en.poisonTicks, en.freezeTicks, en.bleedTicks];
+      const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100", "00100/01110/11111/01110/00100", "10101/01110/11111/01110/10101", "00100/01110/11111/11111/01110"];
       let iconX = Math.round(en.x - ox - (active.filter(t => t > 0).length * 7 - 2) / 2);
       for (let i = 0; i < active.length; i++) {
         if (active[i] <= 0) continue;
         g.fillStyle = P.VOID;
         g.fillRect(iconX - 1, y - 9, 7, 7);
-        g.fillStyle = ["#ff963f", "#58caff", "#ffe66b"][i];
+        g.fillStyle = ["#ff963f", "#58caff", "#ffe66b", "#8f63ae", "#a8e8ff", "#c2182b"][i];
         icons[i].split("/").forEach((row, iy) => {
           for (let ix = 0; ix < row.length; ix++) if (row[ix] === "1") g.fillRect(iconX + ix, y - 8 + iy, 1, 1);
         });
@@ -334,7 +347,7 @@ export class Renderer {
 
       if (en.blink()) {
         g.globalAlpha = 0.5;
-        g.drawImage(white, x, y);
+        g.drawImage(white, x, y, w, h);
         g.globalAlpha = 1;
       }
 
@@ -349,10 +362,46 @@ export class Renderer {
         g.lineWidth = 1;
         g.strokeRect(x - 1.5, y - 1.5, sp.w + 3, sp.h + 3);
       }
+      if (en.isElite) {
+        g.globalAlpha = 0.6 + 0.4 * Math.sin(en.animTicks * 0.15);
+        g.strokeStyle = "#ff3b3b";
+        g.lineWidth = 1;
+        g.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
+        g.globalAlpha = 1;
+      }
+      if (en.def.SHIELD) {
+        g.strokeStyle = "#d8f0ff";
+        g.lineWidth = 2;
+        g.globalAlpha = 0.85;
+        g.beginPath();
+        g.arc(Math.round(en.x - ox), Math.round(en.y - en.bodyH / 2 - oy), Math.max(en.bodyW, en.bodyH) / 2 + 2, en.facing - 0.9, en.facing + 0.9);
+        g.stroke();
+        g.globalAlpha = 1;
+      }
       if (en.state === ENEMY_STATE.ATTACK && en.swing !== null && en.swing.phase === "recover") {
         g.fillStyle = P.ENEMY_EYE;
         g.fillRect(x + Math.floor(sp.w / 2) - 1, y - 3, 3, 1);
       }
+    }
+  }
+
+  private drawBeams(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    for (const b of this.beams) {
+      const x1 = Math.round(b.x - ox);
+      const y1 = Math.round(b.y - oy);
+      const x2 = Math.round(b.x + Math.cos(b.dir) * b.len - ox);
+      const y2 = Math.round(b.y + Math.sin(b.dir) * b.len - oy);
+      g.globalAlpha = Math.max(0, b.left / b.total);
+      g.strokeStyle = P.VOID;
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+      g.stroke();
+      g.strokeStyle = P.PROJ;
+      g.lineWidth = 2;
+      g.stroke();
+      g.globalAlpha = 1;
     }
   }
 

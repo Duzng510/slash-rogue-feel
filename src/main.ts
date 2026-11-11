@@ -18,7 +18,7 @@ import { DebugHud, type DebugFlags } from "./ui/debug.ts";
 import { Sfx } from "./audio/sfx.ts";
 import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
-import type { ArtifactId } from "./systems/artifacts.ts";
+import type { ArtifactId, CurseId } from "./systems/artifacts.ts";
 import type { RunStats, EndAction, EndMode } from "./systems/runStats.ts";
 import { parseAchievements, stringifyAchievements, emptyAchievements } from "./systems/unlocks.ts";
 import type { Achievements } from "./systems/unlocks.ts";
@@ -143,8 +143,9 @@ function resetInput(): void {
   desk.reset();
   touch?.reset();
 }
+const modalActive = (): boolean => world.artifactChoices.length > 0 || world.shopOffers !== null;
 function syncArtifactModal(): boolean {
-  const open = world.artifactChoices.length > 0;
+  const open = modalActive();
   if (open !== modalOpen) {
     resetInput();
     modalOpen = open;
@@ -161,20 +162,42 @@ function chooseArtifact(id: ArtifactId): boolean {
   syncArtifactModal();
   return chosen;
 }
-function artifactFromClient(x: number, y: number): ArtifactId | null {
+function modalFromClient(x: number, y: number): string | null {
   const r = overlay.getBoundingClientRect();
   if (r.width <= 0 || r.height <= 0) return null;
   const u = (x - r.left) / r.width;
   const v = (y - r.top) / r.height;
-  return isRotated() ? hud.artifactAt(v * 320, (1 - u) * 180) : hud.artifactAt(u * 320, v * 180);
+  return isRotated() ? hud.modalAt(v * 320, (1 - u) * 180) : hud.modalAt(u * 320, v * 180);
 }
-const modalPointers = new Map<number, ArtifactId | null>();
+function applyModal(key: string): void {
+  if (key === "t:normal") world.curseTab = false;
+  else if (key === "t:curse") world.curseTab = true;
+  else if (key.startsWith("c:")) {
+    if (world.chooseCurse(key.slice(2) as CurseId)) {
+      resetInput();
+      suppressModalClick = false;
+    }
+    syncArtifactModal();
+  } else if (key === "s:leave") {
+    world.leaveShop();
+    resetInput();
+    suppressModalClick = false;
+    syncArtifactModal();
+  } else if (key.startsWith("s:")) {
+    if (world.chooseShop(Number(key.slice(2)))) {
+      resetInput();
+      suppressModalClick = false;
+    }
+    syncArtifactModal();
+  } else chooseArtifact(key.slice(2) as ArtifactId);
+}
+const modalPointers = new Map<number, string | null>();
 const endPointers = new Map<number, EndAction | null>();
 const endActionFromClient = (x: number, y: number): EndAction | null => endScreen.handlePointer(x, y, renderer.scale);
 let suppressModalClick = false;
 window.addEventListener("pointerdown", (e) => {
   const end = endScreen.isOpen();
-  suppressModalClick = end || world.artifactChoices.length > 0;
+  suppressModalClick = end || modalActive();
   if (!suppressModalClick) return;
   e.preventDefault();
   e.stopImmediatePropagation();
@@ -184,12 +207,12 @@ window.addEventListener("pointerdown", (e) => {
     return;
   }
   syncArtifactModal();
-  modalPointers.set(e.pointerId, e.button === 0 ? artifactFromClient(e.clientX, e.clientY) : null);
+  modalPointers.set(e.pointerId, e.button === 0 ? modalFromClient(e.clientX, e.clientY) : null);
 }, { capture: true });
 for (const type of ["pointerup", "pointercancel"] as const) {
   window.addEventListener(type, (e) => {
     const hasEnd = endPointers.has(e.pointerId);
-    if (!hasEnd && !modalPointers.has(e.pointerId) && world.artifactChoices.length === 0 && !endScreen.isOpen()) return;
+    if (!hasEnd && !modalPointers.has(e.pointerId) && !modalActive() && !endScreen.isOpen()) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (hasEnd) {
@@ -205,12 +228,12 @@ for (const type of ["pointerup", "pointercancel"] as const) {
     }
     const id = modalPointers.get(e.pointerId);
     modalPointers.delete(e.pointerId);
-    if (type === "pointerup" && id != null && id === artifactFromClient(e.clientX, e.clientY)) chooseArtifact(id);
+    if (type === "pointerup" && id != null && id === modalFromClient(e.clientX, e.clientY)) applyModal(id);
   }, { capture: true });
 }
 for (const type of ["mousedown", "mouseup", "click", "dblclick", "contextmenu"] as const) {
   window.addEventListener(type, (e) => {
-    if (!suppressModalClick && world.artifactChoices.length === 0 && !endScreen.isOpen()) return;
+    if (!suppressModalClick && !modalActive() && !endScreen.isOpen()) return;
     e.preventDefault();
     e.stopImmediatePropagation();
   }, { capture: true });
@@ -392,12 +415,15 @@ type Harness = {
   pressDash: () => void;
   setMove: (x: number, y: number) => void;
   setAim: (x: number, y: number) => void;
-  addEnemies: (n: number, kinds?: EnemyKind[]) => void;
+  addEnemies: (n: number, kinds?: EnemyKind[], elite?: boolean) => void;
   clearEnemies: () => void;
   damageEnemy: (id: number, dmg: number) => boolean;
-  applyStatus: (id: number, status: "burn" | "wet" | "shock") => boolean;
+  applyStatus: (id: number, status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed") => boolean;
   gotoRoom: (i: number) => void;
   chooseArtifact: (id: ArtifactId) => boolean;
+  buyShop: (i: number) => boolean;
+  leaveShop: () => void;
+  setCurseTab: (v: boolean) => void;
   forceEnd: (mode: EndMode) => void;
   state: () => {
     tick: number;
@@ -406,6 +432,9 @@ type Harness = {
     roomIndex: number;
     artifacts: ArtifactId[];
     artifactChoices: ArtifactId[];
+    curseOffer: string[] | null;
+    shopOffers: number;
+    shopKinds: string[];
     enemies: {
       id: number;
       x: number;
@@ -413,7 +442,9 @@ type Harness = {
       hp: number;
       state: string;
       kind: string;
+      pattern: string;
       enraged: boolean;
+      elite: boolean;
       telegraphTicksLeft: number;
     }[];
     particles: number;
@@ -436,7 +467,7 @@ const harness: Harness = {
   setAim: (x, y) => {
     intent.aim = { x, y };
   },
-  addEnemies: (n, kinds) => world.addEnemies(n, kinds),
+  addEnemies: (n, kinds, elite) => world.addEnemies(n, kinds, elite),
   clearEnemies: () => world.clearEnemies(),
   damageEnemy: (id, dmg) => {
     const e = world.enemies.find((x) => x.id === id);
@@ -468,6 +499,13 @@ const harness: Harness = {
   },
   gotoRoom: (i) => { world.loadRoom(i); syncArtifactModal(); },
   chooseArtifact,
+  buyShop: (i) => {
+    const bought = world.chooseShop(i);
+    syncArtifactModal();
+    return bought;
+  },
+  leaveShop: () => { world.leaveShop(); syncArtifactModal(); },
+  setCurseTab: (v) => { world.curseTab = v; },
   forceEnd: (mode) => {
     if (mode === "won") world.runStats.roomsCleared = world.roomTotal;
     world.pendingEnd = mode;
@@ -486,6 +524,9 @@ const harness: Harness = {
     roomIndex: world.roomIndex,
     artifacts: [...world.artifacts],
     artifactChoices: world.artifactChoices.map((artifact) => artifact.id),
+    curseOffer: world.curseOffer === null ? null : world.curseOffer.curses.map((c) => c.id),
+    shopOffers: world.shopOffers?.length ?? 0,
+    shopKinds: world.shopOffers?.map((o) => o.kind) ?? [],
     enemies: world.enemies.map((e) => ({
       id: e.id,
       x: e.x,
@@ -493,7 +534,9 @@ const harness: Harness = {
       hp: e.hp,
       state: e.state,
       kind: e.kind,
+      pattern: e.pattern,
       enraged: e.enraged,
+      elite: e.isElite,
       telegraphTicksLeft: e.telegraphTicksLeft,
     })),
     particles: world.particles.alive,

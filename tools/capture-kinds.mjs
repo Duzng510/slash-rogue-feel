@@ -56,6 +56,10 @@ async function evalJs(expr) {
 
 await send("Page.enable");
 await send("Runtime.enable");
+// a fresh profile only unlocks two artifacts, too few for a curse package to draw from
+await send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `localStorage.setItem("ruby.achievements.v1", JSON.stringify({ earned: ["first_blood","room_clear","half_way","combo_master","speedrun","flawless_room","full_run","heavy_hitter","fire_and_ice"], best: null }));`,
+});
 await send("Page.navigate", { url: BASE });
 for (let i = 0; i < 60; i++) {
   if (await evalJs("!!(window.__game && window.__game.ready)")) break;
@@ -98,7 +102,7 @@ const walk = (dx, dy, ticks) => `
 
 await shot(
   "kinds",
-  `g.gotoRoom(6); ${walk(1, 0, 55)} g.addEnemies(3, ["charger", "splitter", "small"]);`,
+  `g.gotoRoom(11); ${walk(1, 0, 55)} g.addEnemies(3, ["charger", "splitter", "small"]);`,
   `near("boss") && near("charger") && near("splitter") && near("small") && s.enemies.every(e => e.state !== "attack" && e.state !== "dead")`
 );
 
@@ -111,13 +115,13 @@ await shot(
 
 await shot(
   "boss-ring",
-  `g.gotoRoom(6);`,
+  `g.gotoRoom(11);`,
   `tele("boss", 4, 14) && !s.enemies.some(e => e.kind === "boss" && e.enraged)`
 );
 
 await shot(
   "boss-enraged",
-  `g.gotoRoom(6); const b = g.state().enemies.find(e => e.kind === "boss"); for (let i = 0; i < 13; i++) g.damageEnemy(b.id, 1);`,
+  `g.gotoRoom(11); const b = g.state().enemies.find(e => e.kind === "boss"); for (let i = 0; i < 13; i++) g.damageEnemy(b.id, 1);`,
   `s.enemies.some(e => e.kind === "boss" && e.enraged) && tele("boss", 4, 12)`
 );
 
@@ -164,6 +168,116 @@ await shot(
   `s.enemies.length === 10 && !s.player.dead`,
   10
 );
+
+await shot(
+  "new-kinds",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(5, ["healer", "exploder", "shielder", "sniper", "jumper"]);`,
+  `["healer", "exploder", "shielder", "sniper", "jumper"].every(k => s.enemies.some(e => e.kind === k)) && !s.enemies.some(e => e.dead || e.state === "attack")`,
+  120
+);
+
+await shot(
+  "sniper-beam",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["sniper"]);`,
+  `s.enemies.some(e => e.kind === "sniper" && e.state === "attack")`,
+  300
+);
+
+await shot(
+  "elite",
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(2, ["chaser", "shielder"], true);`,
+  `s.enemies.filter(e => e.elite).length === 2 && !s.enemies.some(e => e.state === "attack")`,
+  60
+);
+
+await shot(
+  "warden",
+  `g.gotoRoom(5);`,
+  `s.enemies.some(e => e.kind === "warden" && e.state === "telegraph")`,
+  400
+);
+
+await shot(
+  "warden-laser",
+  `g.gotoRoom(5); g.clearEnemies(); g.addEnemies(1, ["warden"]);`,
+  `s.enemies.some(e => e.kind === "warden" && e.pattern === "laser" && e.state === "telegraph")`,
+  400
+);
+
+await shot(
+  "room-traps",
+  `g.gotoRoom(9); ${walk(1, 0, 30)}`,
+  `s.roomIndex === 9 && !s.player.dead`,
+  40
+);
+
+await shot(
+  "shop",
+  `g.gotoRoom(0); g.addEnemies(8); for (const e of g.state().enemies) g.damageEnemy(e.id, 99); g.gotoRoom(10);`,
+  `s.shopOffers === 3 && s.runStats.gold >= 8`,
+  30
+);
+
+// real mouse clicks prove the shop pointer wiring: buy the heal card, then leave
+const shopBefore = await evalJs(`window.__game.state()`);
+const healIdx = shopBefore.shopKinds.indexOf("heal");
+if (healIdx < 0) throw new Error("shop has no heal card");
+const clickAt = async (ux, uy) => {
+  const pt = await evalJs(`(() => {
+    const r = document.getElementById("overlay").getBoundingClientRect();
+    return { x: r.left + (${ux} / 320) * r.width, y: r.top + (${uy} / 180) * r.height };
+  })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await send("Input.dispatchMouseEvent", { type, x: pt.x, y: pt.y, button: "left", clickCount: 1 });
+  }
+};
+await clickAt(160, 40 + healIdx * 43 + 19);
+const bought = await evalJs(`(() => { const g = window.__game; g.advance(1 / 60); return g.state(); })()`);
+if (bought.runStats.gold !== shopBefore.runStats.gold - 8 || bought.shopOffers !== 2) {
+  throw new Error(`shop buy click failed: ${JSON.stringify({ before: shopBefore.runStats.gold, after: bought.runStats.gold, offers: bought.shopOffers })}`);
+}
+const boughtImg = await send("Page.captureScreenshot", { format: "png" });
+writeFileSync(`${OUT}/shot-shop-bought.png`, Buffer.from(boughtImg.result.data, "base64"));
+console.log("shot-shop-bought.png", JSON.stringify({ gold: bought.runStats.gold, offers: bought.shopOffers }));
+await clickAt(160, 172);
+const leftShop = await evalJs(`(() => { const g = window.__game; g.advance(1 / 60); return g.state().shopOffers; })()`);
+if (leftShop !== 0) throw new Error(`shop leave click failed: ${leftShop}`);
+console.log("shop leave click ok");
+
+await shot(
+  "curse-modal",
+  `g.gotoRoom(0); g.clearEnemies();`,
+  `s.curseOffer !== null && s.artifactChoices.length === 3`,
+  30
+);
+
+await shot(
+  "curse-tab",
+  `g.setCurseTab(true);`,
+  `s.curseOffer !== null`,
+  5
+);
+
+// screenshots prove rendering, not tapping: click curse card 0 with a real mouse event
+// and require the bundle (offer consumed + exactly 2 artifacts) to prove the pointer wiring
+const before = await evalJs(`window.__game.state().artifacts.length`);
+const pt = await evalJs(`(() => {
+  const r = document.getElementById("overlay").getBoundingClientRect();
+  return { x: r.left + (160 / 320) * r.width, y: r.top + (59 / 180) * r.height };
+})()`);
+for (const type of ["mousePressed", "mouseReleased"]) {
+  await send("Input.dispatchMouseEvent", { type, x: pt.x, y: pt.y, button: "left", clickCount: 1 });
+}
+const picked = await evalJs(`(() => {
+  const g = window.__game; g.advance(1 / 60);
+  const s = g.state(); return { offer: s.curseOffer, artifacts: s.artifacts.length };
+})()`);
+if (picked.offer !== null || picked.artifacts !== before + 2) {
+  throw new Error(`curse click failed: ${JSON.stringify({ before, ...picked })}`);
+}
+const pickedImg = await send("Page.captureScreenshot", { format: "png" });
+writeFileSync(`${OUT}/shot-curse-picked.png`, Buffer.from(pickedImg.result.data, "base64"));
+console.log("shot-curse-picked.png", JSON.stringify({ before, ...picked }));
 
 ws.close();
 chrome.kill();

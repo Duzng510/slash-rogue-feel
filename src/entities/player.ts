@@ -1,5 +1,5 @@
 import { CONFIG } from "../config.ts";
-import { angleLerp, normAngle } from "../mathx.ts";
+import { angleLerp, dist, normAngle } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
 import { createSwing, playerSwingInit, stepSwing } from "../systems/combat.ts";
 import { ENEMY_STATE } from "./enemy.ts";
@@ -44,6 +44,7 @@ export class Player implements Unit {
   vx = 0;
   vy = 0;
   hp = CONFIG.PLAYER.HP;
+  maxHp = CONFIG.PLAYER.HP;
   facing = 0;
   state: PlayerState = PLAYER_STATE.IDLE;
   swing: Swing | null = null;
@@ -62,6 +63,8 @@ export class Player implements Unit {
   ghostTick = 0;
   impulseTicks = 0;
   reprisalTicks = 0;
+  shieldReady = true;
+  shieldCd = 0;
   autoTargetId = -1;
   private queuedAttackTicks = 0;
 
@@ -70,7 +73,7 @@ export class Player implements Unit {
     this.y = y;
     this.vx = 0;
     this.vy = 0;
-    this.hp = CONFIG.PLAYER.HP;
+    this.hp = this.maxHp;
     this.dead = false;
     this.removed = false;
     this.state = PLAYER_STATE.IDLE;
@@ -83,6 +86,8 @@ export class Player implements Unit {
     this.dashTicks = 0;
     this.impulseTicks = 0;
     this.reprisalTicks = 0;
+    this.shieldReady = true;
+    this.shieldCd = 0;
     this.hurtTicks = 0;
     this.deadTicks = 0;
     this.autoTargetId = -1;
@@ -107,8 +112,18 @@ export class Player implements Unit {
 
   onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean {
     const p = CONFIG.PLAYER;
-    this.hp -= sw.dmg;
-    src.runStats.damageTaken += sw.dmg;
+    if (src.artifacts.has("shield") && this.shieldReady) {
+      this.shieldReady = false;
+      this.shieldCd = 300;
+      knockback(this, sw.dir, p.HURT_KNOCKBACK);
+      artifactText(src.queue, this.x, this.y - 14, "KHIÊN", "#8ab4ff");
+      sfx(src.queue, "reprisal_ready", 0.8, 1.3);
+      return false;
+    }
+    const dmg = sw.dmg * (src.curses.has("glass") ? CONFIG.CURSES.TAKEN_MULT : 1);
+    this.hp -= dmg;
+    src.runStats.damageTaken += dmg;
+    if (sw.kind === "boss") src.runStats.bossDamageTaken += dmg;
     src.runStats.hurtFree = false;
     this.swing = null;
     this.combo = 0;
@@ -152,6 +167,7 @@ export class Player implements Unit {
     if (this.dashCd > 0) this.dashCd--;
     if (this.impulseTicks > 0) this.impulseTicks--;
     if (this.reprisalTicks > 0) this.reprisalTicks--;
+    if (this.shieldCd > 0 && --this.shieldCd === 0) this.shieldReady = true;
     this.animTicks++;
 
     if (this.dead) {
@@ -234,6 +250,9 @@ export class Player implements Unit {
       combo,
       ticks: fd.startup + fd.active,
     });
+    if (combo === 2 && src.artifacts.has("twin_blades")) {
+      src.queue.push({ t: "slashArc", x: init.ox, y: init.oy, dir: normAngle(aim.dir + Math.PI), reach: init.reach, deg: init.deg, combo, ticks: fd.startup + fd.active });
+    }
   }
 
   private startDash(intent: Intent, src: Sim): void {
@@ -245,15 +264,36 @@ export class Player implements Unit {
     this.combo = 0;
     this.queuedAttackTicks = 0;
     this.setState(PLAYER_STATE.DASH);
-    this.dashTicks = d.TICKS;
     this.dashDir = dir;
     this.impulseTicks = src.artifacts.has("impulse") ? 120 : 0;
     if (src.artifacts.has("fire")) src.fireTrails.push({ points: [{ x: this.x, y: this.y - 3, ticks: 60 }], seen: new Set() });
     this.dashCd = d.COOLDOWN;
-    this.dashIframeTicks = d.IFRAME_TICKS;
     this.facing = dir;
-    sfx(src.queue, "dash");
-    src.particles.puffDust(this.x, this.y, CONFIG.FEEL.DASH_DUST, src.rng);
+    if (src.artifacts.has("phantom_dash")) {
+      const ox = this.x, oy = this.y;
+      let step = 0;
+      while (step < 60 && !src.room.solidAtPx(this.x + Math.cos(dir) * (step + 6), this.y + Math.sin(dir) * (step + 6))) step += 6;
+      this.x += Math.cos(dir) * step;
+      this.y += Math.sin(dir) * step;
+      const slash = createSwing(src, { side: "player", combo: 0, dir, ox, oy, reach: 0, deg: 0, dmg: 2, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+      for (const e of src.enemies) {
+        if (e.dead || !e.canBeHit()) continue;
+        if ([0, 0.5, 1].some(t => dist(e.x, e.y, ox + (this.x - ox) * t, oy + (this.y - oy) * t) < 14)) {
+          e.onHit(slash, e.x, e.y, src);
+          if (e.dead) src.runStats.phantomKills++;
+        }
+      }
+      this.dashTicks = 0;
+      this.dashIframeTicks = 0;
+      this.setState(PLAYER_STATE.IDLE);
+      src.particles.afterimage(ox, oy - CONFIG.PLAYER.BODY_H, "player");
+      sfx(src.queue, "teleport", 0.7, 1.1);
+    } else {
+      this.dashTicks = d.TICKS;
+      this.dashIframeTicks = d.IFRAME_TICKS;
+      sfx(src.queue, "dash");
+      src.particles.puffDust(this.x, this.y, CONFIG.FEEL.DASH_DUST, src.rng);
+    }
   }
 
   private integrate(intent: Intent, src: Sim, dt: number): void {
@@ -289,7 +329,8 @@ export class Player implements Unit {
 
     if (control > 0) {
       const speed = Math.hypot(this.vx, this.vy);
-      const maxSpeed = p.SPEED * (src.artifacts.has("desperate") && this.hp <= 2 ? 1.2 : 1);
+      const maxSpeed = p.SPEED * (src.artifacts.has("desperate") && this.hp <= 2 ? 1.2 : 1) *
+        (src.curses.has("heavy_legs") ? CONFIG.CURSES.SPEED_MULT : 1);
       if (speed > maxSpeed) {
         this.vx = (this.vx / speed) * maxSpeed;
         this.vy = (this.vy / speed) * maxSpeed;

@@ -2,9 +2,9 @@ import { CONFIG, type EnemyKind } from "../config.ts";
 import { makeRng } from "../mathx.ts";
 import { EventQueue, sfx } from "../events.ts";
 import { ParticlePool } from "../systems/particles.ts";
-import { resolveHits, resolveFire } from "../systems/combat.ts";
+import { resolveHits, resolveFire, createSwing, hitFeedback } from "../systems/combat.ts";
 import { resolveProjectiles } from "../systems/projectiles.ts";
-import { ARTIFACTS, ARTIFACT_UNLOCKS, type Artifact, type ArtifactId, type FireTrail } from "../systems/artifacts.ts";
+import { ARTIFACTS, ARTIFACT_UNLOCKS, CURSES, CURSE_UNLOCKS, type Artifact, type ArtifactId, type Curse, type CurseId, type FireTrail } from "../systems/artifacts.ts";
 import { emptyStats, resetStats, type RunStats, type EndMode } from "../systems/runStats.ts";
 import {
   type Achievements,
@@ -16,9 +16,15 @@ import {
 } from "../systems/unlocks.ts";
 import { Player } from "../entities/player.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
-import { Room, TEMPLATES, type SpawnMark } from "../world/rooms.ts";
+import { Room, TEMPLATES, TILE, type SpawnMark } from "../world/rooms.ts";
 import { SpatialGrid } from "./grid.ts";
 import type { Intent, Projectile, Sim, Unit } from "../sim/types.ts";
+
+export type ShopOffer = {
+  kind: "artifact" | "heal" | "maxhp" | "curse";
+  price: number;
+  artifact?: Artifact;
+};
 
 export class World implements Sim {
   readonly queue = new EventQueue();
@@ -46,6 +52,10 @@ export class World implements Sim {
 
   readonly artifacts = new Set<ArtifactId>();
   artifactChoices: Artifact[] = [];
+  readonly curses = new Set<CurseId>();
+  curseOffer: { artifacts: Artifact[]; curses: Curse[] } | null = null;
+  curseTab = false;
+  shopOffers: ShopOffer[] | null = null;
   fireTrails: FireTrail[] = [];
   projectiles: Projectile[] = [];
   private rewardedRooms = new Set<number>();
@@ -68,22 +78,23 @@ export class World implements Sim {
     return this.swingSeq++;
   }
 
-  spawnEnemy(x: number, y: number, kind: EnemyKind = "chaser"): void {
+  spawnEnemy(x: number, y: number, kind: EnemyKind = "chaser", elite = false): void {
     if (this.aliveEnemies() >= CONFIG.ENEMY.MAX_ALIVE) return;
-    this.enemies.push(makeEnemy(x, y, kind));
+    this.enemies.push(makeEnemy(x, y, kind, elite));
   }
 
-  /** pick `count` of the template's spawn markers, deterministic by seed */
+  /** pick `count` trash markers, deterministic by seed; boss markers always field */
   private waveSpawns(index: number): SpawnMark[] {
     const want = CONFIG.ROOMS.WAVES[index] ?? this.room.spawns.length;
-    const pool = this.room.spawns.slice();
+    const bosses = this.room.spawns.filter(s => s.kind === "boss" || s.kind === "warden");
+    const pool = this.room.spawns.filter(s => s.kind !== "boss" && s.kind !== "warden");
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(this.rng.next() * (i + 1));
       const t = pool[i];
       pool[i] = pool[j];
       pool[j] = t;
     }
-    return pool.slice(0, Math.min(want, pool.length));
+    return [...bosses, ...pool.slice(0, Math.max(0, want - bosses.length))];
   }
 
   loadRoom(index: number, keepSweep = true): void {
@@ -94,7 +105,13 @@ export class World implements Sim {
     this.fireTrails = [];
     this.projectiles = [];
     this.artifactChoices = [];
-    for (const s of this.waveSpawns(this.roomIndex)) this.spawnEnemy(s.x, s.y, s.kind);
+    this.curseOffer = null;
+    this.curseTab = false;
+    this.shopOffers = null;
+    this.runStats.roomKills = 0;
+    for (const s of this.waveSpawns(this.roomIndex)) {
+      this.spawnEnemy(s.x, s.y, s.kind, s.kind !== "boss" && s.kind !== "warden" && this.rng.next() < 0.15);
+    }
     this.syncUnits();
     this.player.reset(this.room.start.x, this.room.start.y);
     if (keepSweep) this.particles.reset();
@@ -124,6 +141,8 @@ export class World implements Sim {
   restart(): void {
     this.resetRun();
     this.artifacts.clear();
+    this.curses.clear();
+    this.player.maxHp = CONFIG.PLAYER.HP;
     this.rewardedRooms.clear();
     this.loadRoom(0);
   }
@@ -150,12 +169,105 @@ export class World implements Sim {
   chooseArtifact(id: ArtifactId): boolean {
     if (!this.artifactChoices.some(b => b.id === id) || this.artifacts.has(id)) return false;
     this.artifacts.add(id);
+    if (id === "glasscannon") {
+      this.player.maxHp = 2;
+      this.player.hp = Math.min(this.player.hp, 2);
+    }
     this.rewardedRooms.add(this.roomIndex);
     this.runStats.artifactsTaken++;
     this.artifactChoices = [];
+    this.curseOffer = null;
+    this.curseTab = false;
     this.room.openDoors();
     sfx(this.queue, "door");
     this.banner(`${ARTIFACTS.find(b => b.id === id)!.name} — cửa mở`);
+    return true;
+  }
+
+  /** buy one shop offer; rejects when the offer is gone or gold is short */
+  chooseShop(i: number): boolean {
+    const offer = this.shopOffers?.[i];
+    if (offer === undefined || this.runStats.gold < offer.price) return false;
+    this.runStats.gold -= offer.price;
+    if (offer.kind === "artifact" && offer.artifact !== undefined) {
+      this.artifacts.add(offer.artifact.id);
+      if (offer.artifact.id === "glasscannon") {
+        this.player.maxHp = 2;
+        this.player.hp = Math.min(this.player.hp, 2);
+      }
+      this.runStats.artifactsTaken++;
+    } else if (offer.kind === "heal") {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
+    } else if (offer.kind === "maxhp") {
+      this.player.maxHp++;
+      this.player.hp++;
+    } else {
+      const first = [...this.curses][0];
+      if (first !== undefined) this.curses.delete(first);
+    }
+    this.shopOffers!.splice(i, 1);
+    if (this.shopOffers!.length === 0) this.shopOffers = null;
+    sfx(this.queue, "pursuit_proc", 0.6, 1.2);
+    return true;
+  }
+
+  leaveShop(): void {
+    this.shopOffers = null;
+  }
+
+  private buildShopOffers(): ShopOffer[] {
+    const pool: ShopOffer[] = [
+      { kind: "heal", price: CONFIG.SHOP.HEAL },
+      { kind: "maxhp", price: CONFIG.SHOP.MAXHP },
+    ];
+    const arts = ARTIFACTS.filter(b => {
+      if (this.artifacts.has(b.id)) return false;
+      const gate = ARTIFACT_UNLOCKS[b.id];
+      return gate === null || isUnlocked(gate, this.achievements);
+    });
+    if (arts.length > 0) {
+      pool.push({ kind: "artifact", price: CONFIG.SHOP.ARTIFACT, artifact: arts[Math.floor(this.artifactRng.next() * arts.length)] });
+    }
+    if (this.curses.size > 0) pool.push({ kind: "curse", price: CONFIG.SHOP.CURSE });
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(this.artifactRng.next() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 3);
+  }
+
+  /** bank this run's earnings into the persisted lifetime total, then check the rich achievement */
+  private endRun(): void {
+    this.runStats.finalHp = this.player.hp;
+    this.achievements.totalGold += this.runStats.totalGoldEarned;
+    this.awardAchievements(checkAchievements(this.runStats, "end", this.achievements.totalGold));
+  }
+
+  /** accept a curse package: the curse plus both bundled artifacts, then the door opens */
+  chooseCurse(id: CurseId): boolean {
+    const offer = this.curseOffer;
+    if (offer === null || !offer.curses.some(c => c.id === id)) return false;
+    this.curses.add(id);
+    this.runStats.cursesTaken++;
+    if (id === "frail") {
+      this.player.maxHp = Math.max(1, this.player.maxHp - CONFIG.CURSES.FRAIL_HP);
+      this.player.hp = Math.min(this.player.hp, this.player.maxHp);
+    }
+    for (const a of offer.artifacts) {
+      this.artifacts.add(a.id);
+      if (a.id === "glasscannon") {
+        this.player.maxHp = 2;
+        this.player.hp = Math.min(this.player.hp, 2);
+      }
+    }
+    this.runStats.artifactsTaken += offer.artifacts.length;
+    this.rewardedRooms.add(this.roomIndex);
+    this.artifactChoices = [];
+    this.curseOffer = null;
+    this.curseTab = false;
+    this.room.openDoors();
+    sfx(this.queue, "door");
+    this.banner(`${CURSES.find(c => c.id === id)!.name} — cửa mở`);
     return true;
   }
 
@@ -188,6 +300,7 @@ export class World implements Sim {
 
   tick(input: Intent): void {
     if (this.artifactChoices.length > 0) return;
+    if (this.shopOffers !== null) return;
     if (this.pendingEnd !== null) return;
     this.tickCount++;
     if (this.bannerTicks > 0) this.bannerTicks--;
@@ -208,8 +321,34 @@ export class World implements Sim {
     resolveHits(this, this.grid);
     resolveFire(this);
     resolveProjectiles(this);
+    this.resolveTraps();
     this.progress(input);
     this.detectAchievements();
+  }
+
+  /** spikes hurt both sides once, then stay spent; i-frames and dash still dodge them */
+  private resolveTraps(): void {
+    const T = CONFIG.WORLD.TILE;
+    for (const u of this.units) {
+      const tx = Math.floor(u.x / T);
+      const ty = Math.floor(u.y / T);
+      if (this.room.at(tx, ty) !== TILE.TRAP || !u.canBeHit()) continue;
+      const sw = createSwing(this, {
+        side: "enemy",
+        combo: 0,
+        dir: 0,
+        ox: u.x,
+        oy: u.y,
+        reach: 0,
+        deg: 0,
+        dmg: CONFIG.ROOMS.TRAP_DMG,
+        knockback: 0,
+        fd: { startup: 0, active: 1, recovery: 0 },
+      });
+      const killed = u.onHit(sw, u.x, u.y, this);
+      hitFeedback(this, u, sw, u.x, u.y, killed, false);
+      this.room.setTile(tx, ty, TILE.TRAP_ARMED);
+    }
   }
 
   /** fire the check whose counter moved since last tick; a fresh hit breaks the kill streak */
@@ -236,11 +375,23 @@ export class World implements Sim {
   private progress(_input: Intent): void {
     if (this.player.dead) {
       this.playerDeadTicks++;
-      if (this.pendingEnd === null && this.playerDeadTicks >= CONFIG.ROOMS.END_DELAY) this.pendingEnd = "dead";
+      if (this.pendingEnd === null && this.playerDeadTicks >= CONFIG.ROOMS.END_DELAY) {
+        this.endRun();
+        this.pendingEnd = "dead";
+      }
       return;
     }
 
-    if (this.aliveEnemies() === 0 && !this.room.doorOpen) {
+    if (this.room.shop) {
+      if (!this.room.doorOpen) {
+        this.room.openDoors();
+        sfx(this.queue, "door");
+      }
+      if (!this.rewardedRooms.has(this.roomIndex)) {
+        this.rewardedRooms.add(this.roomIndex);
+        this.shopOffers = this.buildShopOffers();
+      }
+    } else if (this.aliveEnemies() === 0 && !this.room.doorOpen) {
       if (!this.rewardedRooms.has(this.roomIndex)) {
         const pool = ARTIFACTS.filter(b => {
           if (this.artifacts.has(b.id)) return false;
@@ -252,6 +403,16 @@ export class World implements Sim {
           [pool[i], pool[j]] = [pool[j], pool[i]];
         }
         this.artifactChoices = pool.slice(0, 3);
+        if (this.runStats.roomsCleared % CONFIG.CURSES.OFFER_EVERY === 0 &&
+          this.curses.size < CONFIG.CURSES.MAX_CURSES && pool.length >= 5) {
+          const cursePool = CURSES.filter(c => !this.curses.has(c.id) &&
+            (CURSE_UNLOCKS[c.id] === null || this.achievements.earned.has(CURSE_UNLOCKS[c.id]!)));
+          for (let i = cursePool.length - 1; i > 0; i--) {
+            const j = Math.floor(this.artifactRng.next() * (i + 1));
+            [cursePool[i], cursePool[j]] = [cursePool[j], cursePool[i]];
+          }
+          this.curseOffer = { artifacts: pool.slice(3, 5), curses: cursePool.slice(0, 2) };
+        }
         if (this.artifactChoices.length > 0) return;
       }
       this.room.openDoors();
@@ -265,6 +426,7 @@ export class World implements Sim {
       sfx(this.queue, "door", 0.8, 1.2);
       if (last) {
         this.victory = true;
+        this.endRun();
         this.awardAchievements(checkAchievements(this.runStats, "win"));
         this.saveBestRun();
         this.pendingEnd = "won";
@@ -276,10 +438,10 @@ export class World implements Sim {
   }
 
   /** debug helper: F6 stress-tests readability without touching the wave table */
-  addEnemies(n: number, kinds: EnemyKind[] = ["chaser", "charger", "splitter"]): void {
+  addEnemies(n: number, kinds: EnemyKind[] = ["chaser", "charger", "splitter"], elite = false): void {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
-      this.spawnEnemy(this.player.x + Math.cos(a) * 40, this.player.y + Math.sin(a) * 30, kinds[i % kinds.length] ?? "chaser");
+      this.spawnEnemy(this.player.x + Math.cos(a) * 40, this.player.y + Math.sin(a) * 30, kinds[i % kinds.length] ?? "chaser", elite);
     }
     this.enemies = this.enemies.filter((e) => !e.removed);
     this.syncUnits();
