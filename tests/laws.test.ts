@@ -666,7 +666,8 @@ heading("Room variety (P5)");
   ok("every authored room has a reachable exit", stuck.length === 0, `stuck rooms ${stuck.join(",")}`);
   ok("the run is now 12 rooms long", TEMPLATES.length === 12, `length ${TEMPLATES.length}`);
   ok("the biggest authored wave fields 8+ enemies", Math.max(...CONFIG.ROOMS.WAVES) >= 8, `max ${Math.max(...CONFIG.ROOMS.WAVES)}`);
-  ok("every non-boss room has a wave entry", CONFIG.ROOMS.WAVES.length === TEMPLATES.length - 1, `waves ${CONFIG.ROOMS.WAVES.length}`);
+  ok("every room has a wave entry", CONFIG.ROOMS.WAVES.length === TEMPLATES.length, `waves ${CONFIG.ROOMS.WAVES.length}`);
+  ok("the scripted king room has no regular wave", CONFIG.ROOMS.WAVES[TEMPLATES.length - 1] === 0, `king wave ${CONFIG.ROOMS.WAVES[TEMPLATES.length - 1]}`);
   // a full-reward run takes one artifact per room (rooms 0..roomTotal-1) and must still show a
   // 3-choice offer on the last room — so pool >= (roomTotal-1) consumed + 3 remaining.
   ok("the artifact pool can fill every reward room", ARTIFACTS.length >= TEMPLATES.length + 2 * CONFIG.CURSES.MAX_CURSES + 2, `have ${ARTIFACTS.length} need ${TEMPLATES.length + 2 * CONFIG.CURSES.MAX_CURSES + 2}`);

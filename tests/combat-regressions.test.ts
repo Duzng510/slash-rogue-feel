@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { CONFIG } from "../src/config.ts";
 import { World } from "../src/world/world.ts";
 import { Room } from "../src/world/rooms.ts";
-import { createSwing, hitboxOf, playerSwingInit, resolveHits } from "../src/systems/combat.ts";
+import { createSwing, hitFeedback, hitboxOf, playerSwingInit, resolveHits } from "../src/systems/combat.ts";
 import { makeEnemy, ENEMY_STATE } from "../src/entities/enemy.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
@@ -456,6 +456,39 @@ test("status artifacts apply wet then extended shock without refreshing an activ
     if (combo === 1) assert.equal(e.wetTicks, 180);
     else assert.deepEqual([e.wetTicks, e.shockTicks], [0, 48]);
   }
+});
+
+test("stun time advances the hurt animation and expires hurt recovery concurrently", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  e.state = ENEMY_STATE.HURT;
+  e.hurtTicks = 1;
+  e.freezeTicks = 3;
+  e.tick(w, w.grid);
+  assert.equal(e.hurtTicks, 0);
+  assert.equal(e.state, ENEMY_STATE.CHASE);
+  assert.equal(e.freezeTicks, 2);
+});
+
+test("vanishing enemies ignore incoming statuses", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  e.state = ENEMY_STATE.VANISH;
+  e.applyStatus("freeze", w);
+  e.applyStatus("shock", w);
+  assert.equal(e.state, ENEMY_STATE.VANISH);
+  assert.equal(e.freezeTicks, 0);
+  assert.equal(e.shockTicks, 0);
+});
+
+test("enemy-owned damage does not inflate player damage dealt", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  const swing = createSwing(w, playerSwingInit(w, 1, 0));
+  swing.side = "enemy";
+  const before = w.runStats.damageDealt;
+  hitFeedback(w, e, swing, e.x, e.y, false, false);
+  assert.equal(w.runStats.damageDealt, before);
 });
 
 test("status slow expires and shock blocks movement without extending on reapplication", () => {

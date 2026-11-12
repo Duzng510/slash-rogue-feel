@@ -398,7 +398,6 @@ export class Renderer {
     this.drawProjectileTrails(g, ox, oy, false);
     this.drawProjectiles(g, ox, oy, false);
 
-    this.drawParticles(g, ox, oy);
     this.fx.drawTexts(g, ox, oy);
     this.drawAmbient(g, ox, oy);
     this.drawFog(g, dtReal);
@@ -1335,7 +1334,6 @@ export class Renderer {
 
   /** afterimage trails: 4 faded ghosts behind each shot, matching its palette */
   private drawProjectileTrails(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
-    if (this.glMode) return;
     for (const p of this.world.projectiles) {
       if (!p.trail) continue;
       for (let i = 0; i < p.trail.length; i++) {
@@ -1646,14 +1644,6 @@ export class Renderer {
     }
   }
 
-  private drawParticles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    const density = CONFIG.SLIDERS.particles;
-    if (density <= 0.01) return;
-    this.world.particles.visit((s) => {
-      this.drawOneParticle(g, s, ox, oy, density);
-    });
-  }
-
   private drawOneParticle(g: CanvasRenderingContext2D, s: Slot, ox: number, oy: number, density: number): void {
     if (!s.live) return;
     const t = s.life / s.maxLife;
@@ -1711,4 +1701,4 @@ export class Renderer {
       g.globalAlpha = 1;
     }
   }
-}
+}

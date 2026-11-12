@@ -256,7 +256,7 @@ export class Enemy implements Unit {
   }
 
   applyStatus(status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed", src: Sim): void {
-    if (this.dead) return;
+    if (this.dead || this.state === ENEMY_STATE.VANISH) return;
     if (status === "burn" && this.wetTicks > 0 || status === "wet" && this.burnTicks > 0) {
       this.burnTicks = this.wetTicks = this.burnPulse = 0;
       src.runStats.comboSeen = true;
@@ -394,11 +394,15 @@ export class Enemy implements Unit {
     const stunned = this.shockTicks > 0 || this.freezeTicks > 0;
     if (this.shockTicks > 0) this.shockTicks--;
     if (this.freezeTicks > 0) this.freezeTicks--;
+    this.ticksInState++;
+    if (this.state === ENEMY_STATE.HURT && --this.hurtTicks <= 0) {
+      this.restTicks = e.REST_TICKS;
+      this.setState(ENEMY_STATE.CHASE);
+    }
     if (stunned) {
       this.vx = this.vy = 0;
       return;
     }
-    this.ticksInState++;
     if (this.restTicks > 0) this.restTicks--;
 
     if (this.swing !== null && stepSwing(this.swing)) this.swing = null;
@@ -485,10 +489,6 @@ export class Enemy implements Unit {
       case ENEMY_STATE.HURT:
         this.vx *= e.KNOCKBACK_FRICTION;
         this.vy *= e.KNOCKBACK_FRICTION;
-        if (--this.hurtTicks <= 0) {
-          this.restTicks = e.REST_TICKS;
-          this.setState(ENEMY_STATE.CHASE);
-        }
         break;
 
       case ENEMY_STATE.DEAD:
