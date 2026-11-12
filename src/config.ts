@@ -486,7 +486,7 @@ export const CONFIG = {
   },
 
   ROOMS: {
-    WAVES: [3, 4, 6, 8, 5, 10, 6, 4, 0, 8, 0],
+    WAVES: [3, 4, 6, 8, 5, 10, 6, 4, 0, 8, 0, 0],
     END_DELAY: 40,
     TRAP_DMG: 1,
   },
