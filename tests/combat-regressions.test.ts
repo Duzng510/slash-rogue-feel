@@ -14,6 +14,9 @@ import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import type { Intent } from "../src/sim/types.ts";
 
 const idle: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
+function intent(o: Partial<Intent> = {}): Intent {
+  return { ...idle, ...o };
+}
 function sandbox() {
   const w = new World();
   w.clearEnemies();
@@ -895,4 +898,42 @@ test("drop 8 achievements fire on their win, kill, room and artifact signals", (
   assert.ok(checkAchievements({ ...emptyStats(), roomsCleared: 1 }, "room").includes("pacifist_room"));
   assert.ok(!checkAchievements({ ...emptyStats(), roomsCleared: 1, roomKills: 2 }, "room").includes("pacifist_room"));
   assert.ok(checkAchievements({ ...emptyStats(), artifactsTaken: 10 }, "artifact").includes("collector_10"));
+});
+
+test("dagger 3-hit combo completes without throwing and chains through combo 3", () => {
+  const w = sandbox();
+  w.room.doorOpen = true;
+  w.pickCharacter("swordsman");
+  w.pickWeapon("dagger");
+  w.introTicks = 0;
+  w.player.reset(160, 100);
+  w.tick(intent({ attack: true }));
+  assert.equal(w.player.combo, 1);
+  while (w.player.swing && w.player.swing.phase !== "recover") w.tick(idle);
+  w.tick(intent({ attack: true }));
+  assert.equal(w.player.combo, 2);
+  while (w.player.swing && w.player.swing.phase !== "recover") w.tick(idle);
+  assert.doesNotThrow(() => {
+    w.tick(intent({ attack: true }));
+  });
+  assert.equal(w.player.combo, 3);
+  assert.equal(w.player.swing?.dmg, 2);
+});
+
+test("combo 2 maintains forward aim direction towards enemies rather than flipping 180 degrees", () => {
+  const w = sandbox();
+  w.room.doorOpen = true;
+  w.pickCharacter("swordsman");
+  w.pickWeapon("katana");
+  w.introTicks = 0;
+  w.player.reset(160, 100);
+  w.player.facing = 0;
+  const foe = makeEnemy(w.player.x + 20, w.player.y, "chaser");
+  w.enemies = [foe];
+  w.syncUnits();
+  w.tick(intent({ attack: true }));
+  assert.equal(w.player.swing?.dir, 0);
+  while (w.player.swing && w.player.swing.phase !== "recover") w.tick(idle);
+  w.tick(intent({ attack: true }));
+  assert.ok(Math.abs(w.player.swing!.dir) < Math.PI / 4, `expected ~0 rad, got ${w.player.swing!.dir}`);
 });

@@ -275,7 +275,8 @@ export class Player implements Unit {
   }
 
   private startSwing(src: Sim, combo: number, intent: Intent, prevDir: number | null): void {
-    const aim = resolveAttackDir(this.x, this.y, prevDir === null ? this.facing : normAngle(prevDir + Math.PI), cursorOf(intent), src.enemies);
+    const fallbackDir = prevDir !== null ? prevDir : this.facing;
+    const aim = resolveAttackDir(this.x, this.y, fallbackDir, cursorOf(intent), src.enemies);
     const init = playerSwingInit(src, combo, aim.dir);
     init.ox = this.x;
     init.oy = this.y;
@@ -288,7 +289,7 @@ export class Player implements Unit {
     this.setState(PLAYER_STATE.ATTACK);
     if (init.kind === "shot") return; // mage cast: no melee arc, the bolt fires on the active tick
     sfx(src.queue, "slash_air", 0.7, combo === 2 ? 1.12 : 1);
-    const fd = CONFIG.ATTACK.COMBOS[combo - 1];
+    const fd = init.fd;
     src.queue.push({
       t: "slashArc",
       x: init.ox,
