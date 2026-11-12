@@ -1,4 +1,5 @@
 import type { RunStats } from "./runStats.ts";
+import { normalizeAscensionLevel, type AscensionLevel } from "./ascension.ts";
 import type { CharacterId } from "./characters.ts";
 import { type WeaponId, WEAPON_LIST } from "./weapons.ts";
 
@@ -30,7 +31,10 @@ export type AchievementId =
   | "vampire_lord"
   | "pacifist_room"
   | "soul_collector"
-  | "master_of_arms";
+  | "master_of_arms"
+  | "ascension_1"
+  | "ascension_4"
+  | "ascension_8";
 
 export type AchEvent = "kill" | "room" | "win" | "hit" | "artifact" | "end";
 
@@ -62,6 +66,9 @@ const ALL_ACHIEVEMENTS: readonly AchievementId[] = [
   "pacifist_room",
   "soul_collector",
   "master_of_arms",
+  "ascension_1",
+  "ascension_4",
+  "ascension_8",
 ];
 
 /** Vietnamese labels, shown by the HUD toast for achievements that unlock no artifact */
@@ -93,6 +100,9 @@ export const ACHIEVEMENT_NAMES: Record<AchievementId, string> = {
   pacifist_room: "Phòng hòa bình",
   soul_collector: "Thu phục hồn tướng",
   master_of_arms: "Bậc thầy binh khí",
+  ascension_1: "Chinh phục Ascension I",
+  ascension_4: "Chinh phục Ascension IV",
+  ascension_8: "Chinh phục Ascension VIII",
 };
 
 export type BestRun = { time: number; rooms: number; kills: number; artifacts: number };
@@ -105,6 +115,8 @@ export type Achievements = {
   charactersWon: Set<CharacterId>;
   /** weapons beaten to the end at least once; five of them earns master_of_arms */
   weaponsWon: Set<WeaponId>;
+  /** highest unlocked Ascension tier, kept backward-compatible with older saves */
+  ascensionMax: AscensionLevel;
 };
 
 const SPEEDRUN_TICKS = 8 * 60 * 60;
@@ -130,6 +142,7 @@ export function emptyAchievements(): Achievements {
     totalGold: 0,
     charactersWon: new Set<CharacterId>(),
     weaponsWon: new Set<WeaponId>(),
+    ascensionMax: 0,
   };
 }
 
@@ -143,6 +156,7 @@ export function parseAchievements(raw: string | null): Achievements {
       totalGold?: unknown;
       charactersWon?: unknown;
       weaponsWon?: unknown;
+      ascensionMax?: unknown;
     };
     const earned = new Set<AchievementId>();
     if (Array.isArray(data.earned)) {
@@ -158,7 +172,8 @@ export function parseAchievements(raw: string | null): Achievements {
     }
     const best = (data.best ?? null) as BestRun | null;
     const totalGold = typeof data.totalGold === "number" && data.totalGold >= 0 ? data.totalGold : 0;
-    return { earned, best, totalGold, charactersWon, weaponsWon };
+    const ascensionMax = normalizeAscensionLevel(data.ascensionMax);
+    return { earned, best, totalGold, charactersWon, weaponsWon, ascensionMax };
   } catch {
     return emptyAchievements();
   }
@@ -171,6 +186,7 @@ export function stringifyAchievements(a: Achievements): string {
     totalGold: a.totalGold,
     charactersWon: [...a.charactersWon],
     weaponsWon: [...a.weaponsWon],
+    ascensionMax: a.ascensionMax,
   });
 }
 

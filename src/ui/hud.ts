@@ -62,8 +62,13 @@ export class Hud {
 
   modalAt(x: number, y: number): string | null {
     const w = this.world;
-    if (w.characterChoices.length > 0) {
-      if (y < 34 || y > 172) return null;
+    if (this.world.characterChoices.length > 0) {
+      if (this.world.achievements.ascensionMax > 0 && y >= 164 && y <= 180) {
+        if (x >= 104 && x <= 132) return "q:-";
+        if (x >= 188 && x <= 216) return "q:+";
+        return null;
+      }
+      if (y < 34 || y >= 164) return null;
       let i = -1;
       if (x >= 12 && x <= 104) i = 0;
       else if (x >= 114 && x <= 206) i = 1;
@@ -145,7 +150,7 @@ export class Hud {
     o.fillText("Bấm phím [1], [2], [3] hoặc chạm/nhấn vào thẻ nhân vật để bắt đầu", 160, 23);
 
     const cardW = 92;
-    const cardH = 138;
+    const cardH = 130;
     const cardY = 34;
 
     list.forEach((id, i) => {
@@ -229,7 +234,7 @@ export class Hud {
       }
 
       // --- Stat Bars (HP, DMG, SPD) ---
-      const statY = cardY + 58;
+      const statY = cardY + 48;
       o.font = "bold 6.5px sans-serif";
 
       // HP Bar
@@ -261,28 +266,48 @@ export class Hud {
 
       // Divider line
       o.fillStyle = "#222c3f";
-      o.fillRect(cardX + 6, cardY + 81, cardW - 12, 1);
+      o.fillRect(cardX + 6, cardY + 70, cardW - 12, 1);
 
       // --- Skill Section ---
       o.font = "bold 7px sans-serif";
       o.fillStyle = "#ffd166";
-      o.fillText(`[E] ${c.skillName}`, cardX + 6, cardY + 85);
+      o.fillText(`[E] ${c.skillName}`, cardX + 6, cardY + 74);
       o.font = "6.5px sans-serif";
       o.fillStyle = "#c5d3e8";
       wrapLines(o, c.skillDesc, cardW - 12).forEach((t, j) => {
-        o.fillText(t, cardX + 6, cardY + 95 + j * 8, cardW - 12);
+        o.fillText(t, cardX + 6, cardY + 82 + j * 8, cardW - 12);
       });
 
       // --- Passive Section ---
       o.font = "bold 7px sans-serif";
       o.fillStyle = c.color;
-      o.fillText(`Nội tại: ${c.passiveName}`, cardX + 6, cardY + 113);
+      o.fillText(`Nội tại: ${c.passiveName}`, cardX + 6, cardY + 99);
       o.font = "6.5px sans-serif";
       o.fillStyle = "#9db0cc";
       wrapLines(o, c.passiveDesc, cardW - 12).forEach((t, j) => {
-        o.fillText(t, cardX + 6, cardY + 122 + j * 8, cardW - 12);
+        o.fillText(t, cardX + 6, cardY + 108 + j * 7, cardW - 12);
       });
     });
+
+    if (this.world.achievements.ascensionMax > 0) {
+      o.fillStyle = "rgba(5, 7, 11, 0.96)";
+      o.fillRect(0, 164, 320, 16);
+      o.textBaseline = "top";
+      o.textAlign = "center";
+      o.font = "bold 7px ui-monospace, monospace";
+      o.fillStyle = "#ffd166";
+      o.fillText(`ASCENSION ${this.world.ascensionLevel} / ${this.world.achievements.ascensionMax}`, 160, 168);
+      o.fillStyle = "#161d2d";
+      o.fillRect(108, 166, 20, 12);
+      o.fillRect(192, 166, 20, 12);
+      o.strokeStyle = "#ffd166";
+      o.strokeRect(108.5, 166.5, 19, 11);
+      o.strokeRect(192.5, 166.5, 19, 11);
+      o.fillStyle = "#ffffff";
+      o.font = "bold 10px ui-monospace, monospace";
+      o.fillText("−", 118, 167);
+      o.fillText("+", 202, 167);
+    }
 
     o.restore();
   }
@@ -484,11 +509,24 @@ export class Hud {
     const w = this.world;
     const full = this.sprites.heart_full;
     const empty = this.sprites.heart_empty;
-    const step = 9;
-    for (let i = 0; i < w.player.maxHp; i++) {
-      const s = i < w.player.hp ? full : empty;
-      o.drawImage(s.c, Math.round((6 + i * step) * scale), Math.round(6 * scale), s.w * scale, s.h * scale);
+  const step = 9;
+  for (let i = 0; i < w.player.maxHp; i++) {
+    const x = Math.round((6 + i * step) * scale);
+    const y = Math.round(6 * scale);
+    const width = full.w * scale;
+    const height = full.h * scale;
+    const fill = Math.max(0, Math.min(1, w.player.hp - i));
+    o.drawImage(empty.c, x, y, empty.w * scale, empty.h * scale);
+    if (fill >= 1) o.drawImage(full.c, x, y, width, height);
+    else if (fill >= 0.5) {
+      o.save();
+      o.beginPath();
+      o.rect(x, y, Math.ceil(width / 2), height);
+      o.clip();
+      o.drawImage(full.c, x, y, width, height);
+      o.restore();
     }
+  }
 
     const cdef = CHARACTERS[w.player.character];
     const badgeX = 10 + w.player.maxHp * step;
@@ -566,8 +604,9 @@ export class Hud {
     o.fillText(`◆ ${w.runStats.gold}`, Math.round(6 * scale), Math.round(24 * scale));
     o.globalAlpha = 1;
 
-    if (w.bannerTicks > 0 && w.bannerText.length > 0) {
-      const a = Math.min(1, w.bannerTicks / 24);
+  if (w.bannerTicks > 0 && w.bannerText.length > 0) {
+    const fadeIn = Math.min(1, (w.bannerDuration - w.bannerTicks + 1) / 6);
+    const a = Math.min(fadeIn, w.bannerTicks / 24);
       o.globalAlpha = a;
       o.font = `${Math.round(8 * scale)}px ui-monospace, monospace`;
       const text = w.bannerText.toUpperCase();

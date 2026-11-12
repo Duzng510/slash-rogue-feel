@@ -26,7 +26,7 @@ function sandbox() {
 function allUnlocks(): Achievements {
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
-  return { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() };
+  return { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 };
 }
 
 function hits(w: World): void {
@@ -225,7 +225,7 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
 });
 
 test("a fresh save only offers the two unlocked artifacts, then gating opens more", () => {
-  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() });
+  const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
   fresh.clearEnemies();
   fresh.player.reset(160, 100);
   fresh.tick(idle);
@@ -234,7 +234,7 @@ test("a fresh save only offers the two unlocked artifacts, then gating opens mor
   assert.ok(offered.every(id => ARTIFACT_UNLOCKS[id] === null));
   assert.ok(!offered.includes("lightning"));
 
-  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set() });
+  const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
   withFirstBlood.clearEnemies();
   withFirstBlood.player.reset(160, 100);
   withFirstBlood.tick(idle);
@@ -289,6 +289,7 @@ test("clearing the last room ends the run with victory", () => {
   w.player.y = Math.floor(w.room.h / 2) * 16;
   w.tick(idle);
   assert.equal(w.pendingEnd, "won");
+  assert.equal(w.achievements.ascensionMax, 1);
   assert.equal(w.victory, true);
   assert.equal(w.roomIndex, w.roomTotal - 1);
   assert.ok(w.artifacts.size > 0);
@@ -298,6 +299,7 @@ test("clearing the last room ends the run with victory", () => {
   assert.equal(w.pendingEnd, null);
   assert.equal(w.roomIndex, 0);
   assert.equal(w.victory, false);
+  assert.equal(w.ascensionLevel, 1);
   assert.ok(w.artifacts.size > 0);
   assert.equal(w.runStats.roomsCleared, 0);
 
