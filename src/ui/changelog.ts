@@ -5,11 +5,18 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.30.0";
+export const APP_VERSION = "v0.31.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.31.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Tách renderer:</b> lớp hiệu ứng chiến đấu (cung chém, mảnh văng, tia, chữ bay) tách sang <i>FxLayer</i> riêng; <i>renderer.ts</i> nhẹ đi ~270 dòng, chỉ còn lo thế giới và ánh sáng.",
+    ],
+  },
   {
     version: "v0.30.0",
     date: "2026-11-13",

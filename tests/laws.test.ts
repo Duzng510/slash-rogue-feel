@@ -1157,7 +1157,8 @@ heading("Artifact feedback events");
   ok("an enemy telegraph plays the audio cue", sawTelegraph);
 
   const rsrc = readFileSync("src/render/renderer.ts", "utf8");
-  ok("the renderer floats artifact text from the event bus", rsrc.includes('e.t === "artifactText"') && rsrc.includes("drawTexts"));
+  const fxsrc = readFileSync("src/render/fxLayer.ts", "utf8");
+  ok("the renderer floats artifact text from the event bus", fxsrc.includes('e.t === "artifactText"') && fxsrc.includes("drawTexts"));
   ok("the renderer draws a shock bolt over stunned enemies", rsrc.includes("en.shockTicks > 0"));
 }
 
