@@ -18,6 +18,9 @@ export type RunStats = {
   critHits: number;
   poisonKills: number;
   wardenKills: number;
+  golemKills: number;
+  kingKills: number;
+  kingNoDamage: boolean;
   phantomKills: number;
   vampireHeals: number;
   bossDamageTaken: number;
@@ -46,6 +49,9 @@ export function emptyStats(): RunStats {
     critHits: 0,
     poisonKills: 0,
     wardenKills: 0,
+    golemKills: 0,
+    kingKills: 0,
+    kingNoDamage: false,
     phantomKills: 0,
     vampireHeals: 0,
     bossDamageTaken: 0,

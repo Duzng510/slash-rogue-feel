@@ -318,6 +318,43 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 12, 16, 4, 2, P.VOID);
   });
 
+  const golem = enemyDef("golem");
+  S[golem.SPRITE_KEY] = bake(24, 20, 12, 19, (g) => {
+    rect(g, 0, 2, 24, 16, P.ENEMY_GOLEM_SHADE);
+    rect(g, 2, 1, 20, 17, golem.BODY_COLOR);
+    rect(g, 2, 1, 20, 2, P.ENEMY_GOLEM_SHADE);
+    rect(g, 0, 4, 3, 8, P.ENEMY_GOLEM_SHADE);
+    rect(g, 21, 4, 3, 8, P.ENEMY_GOLEM_SHADE);
+    rect(g, 11, 5, 2, 3, P.ENEMY_GOLEM_RUNE);
+    rect(g, 7, 9, 2, 2, P.ENEMY_GOLEM_RUNE);
+    rect(g, 15, 9, 2, 2, P.ENEMY_GOLEM_RUNE);
+    rect(g, 10, 12, 4, 2, P.ENEMY_GOLEM_RUNE);
+    rect(g, 5, 4, 4, 3, P.ENEMY_EYE);
+    rect(g, 15, 4, 4, 3, P.ENEMY_EYE);
+    rect(g, 6, 5, 2, 1, P.VOID);
+    rect(g, 16, 5, 2, 1, P.VOID);
+    rect(g, 4, 18, 5, 2, P.VOID);
+    rect(g, 15, 18, 5, 2, P.VOID);
+  });
+
+  const king = enemyDef("king");
+  S[king.SPRITE_KEY] = bake(20, 18, 10, 17, (g) => {
+    rect(g, 3, 1, 14, 2, P.ENEMY_KING_CROWN);
+    rect(g, 4, 0, 2, 2, P.ENEMY_KING_CROWN);
+    rect(g, 9, 0, 2, 2, P.ENEMY_KING_CROWN);
+    rect(g, 14, 0, 2, 2, P.ENEMY_KING_CROWN);
+    rect(g, 2, 3, 16, 13, P.ENEMY_KING_SHADE);
+    rect(g, 3, 4, 14, 12, king.BODY_COLOR);
+    rect(g, 1, 6, 3, 9, P.ENEMY_KING_SHADE);
+    rect(g, 16, 6, 3, 9, P.ENEMY_KING_SHADE);
+    rect(g, 5, 6, 3, 3, "#ff4d4d");
+    rect(g, 12, 6, 3, 3, "#ff4d4d");
+    rect(g, 6, 7, 1, 1, P.VOID);
+    rect(g, 13, 7, 1, 1, P.VOID);
+    rect(g, 5, 16, 4, 2, P.VOID);
+    rect(g, 11, 16, 4, 2, P.VOID);
+  });
+
   S.shadow = bake(10, 4, 5, 2, (g) => {
     g.globalAlpha = CONFIG.READABILITY.SHADOW_ALPHA;
     rect(g, 1, 1, 8, 2, P.VOID);

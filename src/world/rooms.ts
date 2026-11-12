@@ -15,7 +15,7 @@ export const TILE = {
 
 export type Tile = (typeof TILE)[keyof typeof TILE];
 
-/** E chaser, C charger, T splitter, B boss, R ranged, P teleporter, H healer, X exploder, D shielder, N sniper, J jumper; S stays the player start, O crate, ^ spike trap */
+/** E chaser, C charger, T splitter, B boss, R ranged, P teleporter, H healer, X exploder, D shielder, N sniper, J jumper, W warden, G golem, K king; S stays the player start, O crate, ^ spike trap */
 export const MARKER_KIND: Record<string, EnemyKind> = {
   E: "chaser",
   C: "charger",
@@ -29,6 +29,8 @@ export const MARKER_KIND: Record<string, EnemyKind> = {
   N: "sniper",
   J: "jumper",
   W: "warden",
+  G: "golem",
+  K: "king",
 };
 
 export type SpawnMark = { x: number; y: number; kind: EnemyKind };
@@ -167,7 +169,7 @@ export const TEMPLATES: Template[] = [
       "..C....T....R....C....",
       "......................",
       "S.....................",
-      "......................",
+      "...........G..........",
       "..E....X....E....T....",
       "......................",
       "..P....E....C....E....",
@@ -235,7 +237,7 @@ export const TEMPLATES: Template[] = [
       "..........................",
       "....O..................O....",
       "..........................",
-      "S.............B.............",
+      "S.............K.............",
       "..........................",
       "....O..................O....",
       "..........................",

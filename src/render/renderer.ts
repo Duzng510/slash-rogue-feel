@@ -44,6 +44,9 @@ export class Renderer {
   private texts: FloatText[] = [];
   private flash = new Map<number, number>();
   private vignette = 0;
+  /** the forgotten king's phase-drop cinematic: a white flash + centred label, ticking down from 60 */
+  private kingCine = 0;
+  private kingCineLabel = "";
   private white: Record<string, HTMLCanvasElement> = {};
   private statusSprites: Record<string, HTMLCanvasElement[]> = {};
   private tileOf: Record<number, Sprite> = {};
@@ -137,6 +140,10 @@ export class Renderer {
         if (this.texts.length >= 24) this.texts.shift();
         this.texts.push({ x: e.x, y: e.y, text: String(Math.round(e.value)), color: "#ffffff", left: 36, total: 36 });
       }
+      else if (e.t === "kingPhase") {
+        this.kingCine = 60;
+        this.kingCineLabel = `GIAI ĐOẠN ${e.phase}`;
+      }
     }
   }
 
@@ -159,6 +166,7 @@ export class Renderer {
       else this.flash.set(k, n);
     }
     if (this.vignette > 0) this.vignette = Math.max(0, this.vignette - dtReal * 0.9);
+    if (this.kingCine > 0) this.kingCine = Math.max(0, this.kingCine - ticks);
   }
 
   draw(dtReal: number, flags: DrawFlags): void {
@@ -555,6 +563,30 @@ export class Renderer {
     for (const p of this.world.projectiles) {
       const x = Math.round(p.x - ox);
       const y = Math.round(p.y - oy);
+      // the mage's arcane bolt reads violet so it never passes for the orange fireball skill
+      if (p.owner === "player" && p.kind === "bolt") {
+        g.fillStyle = "#3a1450";
+        g.fillRect(x - 2, y - 2, 4, 4);
+        g.fillStyle = "#c99ae6";
+        g.fillRect(x - 1, y - 1, 2, 2);
+        continue;
+      }
+      // the forgotten king's ghost shots: a cold violet, distinct from the warm fireball
+      if (p.kind === "ghost") {
+        g.fillStyle = "#3a1252";
+        g.fillRect(x - 3, y - 3, 6, 6);
+        g.fillStyle = "#c99ae6";
+        g.fillRect(x - 1, y - 1, 3, 3);
+        continue;
+      }
+      // the forge golem's lava globs: molten orange over a dark crust
+      if (p.kind === "lava") {
+        g.fillStyle = "#8a2f1c";
+        g.fillRect(x - 3, y - 3, 6, 6);
+        g.fillStyle = "#ffb14d";
+        g.fillRect(x - 1, y - 1, 3, 3);
+        continue;
+      }
       const hot = p.owner === "player";
       g.fillStyle = hot ? "#3a1c08" : P.VOID;
       g.fillRect(x - 2, y - 2, 4, 4);
@@ -658,6 +690,24 @@ export class Renderer {
       g.strokeStyle = P.SLASH;
       g.lineWidth = 1;
       g.strokeRect(1.5, 1.5, iw - 3, ih - 3);
+      g.globalAlpha = 1;
+    }
+    // the forgotten king drops into a new phase: a one-second white bloom + a centred gold label
+    if (this.kingCine > 0) {
+      const a = this.kingCine / 60;
+      g.globalAlpha = Math.min(0.8, a * 0.8);
+      g.fillStyle = "#ffffff";
+      g.fillRect(0, 0, iw, ih);
+      g.globalAlpha = Math.min(1, a * 1.6);
+      g.textAlign = "center";
+      g.textBaseline = "middle";
+      g.font = "bold 16px ui-monospace, monospace";
+      const cx = Math.round(iw / 2);
+      const cy = Math.round(ih / 2);
+      g.fillStyle = "#2a0b3d";
+      g.fillText(this.kingCineLabel, cx + 1, cy + 1);
+      g.fillStyle = "#ffe66b";
+      g.fillText(this.kingCineLabel, cx, cy);
       g.globalAlpha = 1;
     }
   }

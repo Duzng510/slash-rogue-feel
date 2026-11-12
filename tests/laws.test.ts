@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIG, ENEMY_KINDS, enemyDef } from "../src/config.ts";
+import { CONFIG, ENEMY_KINDS, enemyDef, isScripted } from "../src/config.ts";
 import type { EnemyKind } from "../src/config.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
@@ -8,7 +8,7 @@ import { TEMPLATES, MARKER_KIND, Room, TILE, type Template } from "../src/world/
 import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
 import { createSwing, hitFeedback, playerSwingInit } from "../src/systems/combat.ts";
 import { CHARACTERS, COMBO_HITS } from "../src/systems/characters.ts";
-import { WEAPONS, WEAPON_LIST } from "../src/systems/weapons.ts";
+import { WEAPONS, WEAPON_LIST, type WeaponId } from "../src/systems/weapons.ts";
 import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS, CURSES } from "../src/systems/artifacts.ts";
 import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
 import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
@@ -23,6 +23,7 @@ import { GameLoop } from "../src/loop.ts";
 import type { Intent } from "../src/sim/types.ts";
 import { biomeForRoom } from "../src/systems/biomes.ts";
 import { applyAscension } from "../src/systems/ascension.ts";
+import { APP_VERSION, CHANGELOG } from "../src/ui/changelog.ts";
 
 let pass = 0;
 let fail = 0;
@@ -574,12 +575,16 @@ heading("Authored content");
       if (k !== undefined) placed.add(k);
     }
   }
-  const missing = ENEMY_KINDS.filter((k) => k !== "small" && !placed.has(k));
+  // "small" is only ever summoned, and the legacy "boss" archetype is retired from the run now that
+  // the Forgotten King owns the finale — neither is placed by a room marker.
+  const missing = ENEMY_KINDS.filter((k) => k !== "small" && k !== "boss" && !placed.has(k));
   ok("every archetype you can fight is placed in a room", missing.length === 0, `missing ${missing.join(",")}`);
   const lastRoom = TEMPLATES[TEMPLATES.length - 1];
-  ok("the last room is the boss arena", lastRoom.rows.join("").includes("B"));
-  ok("the boss arena holds no trash mobs", /[ECT]/.test(lastRoom.rows.join("")) === false);
-  ok("exactly one boss exists in the authored rooms", TEMPLATES.reduce((n, t) => n + (t.rows.join("").match(/B/g) ?? []).length, 0) === 1);
+  ok("the last room is the Forgotten King's arena", lastRoom.rows.join("").includes("K"));
+  ok("the finale arena holds no trash mobs", /[ECT]/.test(lastRoom.rows.join("")) === false);
+  const countMark = (ch: string): number => TEMPLATES.reduce((n, t) => n + (t.rows.join("").split(ch).length - 1), 0);
+  ok("each scripted superior is authored exactly once", countMark("W") === 1 && countMark("G") === 1 && countMark("K") === 1, `W${countMark("W")} G${countMark("G")} K${countMark("K")}`);
+  ok("the legacy classic boss is retired from the authored run", countMark("B") === 0);
 
   const arena = TEMPLATES[TEMPLATES.length - 1];
   const cellOf = (ch: string): { x: number; y: number } | null => {
@@ -590,9 +595,9 @@ heading("Authored content");
     return null;
   };
   const entry = cellOf("S");
-  const bossMark = cellOf("B");
-  const gap = entry !== null && bossMark !== null ? Math.hypot(bossMark.x - entry.x, bossMark.y - entry.y) : Infinity;
-  ok("the boss can see the player the moment the arena loads", enemyDef("boss").CHASE_ACQUIRE >= gap, `gap ${Math.round(gap)}`);
+  const kingMark = cellOf("K");
+  const gap = entry !== null && kingMark !== null ? Math.hypot(kingMark.x - entry.x, kingMark.y - entry.y) : Infinity;
+  ok("the king can see the player the moment the arena loads", enemyDef("king").CHASE_ACQUIRE >= gap, `gap ${Math.round(gap)}`);
 
   const w = sandbox();
   w.loadRoom(TEMPLATES.length - 1);
@@ -601,7 +606,7 @@ heading("Authored content");
     w.tick(intent());
     engaged = w.enemies.some((e) => e.state === ENEMY_STATE.TELEGRAPH);
   }
-  ok("the boss walks into range and telegraphs", engaged);
+  ok("the finale boss walks into range and telegraphs", engaged);
 }
 
 heading("Room variety (P5)");
@@ -730,6 +735,119 @@ heading("Warden (P9)");
   ok("the warden cycles spiral, laser and summon", spiral && laser && summon, `spiral=${spiral} laser=${laser} summon=${summon}`);
 }
 
+heading("Forge Golem (mini-boss)");
+{
+  const hz = CONFIG.TIME.TICK_HZ;
+  ok("the golem is a 30 HP brute", enemyDef("golem").HP === 30);
+  ok("the golem slam sweeps a full circle", enemyDef("golem").RADIAL && enemyDef("golem").ATTACK_ARC_DEG === 360);
+  ok("the golem rages at half health", enemyDef("golem").PHASE2_FRACTION === 0.5);
+  ok("a golem slam leaves a reactable punish window", enemyDef("golem").RECOVERY_TICKS / hz >= 0.15);
+  const golemRoom = TEMPLATES.findIndex((t) => t.rows.join("").includes("G"));
+  const wardenRoom = TEMPLATES.findIndex((t) => t.rows.join("").includes("W"));
+  ok("the golem is authored in the forge, after the warden", golemRoom >= 0 && biomeForRoom(golemRoom).id === "forge" && golemRoom > wardenRoom, `golem@${golemRoom} warden@${wardenRoom}`);
+  const fieldedG = new World(CONFIG.SEED);
+  fieldedG.loadRoom(golemRoom);
+  ok("the forge duel room fields the golem", fieldedG.enemies.some((e) => e.kind === "golem"));
+
+  const g = sandbox();
+  g.clearEnemies();
+  g.spawnEnemy(g.player.x + 60, g.player.y, "golem");
+  g.player.iframeTicks = 100000;
+  const golem = g.enemies[g.enemies.length - 1];
+  // a healthy golem swings melee only — no lava yet
+  let guard = 0;
+  while (golem.state !== ENEMY_STATE.ATTACK && guard++ < 400) g.tick(intent());
+  ok("an at-health golem swings melee", golem.swing !== null && g.projectiles.length === 0, `swing=${golem.swing !== null} proj=${g.projectiles.length}`);
+  // drop it into rage and watch the following slams: a shorter tell and lava spit
+  golem.hp = Math.floor(golem.maxHp * 0.4);
+  let sawLava = false;
+  let ragedTelegraph = 0;
+  for (let i = 0; i < 360; i++) {
+    g.tick(intent());
+    if (golem.state === ENEMY_STATE.TELEGRAPH && ragedTelegraph === 0) ragedTelegraph = golem.telegraphTotal;
+    if (g.projectiles.some((p) => p.kind === "lava")) sawLava = true;
+  }
+  ok("the enraged golem flings lava globs on its slam", sawLava);
+  ok("rage shortens the golem telegraph", ragedTelegraph > 0 && ragedTelegraph < enemyDef("golem").TELEGRAPH_TICKS, `telegraph ${ragedTelegraph}`);
+}
+
+heading("Forgotten King (finale mega-boss)");
+{
+  ok("the king is a 60 HP finale boss", enemyDef("king").HP === 60 && enemyDef("king").KING);
+  ok("the king hits in a full circle", enemyDef("king").ATTACK_ARC_DEG === 360);
+  const kingRoom = TEMPLATES.findIndex((t) => t.rows.join("").includes("K"));
+  ok("the king owns the last room, in the void biome", kingRoom === TEMPLATES.length - 1 && biomeForRoom(kingRoom).id === "void", `king@${kingRoom}`);
+  const fieldedK = new World(CONFIG.SEED);
+  fieldedK.loadRoom(kingRoom);
+  ok("the finale always fields the king", fieldedK.enemies.some((e) => e.kind === "king"));
+
+  // a hit landed during the phase-drop invulnerability costs the king nothing
+  const ki = sandbox();
+  ki.clearEnemies();
+  ki.spawnEnemy(ki.player.x + 40, ki.player.y, "king");
+  const kin = ki.enemies[ki.enemies.length - 1];
+  kin.kingInvulnTicks = 30;
+  const hpI = kin.hp;
+  kin.onHit(jab(ki, 5), kin.x, kin.y, ki);
+  ok("an invulnerable king shrugs off a hit", kin.hp === hpI, `hp ${hpI}->${kin.hp}`);
+
+  const k = sandbox();
+  k.clearEnemies();
+  k.spawnEnemy(k.player.x + 40, k.player.y, "king");
+  k.player.iframeTicks = 100000;
+  const king = k.enemies[k.enemies.length - 1];
+
+  // phase 1 opens with a melee swing mirroring the hero's own weapon, no ranged fire yet
+  let guard = 0;
+  while (king.state !== ENEMY_STATE.ATTACK && guard++ < 500) k.tick(intent());
+  ok("phase 1 mirrors the hero's melee", king.swing !== null && king.swing.kind === "king" && k.projectiles.length === 0, `swing=${king.swing?.kind} proj=${k.projectiles.length}`);
+
+  // step down through phases 2 and 3, draining the sim queue each tick
+  const phases: number[] = [];
+  let sawGhost = false;
+  let sawSummon = false;
+  let sawFreeze = false;
+  king.hp = Math.floor(king.maxHp * 0.5);
+  for (let i = 0; i < 400; i++) {
+    if (king.kingCinematicTicks > 0) sawFreeze = true;
+    k.tick(intent());
+    for (const ev of k.queue.drain()) if (ev.t === "kingPhase") phases.push(ev.phase);
+    if (k.projectiles.some((p) => p.kind === "ghost")) sawGhost = true;
+    if (k.enemies.some((e) => e.kind === "chaser")) sawSummon = true;
+  }
+  king.kingInvulnTicks = 0;
+  king.hp = Math.floor(king.maxHp * 0.2);
+  for (let i = 0; i < 200; i++) {
+    k.tick(intent());
+    for (const ev of k.queue.drain()) if (ev.t === "kingPhase") phases.push(ev.phase);
+    if (k.projectiles.some((p) => p.kind === "ghost")) sawGhost = true;
+  }
+  ok("crossing the hp thresholds announces phases 2 and 3", phases.includes(2) && phases.includes(3), `phases ${phases.join(",")}`);
+  ok("phase 2 summons elite chasers", sawSummon);
+  ok("the king freezes for a beat on each phase drop", sawFreeze);
+  ok("phases 2-3 trade melee for ghost volleys", sawGhost);
+
+  // a flawless finish flags the no-damage king kill
+  ok("killing the king records king_slayer, and flawless sets no-damage", (() => {
+    const s = emptyStats();
+    s.hurtFree = true;
+    const w2 = new World(CONFIG.SEED);
+    w2.clearEnemies();
+    w2.runStats = s;
+    w2.spawnEnemy(w2.player.x + 40, w2.player.y, "king");
+    const kk = w2.enemies[w2.enemies.length - 1];
+    let g = 0;
+    while (!kk.dead && g++ < 60) kk.onHit(jab(w2, 20), kk.x, kk.y, w2);
+    return kk.dead && s.kingKills === 1 && s.kingNoDamage;
+  })());
+  ok("the golem kill counts toward golem_slayer", checkAchievements({ ...emptyStats(), golemKills: 1 }, "kill").includes("golem_slayer"));
+  ok("the king kill counts toward king_slayer and no_damage_king", (() => {
+    const hit = checkAchievements({ ...emptyStats(), kingKills: 1 }, "kill");
+    const perfect = checkAchievements({ ...emptyStats(), kingKills: 1, kingNoDamage: true }, "kill");
+    return hit.includes("king_slayer") && perfect.includes("no_damage_king");
+  })());
+}
+
 heading("Curse (P10)");
 {
   const earned = new Set<AchievementId>();
@@ -849,6 +967,20 @@ heading("Mobile landscape");
   const outside = ["stage", "panel", "touch", "keys"].filter((id) => !inside.includes(`id="${id}"`));
   ok("every overlay lives inside the rotated wrapper", outside.length === 0, `outside: ${outside.join(",")}`);
   ok("rot90 transforms that wrapper by a quarter turn", html.includes("body.rot90 #app") && html.includes("rotate(90deg)"));
+}
+
+heading("Changelog popup: version stays in sync");
+{
+  const html = readFileSync("index.html", "utf8");
+  const open = html.indexOf('<div id="app">');
+  const script = html.indexOf("<script");
+  const inside = open >= 0 && script > open ? html.slice(open, script) : "";
+  ok("the newest changelog entry is the app version", CHANGELOG[0].version === APP_VERSION, `${CHANGELOG[0].version} vs ${APP_VERSION}`);
+  ok("every changelog version is well-formed", CHANGELOG.every((e) => /^v\d+\.\d+\.\d+$/.test(e.version)));
+  ok("no duplicate versions in the changelog", new Set(CHANGELOG.map((e) => e.version)).size === CHANGELOG.length);
+  ok("the start screen offers a changelog button and modal", html.includes('id="btn-changelog"') && html.includes('id="changelog-modal"'));
+  ok("the inline changelog box is gone from the start screen", !html.includes("changelog-box"));
+  ok("the changelog modal lives inside the rotated wrapper", inside.includes('id="changelog-modal"'));
 }
 
 heading("Hurt lockout: no input may throw the sim");
@@ -1173,6 +1305,55 @@ heading("Characters (H2 build choice)");
   lit.onHit(bolt2, lit.x, lit.y, g);
   ok("resonance: a statused enemy takes 30% more", plain.maxHp - plain.hp < lit.maxHp - lit.hp, `${plain.maxHp - plain.hp} vs ${lit.maxHp - lit.hp}`);
 }
+
+heading("Mage normal attack: ranged arcane volley");
+{
+  // the mage's attack spawns a bolt instead of a melee arc
+  const m = sandbox();
+  m.pickCharacter("mage");
+  m.pickWeapon("katana");
+  m.introTicks = 0;
+  m.player.reset(m.room.start.x, m.room.start.y);
+  const foe = makeEnemy(m.player.x + 24, m.player.y, "chaser");
+  withEnemy(m, foe);
+  const hp0 = foe.hp;
+  let guard = 0;
+  while (m.projectiles.length === 0 && guard++ < 30) m.tick(intent({ attack: true }));
+  ok("the mage's attack fires a bolt instead of swinging", m.projectiles.some(p => p.owner === "player" && p.kind === "bolt"), `ticks ${guard}`);
+  ok("no melee damage lands at the swing origin", foe.hp === hp0, `hp ${foe.hp} vs ${hp0}`);
+  guard = 0;
+  while (foe.hp === hp0 && m.projectiles.length > 0 && guard++ < 40) m.tick(intent());
+  ok("the bolt damages its target downrange", foe.hp < hp0, `hp ${foe.hp}`);
+
+  // the other two builds keep swinging melee and never spawn a bolt
+  for (const who of ["swordsman", "tank"] as const) {
+    const p = sandbox();
+    p.pickCharacter(who);
+    p.pickWeapon("katana");
+    p.introTicks = 0;
+    p.player.reset(p.room.start.x, p.room.start.y);
+    const near = makeEnemy(p.player.x + 16, p.player.y, "chaser");
+    withEnemy(p, near);
+    const nhp = near.hp;
+    for (let i = 0; i < 30; i++) p.tick(intent({ attack: true }));
+    ok(`${who} keeps a melee swing, no bolt`, p.projectiles.filter(pr => pr.kind === "bolt").length === 0 && near.hp < nhp);
+  }
+
+  // the equipped weapon's arc shapes the volley size
+  const volleyOf = (weapon: WeaponId): number => {
+    const w = sandbox();
+    w.pickCharacter("mage");
+    w.pickWeapon(weapon);
+    w.introTicks = 0;
+    w.player.reset(w.room.start.x, w.room.start.y);
+    let g = 0;
+    while (w.projectiles.length === 0 && g++ < 40) w.tick(intent({ attack: true }));
+    return w.projectiles.filter(pr => pr.kind === "bolt").length;
+  };
+  const gsBolts = volleyOf("greatsword");
+  const spBolts = volleyOf("spear");
+  ok("a wide weapon fires a bigger volley than a narrow one", gsBolts > spBolts, `greatsword ${gsBolts} vs spear ${spBolts}`);
+}
 {
   const t = sandbox();
   t.pickCharacter("tank");
@@ -1265,7 +1446,7 @@ heading("Biomes and Ascension");
   for (let roomIndex = 0; roomIndex < world.roomTotal; roomIndex++) {
     world.loadRoom(roomIndex, false);
     const pool = biomeForRoom(roomIndex).enemyPool;
-    if (world.currentBiome.id !== biomeForRoom(roomIndex).id || world.enemies.some((enemy) => enemy.kind !== "boss" && enemy.kind !== "warden" && !pool.includes(enemy.kind))) poolsMatch = false;
+    if (world.currentBiome.id !== biomeForRoom(roomIndex).id || world.enemies.some((enemy) => !isScripted(enemy.kind) && !pool.includes(enemy.kind))) poolsMatch = false;
   }
   ok("normal enemies use biome pools while scripted bosses remain", poolsMatch);
 

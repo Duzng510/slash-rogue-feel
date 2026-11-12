@@ -27,6 +27,9 @@ export type AchievementId =
   | "dodge_king"
   | "perfect_boss"
   | "warden_slayer"
+  | "golem_slayer"
+  | "king_slayer"
+  | "no_damage_king"
   | "phantom_master"
   | "vampire_lord"
   | "pacifist_room"
@@ -61,6 +64,9 @@ const ALL_ACHIEVEMENTS: readonly AchievementId[] = [
   "dodge_king",
   "perfect_boss",
   "warden_slayer",
+  "golem_slayer",
+  "king_slayer",
+  "no_damage_king",
   "phantom_master",
   "vampire_lord",
   "pacifist_room",
@@ -95,6 +101,9 @@ export const ACHIEVEMENT_NAMES: Record<AchievementId, string> = {
   dodge_king: "Vua né đòn",
   perfect_boss: "Boss không vết xước",
   warden_slayer: "Hạ ngục trưởng",
+  golem_slayer: "Hạ Golem Lò Rèn",
+  king_slayer: "Hạ Vua Lãng Quên",
+  no_damage_king: "Vua không vết xước",
   phantom_master: "Bậc thầy ảo ảnh",
   vampire_lord: "Chúa tể hút máu",
   pacifist_room: "Phòng hòa bình",
@@ -211,6 +220,9 @@ export function checkAchievements(stats: RunStats, event: AchEvent, totalGold = 
       add("crit_king", stats.critHits >= 15);
       add("dodge_king", stats.perfectDodges >= 10);
       add("warden_slayer", stats.wardenKills >= 1);
+      add("golem_slayer", stats.golemKills >= 1);
+      add("king_slayer", stats.kingKills >= 1);
+      add("no_damage_king", stats.kingNoDamage);
       add("phantom_master", stats.phantomKills >= 5);
       add("vampire_lord", stats.vampireHeals >= 5);
       break;

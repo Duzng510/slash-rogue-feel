@@ -1,4 +1,4 @@
-import { CONFIG, type EnemyKind } from "../config.ts";
+import { CONFIG, isScripted, type EnemyKind } from "../config.ts";
 import { makeRng } from "../mathx.ts";
 import { EventQueue, sfx } from "../events.ts";
 import { ParticlePool } from "../systems/particles.ts";
@@ -142,16 +142,15 @@ export class World implements Sim {
   /** filter room markers by biome, then select a deterministic count from the eligible pool */
   private waveSpawns(index: number): SpawnMark[] {
     const fallback = this.currentBiome.enemyPool[0] ?? "chaser";
-  // Boss and warden markers are authored encounters, not ordinary biome-pool spawns.
+  // Bosses and scripted mini-bosses are authored encounters, not ordinary biome-pool spawns.
   const markers = this.room.spawns.map((spawn) => {
-  const isScriptedEncounter = spawn.kind === "boss" || spawn.kind === "warden";
   return {
   ...spawn,
-  kind: isScriptedEncounter || this.currentBiome.enemyPool.includes(spawn.kind) ? spawn.kind : fallback,
+  kind: isScripted(spawn.kind) || this.currentBiome.enemyPool.includes(spawn.kind) ? spawn.kind : fallback,
   };
   });
-    const bosses = markers.filter((spawn) => spawn.kind === "boss" || spawn.kind === "warden");
-    const pool = markers.filter((spawn) => spawn.kind !== "boss" && spawn.kind !== "warden");
+    const bosses = markers.filter((spawn) => isScripted(spawn.kind));
+    const pool = markers.filter((spawn) => !isScripted(spawn.kind));
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(this.rng.next() * (i + 1));
       [pool[i], pool[j]] = [pool[j]!, pool[i]!];
@@ -188,7 +187,7 @@ export class World implements Sim {
     this.shopOffers = null;
     this.runStats.roomKills = 0;
     for (const s of this.waveSpawns(this.roomIndex)) {
-      this.spawnEnemy(s.x, s.y, s.kind, s.kind !== "boss" && s.kind !== "warden" && this.rng.next() < 0.15);
+      this.spawnEnemy(s.x, s.y, s.kind, !isScripted(s.kind) && this.rng.next() < 0.15);
     }
     this.syncUnits();
     this.player.reset(this.room.start.x, this.room.start.y);

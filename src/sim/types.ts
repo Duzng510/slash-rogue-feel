@@ -46,6 +46,7 @@ export type Projectile = {
   ticksLeft: number;
   owner: Side;
   status?: Swing["status"];
+  kind?: "bolt" | "fireball" | "ghost" | "lava";
 };
 
 export interface Unit {

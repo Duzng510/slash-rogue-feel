@@ -54,6 +54,7 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
   const slow = src.curses.has("slow_hand") ? CONFIG.CURSES.STARTUP_TICKS : 0;
   return {
     side: "player",
+    kind: src.player.character === "mage" ? "shot" : undefined,
     status: combo === 1 ? (src.artifacts.has("water") ? "wet" : src.artifacts.has("poison") ? "poison" : undefined)
       : combo === 2 ? (src.artifacts.has("lightning") ? "shock" : src.artifacts.has("freeze") ? "freeze" : undefined)
       : undefined,
@@ -103,6 +104,8 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
   for (const attacker of src.units) {
     const sw = attacker.swing;
     if (sw === null || sw.phase !== "active") continue;
+    // the mage's swing is a ranged cast: its damage travels as a projectile, never as a melee arc
+    if (sw.side === "player" && sw.kind === "shot") continue;
     const box = hitboxOf(sw);
     if (box === null) continue;
     // a whiffed swing loses its arc entirely, so the miss reads on screen too

@@ -95,6 +95,11 @@ export class Enemy implements Unit {
   pattern: (typeof WARDEN_CYCLE)[number] = "spiral";
   private patternIndex = 0;
 
+  /** king only: 3-phase finale — cinematic freeze on each phase drop, brief i-frames while it summons */
+  kingPhase: 1 | 2 | 3 = 1;
+  kingInvulnTicks = 0;
+  kingCinematicTicks = 0;
+
   /** telegraph geometry the renderer draws; locked halfway through so late dodges still work */
   telegraphDir = Math.PI;
   telegraphTicksLeft = 0;
@@ -148,6 +153,11 @@ export class Enemy implements Unit {
   onHit(sw: Swing, _cx: number, _cy: number, src: Sim): boolean {
     const e = this.def;
     if (this.dead) return false;
+    if (this.kind === "king" && this.kingInvulnTicks > 0) {
+      artifactText(src.queue, this.x, this.y - 16, "IMMUNE", "#e9d6ff");
+      sfx(src.queue, "shock_hit", 0.4, 0.7);
+      return false;
+    }
     knockback(this, sw.dir, sw.knockback);
     const playerHit = sw.side === "player";
     const critChance = (src.artifacts.has("crit") ? 0.2 : 0) + (playerHit ? WEAPONS[src.player.weapon].critChance : 0);
@@ -195,6 +205,11 @@ export class Enemy implements Unit {
       src.runStats.totalGoldEarned += bounty;
       if (this.isElite) src.runStats.eliteKills++;
       if (this.kind === "warden") src.runStats.wardenKills++;
+      if (this.kind === "golem") src.runStats.golemKills++;
+      if (this.kind === "king") {
+        src.runStats.kingKills++;
+        if (src.runStats.hurtFree) src.runStats.kingNoDamage = true;
+      }
       if (playerOwned) {
         src.runStats.roomKills++;
         src.player.registerKill(src);
@@ -302,6 +317,13 @@ export class Enemy implements Unit {
       return;
     }
 
+    if (this.kind === "king") this.tickKing(src);
+    if (this.kingCinematicTicks > 0) {
+      this.kingCinematicTicks--;
+      this.vx = this.vy = 0;
+      return;
+    }
+
     if (this.burnTicks > 0) {
       this.burnTicks--;
       if (--this.burnPulse === 0) {
@@ -406,6 +428,7 @@ export class Enemy implements Unit {
           this.brake(dt);
         }
         if (this.swing === null) {
+          if (this.kind === "golem" && this.golemRage()) this.fireLava(src);
           this.restTicks = e.REST_TICKS;
           if (this.followUps > 0) {
             this.followUps--;
@@ -463,11 +486,40 @@ export class Enemy implements Unit {
     return 1;
   }
 
+  /** golem phase 2: below its fraction of max hp the slam quickens and flings lava */
+  private golemRage(): boolean {
+    return this.kind === "golem" && this.def.PHASE2_FRACTION > 0 && this.hp <= this.maxHp * this.def.PHASE2_FRACTION;
+  }
+
+  /** the forgotten king steps 1 → 2 → 3, freezing on each drop and mirroring the player's weapon early */
+  private tickKing(src: Sim): void {
+    if (this.kingInvulnTicks > 0) this.kingInvulnTicks--;
+    const frac = this.hp / this.maxHp;
+    const target: 1 | 2 | 3 = frac <= 0.34 ? 3 : frac <= 0.67 ? 2 : 1;
+    if (target > this.kingPhase) {
+      this.kingPhase = target;
+      this.kingCinematicTicks = 60;
+      this.swing = null;
+      this.followUps = 0;
+      this.telegraphTicksLeft = 0;
+      src.queue.push({ t: "kingPhase", phase: target });
+      sfx(src.queue, "telegraph", 1, 0.5);
+      shake(src.queue, this.x, this.y, this.facing, 1.6);
+      if (target === 2) {
+        src.spawnEnemy(this.x + 30, this.y, "chaser", true);
+        src.spawnEnemy(this.x - 30, this.y, "chaser", true);
+        this.kingInvulnTicks = 180;
+      }
+    }
+  }
+
   private beginTelegraph(src: Sim, dir: number): void {
     const e = this.def;
     const phase = this.bossPhase();
     if (this.kind === "warden") this.pattern = WARDEN_CYCLE[this.patternIndex++ % WARDEN_CYCLE.length];
-    const t = this.kind === "warden" && this.pattern === "laser" && e.LASER_TELEGRAPH_TICKS > 0
+    const t = this.golemRage()
+      ? 30
+      : this.kind === "warden" && this.pattern === "laser" && e.LASER_TELEGRAPH_TICKS > 0
       ? e.LASER_TELEGRAPH_TICKS
       : phase >= 3 && e.PHASE3_TELEGRAPH_TICKS > 0
       ? e.PHASE3_TELEGRAPH_TICKS
@@ -502,6 +554,11 @@ export class Enemy implements Unit {
       this.setState(ENEMY_STATE.ATTACK);
       return;
     }
+    if (this.kind === "king") {
+      this.kingAttack(src);
+      this.setState(ENEMY_STATE.ATTACK);
+      return;
+    }
     if (e.SNIPER) {
       this.fireBeam(src);
       this.setState(ENEMY_STATE.ATTACK);
@@ -523,7 +580,7 @@ export class Enemy implements Unit {
       deg: e.ATTACK_ARC_DEG,
       dmg: e.DMG * this.dmgScale,
       knockback: 0,
-      fd: { startup: 1, active: e.ACTIVE_TICKS, recovery: e.RECOVERY_TICKS },
+      fd: { startup: 1, active: e.ACTIVE_TICKS, recovery: this.golemRage() ? 20 : e.RECOVERY_TICKS },
     });
     const phase = this.bossPhase();
     this.followUps = phase >= 2 ? phase - 1 : 0;
@@ -570,6 +627,63 @@ export class Enemy implements Unit {
       });
     }
     sfx(src.queue, "shoot", 0.8, 0.7);
+  }
+
+  /** phase 1 mirrors the hero's own weapon; phases 2-3 trade the melee for ghost volleys */
+  private kingAttack(src: Sim): void {
+    const e = this.def;
+    if (this.kingPhase === 1) {
+      const cb = WEAPONS[src.player.weapon].combos[0];
+      this.swing = createSwing(src, {
+        side: "enemy",
+        kind: "king",
+        combo: 1,
+        dir: this.telegraphDir,
+        ox: this.x,
+        oy: this.y - e.BODY_H * 0.5,
+        reach: cb.reach,
+        deg: cb.deg,
+        dmg: e.DMG * this.dmgScale,
+        knockback: 0,
+        fd: { startup: 1, active: e.ACTIVE_TICKS, recovery: e.RECOVERY_TICKS },
+      });
+      sfx(src.queue, "slash_air", 0.7, 0.8);
+      return;
+    }
+    const n = this.kingPhase === 3 ? 8 : 1;
+    for (let i = 0; i < n; i++) {
+      const a = this.kingPhase === 3 ? (i / n) * Math.PI * 2 : this.telegraphDir + src.rng.range(-0.1, 0.1);
+      src.projectiles.push({
+        x: this.x,
+        y: this.y - e.BODY_H * 0.5,
+        vx: Math.cos(a) * e.SHOT_SPEED,
+        vy: Math.sin(a) * e.SHOT_SPEED,
+        dmg: e.SHOT_DMG * this.dmgScale,
+        ticksLeft: e.SHOT_LIFE_TICKS,
+        owner: "enemy",
+        kind: "ghost",
+      });
+    }
+    sfx(src.queue, "shoot", 0.8, 0.6);
+  }
+
+  /** a raging golem's slam spits three lava globs out at 120° */
+  private fireLava(src: Sim): void {
+    const e = this.def;
+    for (let i = 0; i < 3; i++) {
+      const a = this.telegraphDir + ((i - 1) * Math.PI * 2) / 3;
+      src.projectiles.push({
+        x: this.x,
+        y: this.y - e.BODY_H * 0.5,
+        vx: Math.cos(a) * e.SHOT_SPEED,
+        vy: Math.sin(a) * e.SHOT_SPEED,
+        dmg: e.SHOT_DMG * this.dmgScale,
+        ticksLeft: e.SHOT_LIFE_TICKS,
+        owner: "enemy",
+        kind: "lava",
+      });
+    }
+    sfx(src.queue, "aftershock_boom", 0.5, 1.2);
   }
 
   private summonMinions(src: Sim): void {

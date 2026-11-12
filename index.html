@@ -29,48 +29,45 @@
           Crisp Combat &bull; Elemental Artifacts &bull; Fast Roguelike
         </div>
 
-        <div class="flex flex-col sm:flex-row gap-7 max-w-[720px] w-full items-stretch justify-center mb-6">
-          <div
-            class="changelog-box flex-1 bg-[rgba(18,23,34,0.85)] border border-[#2b3952] rounded-md px-[18px] py-3.5 text-left shadow-[0_8px_24px_rgba(0,0,0,0.5),inset_0_0_12px_rgba(0,240,255,0.05)]"
-          >
-            <div
-              class="changelog-title text-[11px] font-bold text-[#ffd166] uppercase tracking-[0.1em] mb-2.5 pb-[5px] border-b border-[#233045] flex justify-between"
-            >
-              <span>Nhật ký cập nhật</span>
-              <span class="text-[#00f0ff]">v0.15.0</span>
-            </div>
-            <ul class="changelog-list list-none p-0 m-0 text-[11px] leading-[1.6] text-[#b4c4d9]">
-              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
-                <b>Hệ thống 5 Vũ khí (Weapons):</b> Kiếm nhật (Katana), Đại đao (Greatsword), Song đao (Dagger), Thương (Spear), Roi (Whip) với tầm đánh, góc quét và sát thương độc đáo.
-              </li>
-              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
-                <b>Hệ thống Chặt chém Sắc nét:</b> Vệt chém Razor Crescent đa tầng phát sáng Neon, vết cắt Slice Mark trên thân quái khi chém trúng.
-              </li>
-              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
-                <b>Giao diện Thẻ Cổ vật Cột dọc:</b> Xếp 3 cột thẻ bài chuẩn Roguelike, bổ sung hiệu ứng tia sét chạy viền (kiếm điện), lửa bốc (lửa), tinh thể tuyết (băng).
-              </li>
-              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
-                <b>Nâng cấp Pixel Art:</b> Nhân vật có kính ngắm Visor phát sáng, tư thế nhào chém (attack lean), mắt quái vật phát sáng trong bóng tối.
-              </li>
-              <li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">
-                <b>Không gian Dungeon:</b> Gạch sàn vát cạnh nứt vỡ, tường 3 lớp chiều sâu và hiệu ứng ánh sáng cục bộ (ambient vignette).
-              </li>
-            </ul>
-          </div>
+        <button
+          id="btn-changelog"
+          type="button"
+          aria-label="Nhật ký cập nhật"
+          class="absolute top-[max(12px,env(safe-area-inset-top))] right-[max(12px,env(safe-area-inset-right))] z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#2b3952] bg-[rgba(18,23,34,0.85)] text-[11px] font-bold uppercase tracking-[0.1em] text-[#ffd166] cursor-pointer touch-manipulation shadow-[0_4px_14px_rgba(0,0,0,0.4)] hover:border-[#00f0ff] hover:text-[#00f0ff]"
+        >
+          <span aria-hidden="true">✦</span> Có gì mới
+        </button>
 
-          <div class="start-action flex flex-col items-center justify-center gap-3 min-w-[200px]">
-            <button
-              id="btn-start"
-              type="button"
-              class="py-4 px-9 border-2 border-[#00f0ff] bg-[rgba(0,240,255,0.12)] text-white font-bold text-[clamp(20px,4vw,28px)] leading-none tracking-[0.2em] cursor-pointer touch-manipulation rounded shadow-[0_0_25px_rgba(0,240,255,0.4),inset_0_0_15px_rgba(0,240,255,0.2)] transition-all duration-150 ease-out hover:bg-[#00f0ff] hover:text-[#05070b] hover:shadow-[0_0_35px_#00f0ff] hover:-translate-y-0.5 focus-visible:bg-[#00f0ff] focus-visible:text-[#05070b] focus-visible:shadow-[0_0_35px_#00f0ff] focus-visible:-translate-y-0.5 active:scale-96"
-            >
-              START
-            </button>
-            <div class="quick-controls text-[10px] text-[#6b7d99] leading-[1.4] text-center">
-              <u class="no-underline text-[#d7dbe4]">WASD</u> Di chuyển &bull; <u class="no-underline text-[#d7dbe4]">Chuột / J</u> Chém<br />
-              <u class="no-underline text-[#d7dbe4]">Space / Shift</u> Dash lướt né &bull;
-              <u class="no-underline text-[#d7dbe4]">E / Q</u> Kỹ năng
+        <div class="start-action flex flex-col items-center justify-center gap-3 mb-6">
+          <button
+            id="btn-start"
+            type="button"
+            class="py-4 px-9 border-2 border-[#00f0ff] bg-[rgba(0,240,255,0.12)] text-white font-bold text-[clamp(20px,4vw,28px)] leading-none tracking-[0.2em] cursor-pointer touch-manipulation rounded shadow-[0_0_25px_rgba(0,240,255,0.4),inset_0_0_15px_rgba(0,240,255,0.2)] transition-all duration-150 ease-out hover:bg-[#00f0ff] hover:text-[#05070b] hover:shadow-[0_0_35px_#00f0ff] hover:-translate-y-0.5 focus-visible:bg-[#00f0ff] focus-visible:text-[#05070b] focus-visible:shadow-[0_0_35px_#00f0ff] focus-visible:-translate-y-0.5 active:scale-96"
+          >
+            START
+          </button>
+          <div class="quick-controls text-[10px] text-[#6b7d99] leading-[1.4] text-center">
+            <u class="no-underline text-[#d7dbe4]">WASD</u> Di chuyển &bull; <u class="no-underline text-[#d7dbe4]">Chuột / J</u> Chém<br />
+            <u class="no-underline text-[#d7dbe4]">Space / Shift</u> Dash lướt né &bull;
+            <u class="no-underline text-[#d7dbe4]">E / Q</u> Kỹ năng
+          </div>
+        </div>
+
+        <!-- Popup Nhật ký cập nhật (ẩn tới khi mở) -->
+        <div
+          id="changelog-modal"
+          hidden
+          role="dialog"
+          aria-modal="true"
+          aria-label="Nhật ký cập nhật"
+          class="absolute inset-0 z-30 grid place-items-center bg-[rgba(4,6,10,0.72)] p-6 [&[hidden]]:hidden"
+        >
+          <div class="changelog-panel w-full max-w-[560px] max-h-[70vh] flex flex-col bg-[rgba(18,23,34,0.96)] border border-[#2b3952] rounded-md shadow-[0_8px_24px_rgba(0,0,0,0.5),inset_0_0_12px_rgba(0,240,255,0.05)]">
+            <div class="flex items-center justify-between px-[18px] py-3 border-b border-[#233045]">
+              <span class="text-[12px] font-bold text-[#ffd166] uppercase tracking-[0.1em]">Nhật ký cập nhật</span>
+              <button id="changelog-close" type="button" aria-label="Đóng" class="text-[#7fd1ff] hover:text-[#00f0ff] text-[20px] leading-none cursor-pointer touch-manipulation px-1">&times;</button>
             </div>
+            <div id="changelog-body" class="overflow-y-auto px-[18px] py-3.5 text-[11px] leading-[1.6] text-[#b4c4d9]"></div>
           </div>
         </div>
 
@@ -78,7 +75,7 @@
           id="version"
           class="absolute right-[max(12px,env(safe-area-inset-right))] bottom-[max(10px,env(safe-area-inset-bottom))] text-[var(--dim)] text-[11px]"
         >
-          v0.14.1
+          v0.17.0
         </span>
       </div>
 

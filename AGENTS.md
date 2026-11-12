@@ -51,9 +51,13 @@ framework, canvas 2D. Node runs `.ts` directly (native type stripping, no build 
 
 ## Verification (prove it, then report)
 - Type: `npm run typecheck`.
-- Logic: `npm test` = `node --test tests/combat-regressions.test.ts` (node:test) **then**
-  `node tests/laws.test.ts` (custom `ok()` runner, self-sets `exitCode`). Two runners on purpose.
-- `npm run test:combat` / `npm run test:laws` for targeted runs — prefer the narrow one.
+- Logic: `npm test` = `node --test tests/combat-regressions.test.ts tests/invariants.test.ts`
+  (node:test + `node:assert/strict`) **then** `node tests/laws.test.ts` (custom `ok()` runner,
+  self-sets `exitCode`). Three runners on purpose. `invariants.test.ts` holds the determinism
+  oracle (seeded fingerprint must match `GOLDEN_HASH`) + property/fuzz (archetypes stay finite,
+  hp/projectile counts under `CONFIG.LAWS` ceilings) — all in-repo, no external assertion DSL.
+- `npm run test:combat` / `test:laws` / `test:inv` for targeted runs — prefer the narrow one.
+  Tune fuzz with env: `INV_TRIALS` / `INV_BUDGET`; re-baseline the oracle with `RECORD_GOLDEN=1`.
 - Add a laws/regression assertion for any feel or combat rule you change; it should fail without
   the fix.
 - Visual/feel: `tools/capture-*.mjs` take headless CDP screenshots at fixed frames off `npm run dev`

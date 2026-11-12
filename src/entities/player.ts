@@ -1,5 +1,5 @@
 import { CONFIG } from "../config.ts";
-import { angleLerp, dist, normAngle } from "../mathx.ts";
+import { angleLerp, clamp, dist, normAngle } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
 import { createSwing, hitFeedback, playerSwingInit, stepSwing } from "../systems/combat.ts";
 import { CHARACTERS, COMBO_HITS, COMBO_WINDOW, executeSkill, type CharacterId } from "../systems/characters.ts";
@@ -230,7 +230,9 @@ export class Player implements Unit {
       this.startDash(intent, src);
     } else if (this.swing !== null) {
       const done = stepSwing(this.swing);
-      if (this.queuedAttackTicks > 0 && this.canChain()) this.startSwing(src, this.combo + 1, intent, this.swing.dir);
+      const sw = this.swing;
+      if (sw.kind === "shot" && sw.phase === "active" && sw.ticksLeft === sw.fd.active) this.fireShot(src, sw);
+      if (this.queuedAttackTicks > 0 && this.canChain()) this.startSwing(src, this.combo + 1, intent, sw.dir);
       else if (done) {
         this.swing = null;
         this.combo = 0;
@@ -278,6 +280,7 @@ export class Player implements Unit {
     this.queuedAttackTicks = 0;
     this.autoTargetId = aim.targetId;
     this.setState(PLAYER_STATE.ATTACK);
+    if (init.kind === "shot") return; // mage cast: no melee arc, the bolt fires on the active tick
     sfx(src.queue, "slash_air", 0.7, combo === 2 ? 1.12 : 1);
     const fd = CONFIG.ATTACK.COMBOS[combo - 1];
     src.queue.push({
@@ -293,6 +296,32 @@ export class Player implements Unit {
     if (combo === 2 && src.artifacts.has("twin_blades")) {
       src.queue.push({ t: "slashArc", x: init.ox, y: init.oy, dir: normAngle(aim.dir + Math.PI), reach: init.reach, deg: init.deg, combo, ticks: fd.startup + fd.active });
     }
+  }
+
+  /** the mage's swing resolves as a ranged volley; the weapon's arc and reach shape pellet count and range */
+  private fireShot(src: Sim, sw: Swing): void {
+    const M = CONFIG.MAGE_SHOT;
+    const cb = WEAPONS[this.weapon].combos[sw.combo - 1];
+    const ticksLeft = Math.max(1, Math.round(((cb.reach * M.RANGE_SCALE) / M.SPEED) * 60));
+    const pellets = clamp(Math.round(cb.deg / M.DEG_PER_PELLET), 1, M.MAX_PELLETS);
+    const step = (M.SPREAD_DEG * Math.PI) / 180;
+    const dmg = sw.dmg * M.PELLET_DMG_SCALE;
+    for (let i = 0; i < pellets; i++) {
+      const dir = normAngle(sw.dir + (i - (pellets - 1) / 2) * step);
+      src.projectiles.push({
+        x: this.x,
+        y: this.y - M.Y_OFFSET,
+        vx: Math.cos(dir) * M.SPEED,
+        vy: Math.sin(dir) * M.SPEED,
+        dmg,
+        ticksLeft,
+        owner: "player",
+        status: sw.status,
+        kind: "bolt",
+      });
+    }
+    src.particles.burstSpark(this.x + Math.cos(sw.dir) * 6, this.y - M.Y_OFFSET + Math.sin(sw.dir) * 6, 4, src.rng);
+    sfx(src.queue, "shoot", 0.6, 1.15);
   }
 
   private startDash(intent: Intent, src: Sim): void {

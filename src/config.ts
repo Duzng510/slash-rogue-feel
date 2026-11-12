@@ -1,6 +1,6 @@
 export type FrameData = { startup: number; active: number; recovery: number };
 
-export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss" | "ranged" | "teleporter" | "healer" | "exploder" | "shielder" | "sniper" | "jumper" | "warden";
+export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss" | "ranged" | "teleporter" | "healer" | "exploder" | "shielder" | "sniper" | "jumper" | "warden" | "golem" | "king";
 
 const PALETTE = {
   VOID: "#05070b",
@@ -40,6 +40,12 @@ const PALETTE = {
   ENEMY_JUMPER_SHADE: "#3fa884",
   ENEMY_WARDEN: "#e0c341",
   ENEMY_WARDEN_SHADE: "#8a6a1a",
+  ENEMY_GOLEM: "#ff5a3c",
+  ENEMY_GOLEM_SHADE: "#8a2f1c",
+  ENEMY_GOLEM_RUNE: "#ffd166",
+  ENEMY_KING: "#b06fd6",
+  ENEMY_KING_SHADE: "#3a1252",
+  ENEMY_KING_CROWN: "#ffd166",
   PROJ: "#ffe08a",
   TELEGRAPH_FILL: "#ff3b3b",
   TELEGRAPH_EDGE: "#ff8a8a",
@@ -130,6 +136,10 @@ const ENEMY_BASE = {
   SNIPER: false,
   /** warden only: the laser pattern telegraphs longer than the other two (0 disables) */
   LASER_TELEGRAPH_TICKS: 0,
+  /** golem only: below this fraction of max hp it enters phase 2 (0 disables) */
+  PHASE2_FRACTION: 0,
+  /** king only: authored 3-phase finale that mirrors the player's weapon at phase 1 */
+  KING: false,
 
   /** splitter only */
   SPLIT_INTO: null as EnemyKind | null,
@@ -374,6 +384,61 @@ const ENEMY_OVERRIDES: Record<EnemyKind, Partial<typeof ENEMY_BASE>> = {
     HP_BAR: true,
     KILL_PITCH: 0.7,
   },
+  golem: {
+    HP: 30,
+    SPEED: 40,
+    ACCEL: 500,
+    BODY_W: 24,
+    BODY_H: 20,
+    HURT_W: 24,
+    HURT_H: 16,
+    TELEGRAPH_TICKS: 40,
+    ACTIVE_TICKS: 4,
+    RECOVERY_TICKS: 30,
+    REST_TICKS: 50,
+    ATTACK_REACH: 70,
+    ATTACK_ARC_DEG: 360,
+    RADIAL: true,
+    DMG: 2,
+    CHASE_ACQUIRE: 400,
+    SEPARATION: 0,
+    /** phase 2 slam flings three lava globs outward */
+    SHOT_SPEED: 95,
+    SHOT_DMG: 1,
+    SHOT_LIFE_TICKS: 90,
+    SPRITE_KEY: "enemy_golem",
+    BODY_COLOR: PALETTE.ENEMY_GOLEM,
+    HP_BAR: true,
+    KILL_PITCH: 0.5,
+    PHASE2_FRACTION: 0.5,
+  },
+  king: {
+    HP: 60,
+    SPEED: 50,
+    ACCEL: 700,
+    BODY_W: 20,
+    BODY_H: 18,
+    HURT_W: 20,
+    HURT_H: 14,
+    TELEGRAPH_TICKS: 20,
+    ACTIVE_TICKS: 3,
+    RECOVERY_TICKS: 14,
+    REST_TICKS: 30,
+    ATTACK_REACH: 50,
+    ATTACK_ARC_DEG: 360,
+    DMG: 1,
+    CHASE_ACQUIRE: 400,
+    SEPARATION: 0,
+    /** phase 2/3 fire ghost volleys instead of the phase 1 melee mirror */
+    SHOT_SPEED: 100,
+    SHOT_DMG: 1,
+    SHOT_LIFE_TICKS: 160,
+    SPRITE_KEY: "enemy_king",
+    BODY_COLOR: PALETTE.ENEMY_KING,
+    HP_BAR: true,
+    KILL_PITCH: 0.4,
+    KING: true,
+  },
 };
 
 const defCache = new Map<EnemyKind, EnemyDef>();
@@ -389,6 +454,14 @@ export function enemyDef(kind: EnemyKind): EnemyDef {
 
 export const ENEMY_KINDS = Object.keys(ENEMY_OVERRIDES) as EnemyKind[];
 
+/** authored encounters that spawn from their room marker instead of the biome pool */
+export const SCRIPTED_ENEMIES: EnemyKind[] = ["boss", "warden", "golem", "king"];
+
+/** a scripted encounter bypasses the biome pool, the elite roll and the pool-selection law */
+export function isScripted(kind: EnemyKind): boolean {
+  return SCRIPTED_ENEMIES.includes(kind);
+}
+
 export const CONFIG = {
   TIME: {
     TICK_HZ: 60,
@@ -403,7 +476,7 @@ export const CONFIG = {
   },
 
   ROOMS: {
-    WAVES: [3, 4, 6, 8, 5, 10, 6, 12, 0, 8, 0],
+    WAVES: [3, 4, 6, 8, 5, 10, 6, 4, 0, 8, 0],
     END_DELAY: 40,
     TRAP_DMG: 1,
   },
@@ -458,6 +531,17 @@ export const CONFIG = {
     COMBO2_REACH_SCALE: 1.25,
     COMBO2_ARC_SCALE: 1.2,
     KNOCKBACK: 95,
+  },
+
+  /** mage normal attack: the equipped weapon's arc/reach are reinterpreted as a ranged volley */
+  MAGE_SHOT: {
+    SPEED: 240, // bolt travel, px/s
+    RANGE_SCALE: 4, // weapon reach -> bolt range, px
+    DEG_PER_PELLET: 60, // weapon arc deg / this = number of bolts
+    MAX_PELLETS: 3,
+    SPREAD_DEG: 7, // angular step between adjacent bolts, centered on the aim
+    PELLET_DMG_SCALE: 0.75, // per-bolt damage relative to the swing's dmg
+    Y_OFFSET: 5, // spawn height above the player's feet
   },
 
   DASH: {
@@ -541,6 +625,11 @@ export const CONFIG = {
   LAWS: {
     MIN_TELEGRAPH_S: 0.3,
     MAX_CHARGER_ARC_DEG: 60,
+    /** ceilings asserted by the fuzz + determinism invariants; MAX_ENEMIES sits above the biggest authored wave */
+    MAX_ENEMIES: 80,
+    MAX_PROJECTILES: 160,
+    FUZZ_BUDGET: 240,
+    FUZZ_TRIALS: 80,
   },
 
   PALETTE,
