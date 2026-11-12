@@ -73,3 +73,12 @@ export function makeRng(seed: number): Rng {
     pick: <T>(xs: readonly T[]) => xs[Math.min(xs.length - 1, Math.floor(next() * xs.length))],
   };
 }
+
+/** Fisher-Yates in place using the caller's RNG draw; returns the same array. */
+export function shuffle<T>(arr: T[], next: () => number): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [arr[i], arr[j]] = [arr[j]!, arr[i]!];
+  }
+  return arr;
+}

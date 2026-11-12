@@ -67,6 +67,15 @@ const PALETTE = {
   DBG_HITBOX: "#ff5fb0",
   DBG_HURTBOX: "#5fffb0",
   DBG_ARC: "#ffd166",
+  /** status-element read colors — the single source shared by combat hit-feedback and enemy procs */
+  ELEMENT: {
+    burn: "#ff963f",
+    wet: "#58caff",
+    shock: "#ffe66b",
+    poison: "#8f63ae",
+    freeze: "#a8e8ff",
+    bleed: "#c2182b",
+  },
 };
 
 /** every archetype overrides only what makes it read and play differently */
@@ -148,6 +157,7 @@ const ENEMY_BASE = {
   KILL_PITCH: 1,
   /** hard ceiling on living enemies, enforced at spawn */
   MAX_ALIVE: 14,
+  ELITE_SPAWN_TICKS: 12,
 };
 
 export type EnemyDef = typeof ENEMY_BASE & { kind: EnemyKind };
@@ -514,8 +524,6 @@ export const CONFIG = {
     FLASH_TICKS: 2,
     HURT_KNOCKBACK: 130,
     HURT_TICKS: 10,
-    DEATH_TICKS: 40,
-    RESPAWN_FADE_TICKS: 36,
   },
 
   ATTACK: {
@@ -523,14 +531,8 @@ export const CONFIG = {
       { startup: 4, active: 3, recovery: 7 },
       { startup: 3, active: 3, recovery: 7 },
     ] as FrameData[],
-    CHAIN_CANCEL_WINDOW: 6,
-    ARC_DEG: 120,
     REACH: 24,
-    BAND: 14,
     DMG: 1,
-    COMBO2_REACH_SCALE: 1.25,
-    COMBO2_ARC_SCALE: 1.2,
-    KNOCKBACK: 95,
   },
 
   /** mage normal attack: the equipped weapon's arc/reach are reinterpreted as a ranged volley */
@@ -549,7 +551,6 @@ export const CONFIG = {
     SPEED: 330,
     IFRAME_TICKS: 6,
     COOLDOWN: 54,
-    GHOSTS: 4,
   },
 
   ENEMY: ENEMY_BASE,
@@ -587,6 +588,8 @@ export const CONFIG = {
     IMPACT_SATURATE: 0.45,
     /** ground blood decals per room; oldest is recycled when full */
     DECAL_CAP: 64,
+    /** iris-wipe room transition (visual-only): half close + half open */
+    ROOM_TRANSITION_TICKS: 36,
   },
 
   READABILITY: {
@@ -594,11 +597,58 @@ export const CONFIG = {
     DOWNSCALE_AT: 0.72,
     TIER3_OFF_AT: 0.9,
     VIGNETTE_MAX: 0.25,
-    DMG_NUMBER_BUDGET: 20,
     SLASH_ALPHA: 0.5,
     TELEGRAPH_FILL: 0.34,
     SHADOW_ALPHA: 0.35,
     IFRAME_ALPHA: 0.35,
+  },
+
+  /** renderer visual constants: light-punch radii, weather motes, floating-text cap, cine beats */
+  RENDER: {
+    LIGHT_PLAYER_R: 72,
+    LIGHT_ENEMY_R: 26,
+    LIGHT_PROJ_R: 36,
+    LIGHT_BEAM_R: 36,
+    LIGHT_BEAM_MID_R: 40,
+    LIGHT_SWING_SCALE: 1.35,
+    TORCH_LIGHT_R: 26,
+    /** torch flicker: sine rad per renderer-ms, glow-breath amplitude, and sprite toggle period (ms) */
+    TORCH_FLICKER: 0.01,
+    TORCH_PULSE: 0.15,
+    TORCH_FRAME_MS: 120,
+    WEATHER_COUNT: 48,
+    TEXT_CAP: 24,
+    /** cinematic letterbox beat length, in frames */
+    KING_PHASE_CINE: 60,
+    BOSS_INTRO_CINE: 120,
+  },
+
+  /** WebGL post chain (renderer ?renderer=gl). Strengths are multiplied by the matching
+   *  SLIDERS entry, so every effect is graduated, never an on/off toggle. */
+  BLOOM: {
+    /** luminance cut-off (0..1, sRGB) above which a pixel emits into the glow; ~0.78 == the pitch's "brighter than 200/255" */
+    THRESHOLD: 0.78,
+    KNEE: 0.12,
+    INTENSITY: 0.9,
+    /** gaussian radius as a fraction of the half-res bloom RT texel */
+    RADIUS: 1.35,
+  },
+  CRT: {
+    /** barrel warp strength (kept mild so the 16px grid stays legible) */
+    BARREL: 0.05,
+    SCANLINE: 0.1,
+    /** radial RGB-split in internal pixels at full slider */
+    ABERRATION: 0.5,
+    /** constant ambient rim darkening the GL composite adds on top of the hurt vignette */
+    AMBIENT_VIGNETTE: 0.22,
+  },
+  HAZE: {
+    /** heat-haze horizontal wobble: cycles/sec and amplitude in internal px at full slider */
+    SPEED: 1.8,
+    FREQ: 0.16,
+    AMP: 0.6,
+    /** how much of the ripple comes from animated value-noise vs the radial sine (0..1) */
+    NOISE: 0.6,
   },
 
   CAMERA: {
@@ -628,6 +678,9 @@ export const CONFIG = {
     hitStopScale: 1,
     dmgNumbers: 1,
     brightness: 1,
+    bloom: 0.8,
+    crt: 0.45,
+    ripple: 0.4,
   },
 
   LAWS: {

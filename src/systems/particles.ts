@@ -7,6 +7,10 @@ export const PARTICLE_KIND = {
   shard: "shard",
   dust: "dust",
   ghost: "ghost",
+  ember: "ember",
+  bolt: "bolt",
+  ice: "ice",
+  bubble: "bubble",
 } as const;
 
 export type ParticleKind = (typeof PARTICLE_KIND)[keyof typeof PARTICLE_KIND];
@@ -35,6 +39,10 @@ const SPECS: Record<ParticleKind, { tier: number; life: number; size: number; dr
   shard: { tier: 1, life: 0.5, size: 2, drag: 0.9, gravity: 90 },
   dust: { tier: 3, life: 0.26, size: 1, drag: 0.8, gravity: -6 },
   ghost: { tier: 3, life: 0.2, size: 1, drag: 1, gravity: 0 },
+  ember: { tier: 1, life: 0.4, size: 1, drag: 0.92, gravity: -26 },
+  bolt: { tier: 1, life: 0.15, size: 1, drag: 0.86, gravity: 0 },
+  ice: { tier: 1, life: 0.45, size: 1, drag: 0.9, gravity: 26 },
+  bubble: { tier: 1, life: 0.5, size: 1, drag: 0.94, gravity: -14 },
 };
 
 function makeSlot(): Slot {
@@ -48,6 +56,7 @@ export class ParticlePool {
   private slots: Slot[];
   private cursor = 0;
   private liveCount = 0;
+  private nonce = 0x1f2e3d4c;
   readonly cap: number;
 
   constructor(cap: number = CONFIG.READABILITY.PARTICLE_CAP) {
@@ -122,6 +131,58 @@ export class ParticlePool {
       const a = rng.range(0, Math.PI * 2);
       const sp = rng.range(90, 170);
       this.emit("spark", x, y, Math.cos(a) * sp, Math.sin(a) * sp, CONFIG.PALETTE.SPARK);
+    }
+  }
+
+  /**
+   * deterministic pseudo-random for element sprays: hashed from position + a pool
+   * nonce so landing element hits never consumes the sim rng (keeps the golden oracle intact)
+   */
+  private hashNext(x: number, y: number): number {
+    this.nonce = (this.nonce + 0x9e3779b9) >>> 0;
+    let h = ((Math.round(x) * 73856093) ^ (Math.round(y) * 19349663) ^ this.nonce) >>> 0;
+    h = (h * 1664525 + 1013904223) >>> 0;
+    return h / 4294967296;
+  }
+
+  /** burning embers: warm sparks that drift upward */
+  burstEmber(x: number, y: number, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const r = this.hashNext(x, y);
+      const r2 = this.hashNext(x + 3, y);
+      this.emit("ember", x, y, (r - 0.5) * 34, -30 - r2 * 55, r2 < 0.5 ? "#ff963f" : "#ffc35a", {
+        size: r < 0.35 ? 2 : 1, life: 0.3 + r * 0.25,
+      });
+    }
+  }
+
+  /** shock bolts: fast bright yellow sparks in all directions */
+  burstBolt(x: number, y: number, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const a = this.hashNext(x, y) * Math.PI * 2;
+      const sp = 80 + this.hashNext(x + 5, y) * 90;
+      this.emit("bolt", x, y, Math.cos(a) * sp, Math.sin(a) * sp, this.hashNext(x + 9, y) < 0.4 ? "#ffffff" : "#ffe66b");
+    }
+  }
+
+  /** ice crystals: cool shards that pop out and drop */
+  burstIce(x: number, y: number, count: number): void {
+    for (let i = 0; i < count; i++) {
+      const a = this.hashNext(x, y) * Math.PI * 2;
+      const sp = 22 + this.hashNext(x + 4, y) * 40;
+      this.emit("ice", x, y, Math.cos(a) * sp, Math.sin(a) * sp - 14, this.hashNext(x + 8, y) < 0.5 ? "#a8e8ff" : "#d8f0ff", {
+        size: this.hashNext(x + 2, y) < 0.3 ? 2 : 1,
+      });
+    }
+  }
+
+  /** poison bubbles: violet blobs that float up and pop */
+  burstBubble(x: number, y: number, count: number, color = "#8f63ae"): void {
+    for (let i = 0; i < count; i++) {
+      const r = this.hashNext(x, y);
+      this.emit("bubble", x + (r - 0.5) * 8, y - 2, (r - 0.5) * 18, -14 - this.hashNext(x + 6, y) * 26, r < 0.4 ? "#c99ae6" : color, {
+        size: r < 0.3 ? 2 : 1, life: 0.4 + r * 0.25,
+      });
     }
   }
 

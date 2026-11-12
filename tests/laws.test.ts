@@ -103,6 +103,15 @@ ok(
 ok("slash has startup, active and recovery phases", CONFIG.ATTACK.COMBOS.every((f) => f.startup > 0 && f.active > 0 && f.recovery > 0));
 ok("player is invulnerable long enough to escape after a hit", CONFIG.PLAYER.IFRAMES / CONFIG.TIME.TICK_HZ >= 0.4);
 ok("dash cooldown is shorter than its cost in risk", CONFIG.DASH.COOLDOWN / CONFIG.TIME.TICK_HZ <= 1.2);
+ok(
+  "post-effect feel sliders are graduated intensities in [0,1], not toggles",
+  [CONFIG.SLIDERS.bloom, CONFIG.SLIDERS.crt, CONFIG.SLIDERS.ripple].every((v) => v >= 0 && v <= 1),
+  `bloom ${CONFIG.SLIDERS.bloom} crt ${CONFIG.SLIDERS.crt} ripple ${CONFIG.SLIDERS.ripple}`
+);
+ok(
+  "bloom/crt/haze carry a positive base strength so any nonzero slider reads",
+  CONFIG.BLOOM.INTENSITY > 0 && CONFIG.CRT.BARREL > 0 && CONFIG.CRT.SCANLINE > 0 && CONFIG.HAZE.AMP > 0
+);
 
 heading("Hit registry");
 {
@@ -463,6 +472,8 @@ heading("Crowding cap");
   for (let i = 0; i < 40; i++) w.spawnEnemy(w.player.x + i, w.player.y, "chaser");
   ok("spawnEnemy refuses to exceed MAX_ALIVE", w.aliveEnemies() === CONFIG.ENEMY.MAX_ALIVE, `alive ${w.aliveEnemies()}`);
   ok("the cap still leaves room above the biggest authored wave", CONFIG.ENEMY.MAX_ALIVE > Math.max(...CONFIG.ROOMS.WAVES));
+  const elite = makeEnemy(w.player.x + 80, w.player.y, "chaser", true);
+  ok("elites spawn in their red appearance telegraph", elite.state === ENEMY_STATE.APPEAR);
 
   const w2 = sandbox();
   const parent = makeEnemy(w2.player.x + 40, w2.player.y, "splitter");
@@ -790,6 +801,14 @@ heading("Forgotten King (finale mega-boss)");
   const fieldedK = new World(CONFIG.SEED);
   fieldedK.loadRoom(kingRoom);
   ok("the finale always fields the king", fieldedK.enemies.some((e) => e.kind === "king"));
+  const intro = new World(CONFIG.SEED);
+  intro.loadRoom(kingRoom);
+  intro.queue.drain();
+  intro.tick(intent());
+  const introEvent = intro.queue.drain().find((ev) => ev.t === "bossIntro");
+  ok("boss intro announces the name and schedules a 60-tick freeze",
+    introEvent?.t === "bossIntro" && introEvent.name === "VUA LÃNG QUÊN" && intro.hitStopTicks === 59,
+    `event=${introEvent?.t ?? "none"} stop=${intro.hitStopTicks}`);
 
   // a hit landed during the phase-drop invulnerability costs the king nothing
   const ki = sandbox();

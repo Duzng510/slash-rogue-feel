@@ -9,6 +9,7 @@ import type { Slot } from "../systems/particles.ts";
 import type { Projectile } from "../sim/types.ts";
 import type { Camera } from "./camera.ts";
 import type { World } from "../world/world.ts";
+import { GLPipeline } from "./gl/pipeline.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -21,7 +22,7 @@ const BAYER4 = [
 
 type Arc = { x: number; y: number; dir: number; reach: number; deg: number; combo: number; left: number; total: number };
 type Slice = { x: number; y: number; dir: number; len: number; left: number; total: number };
-type FloatText = { x: number; y: number; text: string; color: string; left: number; total: number };
+type FloatText = { x: number; y: number; text: string; color: string; left: number; total: number; style: "normal" | "crit" | "heal" | "element" };
 
 export type DrawFlags = { boxes: boolean; fps: boolean; hitStop: boolean };
 
@@ -53,9 +54,16 @@ export class Renderer {
   private texts: FloatText[] = [];
   private flash = new Map<number, number>();
   private vignette = 0;
+  /** iris-wipe room transition: half close, half open, centred on the door point */
+  private transTicks = 0;
+  private transX = 0;
+  private transY = 0;
   /** the forgotten king's phase-drop cinematic: a white flash + centred label, ticking down from 60 */
   private kingCine = 0;
+  private kingCineTotal = 60;
   private kingCineLabel = "";
+  private bossCineX = 0;
+  private bossCineY = 0;
   /** kill-cam punch: zoom + desaturate while > 0, red full-screen flash on the first frame */
   private impactTicks = 0;
   /** drifting fog: baked at 160×90 then upscaled 2x pixelated */
@@ -66,6 +74,8 @@ export class Renderer {
   private weather: { x: number; y: number; v: number; phase: number }[] = [];
   private white: Record<string, HTMLCanvasElement> = {};
   private statusSprites: Record<string, HTMLCanvasElement[]> = {};
+  private shadowSprites: Record<string, HTMLCanvasElement> = {};
+  private eliteSprites: Record<string, HTMLCanvasElement> = {};
   private tileOf: Record<number, Sprite> = {};
   private biomeTileOf: Record<string, Record<number, Sprite>> = {};
   /** baked multi-frame clips, keyed by sprite key (players get idle + walk, enemies walk) */
@@ -87,6 +97,18 @@ export class Renderer {
 
   private lightCanvas: HTMLCanvasElement;
   private lightG: CanvasRenderingContext2D;
+  private frameCanvas: HTMLCanvasElement;
+  private frameG: CanvasRenderingContext2D;
+  private redCanvas: HTMLCanvasElement;
+  private redG: CanvasRenderingContext2D;
+  private blueCanvas: HTMLCanvasElement;
+  private blueG: CanvasRenderingContext2D;
+  private visualTime = 0;
+
+  /** WebGL2 migration mode (?renderer=gl): scene is drawn offscreen into `sceneCanvas`, then composited by `gl`. */
+  private glMode = false;
+  private sceneCanvas: HTMLCanvasElement | null = null;
+  private gl: GLPipeline | null = null;
 
   constructor(
     private readonly game: HTMLCanvasElement,
@@ -99,7 +121,19 @@ export class Renderer {
     const ih = CONFIG.WORLD.INTERNAL_H;
     game.width = iw;
     game.height = ih;
-    this.g = ctx2d(game);
+
+    // WebGL is the default path: the game canvas is handed to GL and every existing draw*
+    // helper runs unchanged into an offscreen 2D scene canvas, which the GL post chain
+    // (bloom/CRT/haze) uploads and composites. ?renderer=2d keeps the canvas-2D phao
+    // reachable as a fallback until the WebGL path is confirmed on real Android devices.
+    const rendererParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("renderer") : null;
+    this.glMode = rendererParam !== "2d";
+    if (this.glMode) {
+      this.sceneCanvas = document.createElement("canvas");
+      this.sceneCanvas.width = iw;
+      this.sceneCanvas.height = ih;
+    }
+    this.g = ctx2d(this.glMode ? (this.sceneCanvas as HTMLCanvasElement) : game);
     this.o = ctx2d(overlay);
     this.g.imageSmoothingEnabled = false;
     this.o.imageSmoothingEnabled = false;
@@ -122,12 +156,26 @@ export class Renderer {
     this.lightG = ctx2d(this.lightCanvas);
     this.lightG.imageSmoothingEnabled = true;
 
+    this.frameCanvas = document.createElement("canvas");
+    this.frameCanvas.width = iw;
+    this.frameCanvas.height = ih;
+    this.frameG = ctx2d(this.frameCanvas);
+    this.frameG.imageSmoothingEnabled = false;
+    this.redCanvas = document.createElement("canvas");
+    this.redCanvas.width = iw;
+    this.redCanvas.height = ih;
+    this.redG = ctx2d(this.redCanvas);
+    this.blueCanvas = document.createElement("canvas");
+    this.blueCanvas.width = iw;
+    this.blueCanvas.height = ih;
+    this.blueG = ctx2d(this.blueCanvas);
+
     this.fogCanvas = document.createElement("canvas");
     this.fogCanvas.width = 160;
     this.fogCanvas.height = 90;
     this.fogG = ctx2d(this.fogCanvas);
 
-    const weatherCount = 48;
+    const weatherCount = CONFIG.RENDER.WEATHER_COUNT;
     for (let i = 0; i < weatherCount; i++) {
       this.weather.push({
         x: Math.random() * iw,
@@ -138,13 +186,25 @@ export class Renderer {
     }
 
     this.white.player = tinted(sprites.player.c, P.FLASH);
-    if (sprites.player_swordsman) this.white.player_swordsman = tinted(sprites.player_swordsman.c, P.FLASH);
-    if (sprites.player_mage) this.white.player_mage = tinted(sprites.player_mage.c, P.FLASH);
-    if (sprites.player_tank) this.white.player_tank = tinted(sprites.player_tank.c, P.FLASH);
+    this.shadowSprites.player = tinted(sprites.player.c, P.VOID);
+    if (sprites.player_swordsman) {
+      this.white.player_swordsman = tinted(sprites.player_swordsman.c, P.FLASH);
+      this.shadowSprites.player_swordsman = tinted(sprites.player_swordsman.c, P.VOID);
+    }
+    if (sprites.player_mage) {
+      this.white.player_mage = tinted(sprites.player_mage.c, P.FLASH);
+      this.shadowSprites.player_mage = tinted(sprites.player_mage.c, P.VOID);
+    }
+    if (sprites.player_tank) {
+      this.white.player_tank = tinted(sprites.player_tank.c, P.FLASH);
+      this.shadowSprites.player_tank = tinted(sprites.player_tank.c, P.VOID);
+    }
     for (const key of Object.keys(sprites)) {
       if (key.startsWith("enemy")) {
         this.white[key] = tinted(sprites[key].c, P.FLASH);
-        this.statusSprites[key] = ["#ff963f", "#58caff", "#ffe66b"].map(color => tinted(sprites[key].c, color));
+        this.statusSprites[key] = [P.ELEMENT.burn, P.ELEMENT.wet, P.ELEMENT.shock].map(color => tinted(sprites[key].c, color));
+        this.shadowSprites[key] = tinted(sprites[key].c, P.VOID);
+        this.eliteSprites[key] = tinted(sprites[key].c, "#ffd166");
       }
     }
     this.tileOf[TILE.FLOOR] = sprites.floor;
@@ -162,6 +222,12 @@ export class Renderer {
         [TILE.ACCENT]: sprites[`accent_${id}`] ?? sprites.accent,
         [TILE.WALL]: sprites[`wall_${id}`] ?? sprites.wall,
       };
+    }
+
+    if (this.glMode) {
+      // acquiring WebGL2 on `game` is only safe here: in 2D mode `game` holds a 2D context,
+      // and the two contexts are mutually exclusive on one canvas.
+      this.gl = new GLPipeline(game, iw, ih, sprites, this.anims);
     }
   }
 
@@ -205,16 +271,37 @@ export class Renderer {
       else if (e.t === "hurtVignette") this.vignette = Math.min(CONFIG.READABILITY.VIGNETTE_MAX, e.strength);
       else if (e.t === "beam") this.beams.push({ x: e.x, y: e.y, dir: e.dir, len: e.len, left: 20, total: 20 });
       else if (e.t === "artifactText") {
-        if (this.texts.length >= 24) this.texts.shift();
-        this.texts.push({ x: e.x, y: e.y, text: e.text, color: e.color, left: 48, total: 48 });
+        if (this.texts.length >= CONFIG.RENDER.TEXT_CAP) this.texts.shift();
+        this.texts.push({ x: e.x, y: e.y, text: e.text, color: e.color, left: 48, total: 48, style: "normal" });
       }
       else if (e.t === "dmgNumber") {
-        if (this.texts.length >= 24) this.texts.shift();
-        this.texts.push({ x: e.x, y: e.y, text: String(Math.round(e.value)), color: "#ffffff", left: 36, total: 36 });
+        if (this.texts.length >= CONFIG.RENDER.TEXT_CAP) this.texts.shift();
+        const style = e.style ?? "normal";
+        this.texts.push({
+          x: e.x, y: e.y,
+          text: style === "heal" ? `+${Math.round(e.value)}` : String(Math.round(e.value)),
+          color: style === "crit" ? "#ffd166" : style === "heal" ? "#58ff8a" : e.color ?? "#ffffff",
+          left: style === "crit" ? 42 : 36, total: style === "crit" ? 42 : 36,
+          style,
+        });
+      }
+      else if (e.t === "roomTransition") {
+        this.transTicks = CONFIG.FEEL.ROOM_TRANSITION_TICKS;
+        this.transX = e.x;
+        this.transY = e.y;
       }
       else if (e.t === "kingPhase") {
-        this.kingCine = 60;
+        this.kingCine = CONFIG.RENDER.KING_PHASE_CINE;
+        this.kingCineTotal = CONFIG.RENDER.KING_PHASE_CINE;
         this.kingCineLabel = `GIAI ĐOẠN ${e.phase}`;
+      }
+      else if (e.t === "bossIntro") {
+        this.kingCine = CONFIG.RENDER.BOSS_INTRO_CINE;
+        this.kingCineTotal = CONFIG.RENDER.BOSS_INTRO_CINE;
+        this.kingCineLabel = e.name;
+        this.bossCineX = e.x;
+        this.bossCineY = e.y;
+        this.cam.focus(e.x, e.y, 90);
       }
       else if (e.t === "hitImpact") this.impactTicks = CONFIG.FEEL.IMPACT_TICKS;
     }
@@ -222,6 +309,7 @@ export class Renderer {
 
   private stepVisual(dtReal: number): void {
     const ticks = dtReal * CONFIG.TIME.TICK_HZ;
+    this.visualTime += dtReal;
     for (const a of this.arcs) {
       a.left -= ticks;
       // the swing just finished: leave a long faint cut mark hanging in the air
@@ -236,9 +324,16 @@ export class Renderer {
     this.beams = this.beams.filter((b) => b.left > 0);
     for (const ft of this.texts) {
       ft.left -= ticks;
-      ft.y -= ticks * 0.09;
+      // crits punch up faster; heals drift gently; plain numbers float at the base rate
+      ft.y -= ticks * (ft.style === "crit" ? 0.16 : ft.style === "heal" ? 0.12 : 0.09);
     }
     this.texts = this.texts.filter((ft) => ft.left > 0);
+    if (this.transTicks > 0) this.transTicks = Math.max(0, this.transTicks - ticks);
+    // low-HP pulse: the vignette breathes while at or below 30% health (sfx heartbeat lives in player tick)
+    const pl = this.world.player;
+    if (!pl.dead && pl.hp > 0 && pl.hp / pl.maxHp < 0.3) {
+      this.vignette = Math.max(this.vignette, 0.12 + 0.08 * Math.sin(pl.animTicks * 0.15));
+    }
     for (const [k, v] of this.flash) {
       const n = v - ticks;
       if (n <= 0) this.flash.delete(k);
@@ -274,6 +369,7 @@ export class Renderer {
     }
 
     this.drawTiles(g, ox, oy);
+    this.drawBossIntroCracks(g, ox, oy);
     this.drawDecals(g, ox, oy);
     this.drawTorches(g, ox, oy, false);
     for (const trail of w.fireTrails) for (const p of trail.points) {
@@ -290,31 +386,33 @@ export class Renderer {
     this.drawShadows(g, ox, oy);
     this.drawSortedWorld(g, ox, oy);
 
-    // --- Glow Bloom Pass ---
-    const hw = Math.floor(iw / 2);
-    const hh = Math.floor(ih / 2);
-    const gg = this.glowG;
-    gg.clearRect(0, 0, iw, ih);
+    // --- Glow Bloom Pass (canvas 2D only; in GL mode the bloom post chain replaces it) ---
+    if (!this.glMode) {
+      const hw = Math.floor(iw / 2);
+      const hh = Math.floor(ih / 2);
+      const gg = this.glowG;
+      gg.clearRect(0, 0, iw, ih);
 
-    // Render bright FX onto isolated glow canvas
-    this.drawArcs(gg, ox, oy, true);
-    this.drawSlices(gg, ox, oy, true);
-    this.drawBeams(gg, ox, oy, true);
-    this.drawProjectileTrails(gg, ox, oy, true);
-    this.drawProjectiles(gg, ox, oy, true);
-    this.drawTelegraphs(gg, ox, oy, true);
-    this.drawTorches(gg, ox, oy, true);
-    // Fake gaussian blur via downscale -> upscale
-    const hg = this.glowHalfG;
-    hg.clearRect(0, 0, hw, hh);
-    hg.drawImage(this.glowCanvas, 0, 0, hw, hh);
+      // Render bright FX onto isolated glow canvas
+      this.drawArcs(gg, ox, oy, true);
+      this.drawSlices(gg, ox, oy, true);
+      this.drawBeams(gg, ox, oy, true);
+      this.drawProjectileTrails(gg, ox, oy, true);
+      this.drawProjectiles(gg, ox, oy, true);
+      this.drawTelegraphs(gg, ox, oy, true);
+      this.drawTorches(gg, ox, oy, true);
+      // Fake gaussian blur via downscale -> upscale
+      const hg = this.glowHalfG;
+      hg.clearRect(0, 0, hw, hh);
+      hg.drawImage(this.glowCanvas, 0, 0, hw, hh);
 
-    // Composite bloom softly with additive blend
-    g.save();
-    g.globalCompositeOperation = "lighter";
-    g.globalAlpha = 0.85;
-    g.drawImage(this.glowHalf, 0, 0, iw, ih);
-    g.restore();
+      // Composite bloom softly with additive blend
+      g.save();
+      g.globalCompositeOperation = "lighter";
+      g.globalAlpha = 0.85;
+      g.drawImage(this.glowHalf, 0, 0, iw, ih);
+      g.restore();
+    }
 
     // Sharp pixel-crisp foreground layer on main canvas
     this.drawArcs(g, ox, oy, false);
@@ -328,6 +426,12 @@ export class Renderer {
     this.drawAmbient(g, ox, oy);
     this.drawFog(g, dtReal);
     this.drawLighting(g, ox, oy);
+    g.save();
+    g.globalCompositeOperation = "color";
+    g.globalAlpha = 0.15;
+    g.fillStyle = w.currentBiome.palette.grade;
+    g.fillRect(0, 0, iw, ih);
+    g.restore();
 
     g.restore();
     g.filter = "none";
@@ -338,7 +442,133 @@ export class Renderer {
       g.globalAlpha = 1;
     }
 
-    this.drawVignette(g, flags);
+    this.drawTransition(g);
+    this.drawVignette(g, flags, this.glMode);
+    this.applyBiomeDistortion(g, iw, ih);
+
+    if (this.gl && this.sceneCanvas) {
+      // GL owns bloom + vignette now; the dynamic hurt pulse rides on uHurt (red push),
+      // while the baseline ambient rim comes from CONFIG.CRT.AMBIENT_VIGNETTE in the shader.
+      this.gl.presentScene(this.sceneCanvas, {
+        hurt: this.vignette,
+        vignette: 0,
+        brightness: CONFIG.SLIDERS.brightness,
+        bloom: CONFIG.SLIDERS.bloom,
+        crt: CONFIG.SLIDERS.crt,
+        ripple: CONFIG.SLIDERS.ripple,
+        time: this.visualTime,
+      });
+    }
+  }
+
+  private drawBossIntroCracks(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.kingCine <= 0 || this.kingCineTotal !== 120) return;
+    const progress = 1 - this.kingCine / this.kingCineTotal;
+    const radius = Math.floor(progress * 28);
+    const cx = Math.round(this.bossCineX - ox);
+    const cy = Math.round(this.bossCineY - oy);
+    g.save();
+    g.globalAlpha = Math.min(0.7, (1 - progress) * 0.8);
+    for (let ray = 0; ray < 8; ray++) {
+      const angle = ray * Math.PI / 4;
+      for (let distance = 4; distance < radius; distance += 3) {
+        const wobble = Math.round(Math.sin(distance * 0.7 + ray) * 1.5);
+        const x = Math.round(cx + Math.cos(angle) * distance + wobble);
+        const y = Math.round(cy + Math.sin(angle) * distance);
+        this.ditherRect(g, x, y, 2, 1, "#ff6b45", 0.65);
+      }
+    }
+    g.restore();
+  }
+
+  private applyBiomeDistortion(g: CanvasRenderingContext2D, iw: number, ih: number): void {
+    const biome = this.world.currentBiome.id;
+    if (biome === "dungeon") return;
+    this.frameG.clearRect(0, 0, iw, ih);
+    // Snapshot the scene we just drew into `g`'s canvas. In GL mode `g` is the offscreen
+    // sceneCanvas and `this.game` is the composited GL output — reading this.game here would
+    // feed the post-processed frame back as the scene, discarding the world and compounding
+    // bloom each frame (black ghost on software GL, blown-out white on real GPUs).
+    this.frameG.drawImage(this.g.canvas, 0, 0);
+    g.clearRect(0, 0, iw, ih);
+
+    if (biome === "forge") {
+      g.fillStyle = this.world.currentBiome.palette.outside;
+      g.fillRect(0, 0, iw, ih);
+      for (let y = 0; y < ih; y += 2) {
+        const h = Math.min(2, ih - y);
+        const offset = Math.round(Math.sin(y * 0.3 + this.visualTime * 2.2) * 1.5);
+        if (offset > 0) {
+          g.drawImage(this.frameCanvas, 0, y, iw - offset, h, offset, y, iw - offset, h);
+          g.drawImage(this.frameCanvas, 0, y, 1, h, 0, y, offset, h);
+        } else if (offset < 0) {
+          const shift = -offset;
+          g.drawImage(this.frameCanvas, shift, y, iw - shift, h, 0, y, iw - shift, h);
+          g.drawImage(this.frameCanvas, iw - 1, y, 1, h, iw - shift, y, shift, h);
+        } else g.drawImage(this.frameCanvas, 0, y, iw, h, 0, y, iw, h);
+      }
+      return;
+    }
+
+    g.drawImage(this.frameCanvas, 0, 0);
+    if (biome === "caverns") {
+      const edge = 4;
+      g.save();
+      g.globalAlpha = 0.3;
+      for (const [x, y, dx, dy, w, h] of [
+        [0, 0, -1, 0, edge, ih],
+        [iw - edge, 0, 1, 0, edge, ih],
+        [0, 0, 0, -1, iw, edge],
+        [0, ih - edge, 0, 1, iw, edge],
+      ]) {
+        g.save();
+        g.beginPath();
+        g.rect(x, y, w, h);
+        g.clip();
+        g.drawImage(this.frameCanvas, dx, dy);
+        g.restore();
+      }
+      g.restore();
+      return;
+    }
+
+    this.redG.clearRect(0, 0, iw, ih);
+    this.redG.drawImage(this.frameCanvas, 0, 0);
+    this.redG.globalCompositeOperation = "source-atop";
+    this.redG.fillStyle = "#ff0000";
+    this.redG.fillRect(0, 0, iw, ih);
+    this.redG.globalCompositeOperation = "source-over";
+    this.blueG.clearRect(0, 0, iw, ih);
+    this.blueG.drawImage(this.frameCanvas, 0, 0);
+    this.blueG.globalCompositeOperation = "source-atop";
+    this.blueG.fillStyle = "#0000ff";
+    this.blueG.fillRect(0, 0, iw, ih);
+    this.blueG.globalCompositeOperation = "source-over";
+    g.save();
+    g.globalCompositeOperation = "lighter";
+    g.globalAlpha = 0.2;
+    g.drawImage(this.redCanvas, -1, 0);
+    g.drawImage(this.blueCanvas, 1, 0);
+    g.restore();
+  }
+
+  /** iris wipe: black closes over the door point, then opens onto the new room */
+  private drawTransition(g: CanvasRenderingContext2D): void {
+    if (this.transTicks <= 0) return;
+    const total = CONFIG.FEEL.ROOM_TRANSITION_TICKS;
+    const p = 1 - this.transTicks / total;
+    const iw = CONFIG.WORLD.INTERNAL_W;
+    const ih = CONFIG.WORLD.INTERNAL_H;
+    const cx = Math.round(Math.max(10, Math.min(iw - 10, this.transX - this.origin.x)));
+    const cy = Math.round(Math.max(10, Math.min(ih - 10, this.transY - this.origin.y)));
+    // close over the first half, open through the second
+    const r = Math.max(6, 200 * Math.abs(p * 2 - 1));
+    g.globalAlpha = 1;
+    g.fillStyle = P.VOID;
+    g.beginPath();
+    g.rect(0, 0, iw, ih);
+    g.arc(cx, cy, r, 0, Math.PI * 2, true);
+    g.fill("evenodd");
   }
 
   /** permanent blood stains under everything alive; drawn between tiles and telegraphs */
@@ -410,41 +640,41 @@ export class Renderer {
 
     // player aura: mở rộng bán kính và tăng cường độ sáng
     const pl = this.world.player;
-    punch(pl.x - ox, pl.y - 8 - oy, 72, 1);
+    punch(pl.x - ox, pl.y - 8 - oy, CONFIG.RENDER.LIGHT_PLAYER_R, 1);
 
     // enemy auras nhẹ để quái không bị chìm hoàn toàn vào bóng tối
     for (const en of this.world.enemies) {
       if (!en.dead && en.state !== ENEMY_STATE.VANISH) {
-        punch(en.x - ox, en.y - en.bodyH * 0.5 - oy, 26, 0.45);
+        punch(en.x - ox, en.y - en.bodyH * 0.5 - oy, CONFIG.RENDER.LIGHT_ENEMY_R, 0.45);
       }
     }
 
     // projectile lights: sáng rộng hơn
     for (const p of this.world.projectiles) {
-      punch(p.x - ox, p.y - oy, 36, 0.85);
+      punch(p.x - ox, p.y - oy, CONFIG.RENDER.LIGHT_PROJ_R, 0.85);
     }
 
     // torch lights: flicker radius ±15%, slow enough to read as fire not strobe
-    const now = performance.now();
+    const now = this.visualTime * 1000;
     for (const t of this.world.room.torches) {
-      const r = 26 * (1 + 0.15 * Math.sin(now * 0.01 + t.phase));
+      const r = CONFIG.RENDER.TORCH_LIGHT_R * (1 + CONFIG.RENDER.TORCH_PULSE * Math.sin(now * CONFIG.RENDER.TORCH_FLICKER + t.phase));
       punch(t.x - ox, t.y - 3 - oy, r, 0.85);
     }
 
     // swing lights: mở rộng tầm sáng của nhát chém
     for (const a of this.arcs) {
-      punch(a.x - ox, a.y - oy, a.reach * 1.35, 0.7);
+      punch(a.x - ox, a.y - oy, a.reach * CONFIG.RENDER.LIGHT_SWING_SCALE, 0.7);
     }
 
     // beam lights
     for (const b of this.beams) {
-      punch(b.x - ox, b.y - oy, 36, 0.75);
+      punch(b.x - ox, b.y - oy, CONFIG.RENDER.LIGHT_BEAM_R, 0.75);
       const bx = b.x + Math.cos(b.dir) * b.len * 0.5;
       const by = b.y + Math.sin(b.dir) * b.len * 0.5;
-      punch(bx - ox, by - oy, 40, 0.75);
+      punch(bx - ox, by - oy, CONFIG.RENDER.LIGHT_BEAM_MID_R, 0.75);
       const ex = b.x + Math.cos(b.dir) * b.len;
       const ey = b.y + Math.sin(b.dir) * b.len;
-      punch(ex - ox, ey - oy, 36, 0.75);
+      punch(ex - ox, ey - oy, CONFIG.RENDER.LIGHT_BEAM_R, 0.75);
     }
 
     g.save();
@@ -476,7 +706,7 @@ export class Renderer {
   private drawTorches(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     const torches = this.world.room.torches;
     if (torches.length === 0) return;
-    const now = performance.now();
+    const now = this.visualTime * 1000;
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
     g.globalCompositeOperation = "lighter";
@@ -484,11 +714,11 @@ export class Renderer {
       const x = Math.round(t.x - ox) - 2;
       const y = Math.round(t.y - oy) - 7;
       if (x < -8 || y < -12 || x > iw || y > ih) continue;
-      const frame = Math.floor(now / 120 + t.phase) % 2 === 0 ? this.sprites.torch : this.sprites.torch_flicker;
+      const frame = Math.floor(now / CONFIG.RENDER.TORCH_FRAME_MS + t.phase) % 2 === 0 ? this.sprites.torch : this.sprites.torch_flicker;
       if (frame === undefined) continue;
       if (glowOnly) {
         // bloom: a soft flame halo that breathes with the flicker
-        const pulse = 1 + 0.15 * Math.sin(now * 0.01 + t.phase);
+        const pulse = 1 + CONFIG.RENDER.TORCH_PULSE * Math.sin(now * CONFIG.RENDER.TORCH_FLICKER + t.phase);
         g.globalAlpha = 0.5;
         g.fillStyle = "#ff963f";
         g.fillRect(x - 2, y - 2, 9 * pulse, 10 * pulse);
@@ -531,7 +761,7 @@ export class Renderer {
   /** weather motes: snow (caverns), rising ash + embers (forge), drifting crystals + stars (void) */
   private drawWeather(g: CanvasRenderingContext2D): void {
     const biome = this.world.currentBiome;
-    const time = performance.now() * 0.001;
+    const time = this.visualTime;
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
     const drift = time * 14;
@@ -600,7 +830,7 @@ export class Renderer {
       g.fillRect(0, 0, iw, ih);
     }
 
-    const time = performance.now() * 0.001;
+    const time = this.visualTime;
     for (let i = 0; i < 12; i++) {
       let x = 0;
       let y = 0;
@@ -663,6 +893,23 @@ export class Renderer {
           g.drawImage(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - FACE_H - oy));
         }
       }
+
+      g.fillStyle = "#000000";
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          const tile = room.at(tx, ty);
+          if (tile !== TILE.WALL && tile !== TILE.DOOR && tile !== TILE.CRATE) continue;
+          const below = room.at(tx, ty + 1);
+          if (below === TILE.WALL || below === TILE.CRATE) continue;
+          const x = Math.round(tx * T - ox);
+          const y = Math.round((ty + 1) * T - oy);
+          g.globalAlpha = 0.22;
+          g.fillRect(x, y, T, 1);
+          g.globalAlpha = 0.1;
+          g.fillRect(x, y + 1, T, 1);
+        }
+      }
+      g.globalAlpha = 1;
     }
   }
 
@@ -868,6 +1115,112 @@ export class Renderer {
         g.lineDashOffset = -this.world.tickCount % 5;
       }
 
+      if (en.kind === "charger") {
+        // a fat thrust line with a chevron tip: read the shaft, step off it
+        const x1 = cx + Math.cos(en.telegraphDir) * e.ATTACK_REACH;
+        const y1 = cy + Math.sin(en.telegraphDir) * e.ATTACK_REACH;
+        g.lineCap = "butt";
+        if (glowOnly) {
+          g.globalAlpha = 0.5 + 0.5 * prog;
+          g.strokeStyle = P.TELEGRAPH_EDGE;
+          g.lineWidth = 6;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.lineTo(x1, y1);
+          g.stroke();
+        } else {
+          g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.55 + 0.45 * prog);
+          g.strokeStyle = P.TELEGRAPH_FILL;
+          g.lineWidth = 4;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.lineTo(x1, y1);
+          g.stroke();
+          g.globalAlpha = 0.55 + 0.45 * prog;
+          g.strokeStyle = P.TELEGRAPH_EDGE;
+          g.lineWidth = 2;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.lineTo(x1, y1);
+          g.stroke();
+          // chevron tip pointing down the shaft
+          const a = en.telegraphDir;
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(x1 - Math.cos(a - 0.7) * 5, y1 - Math.sin(a - 0.7) * 5);
+          g.lineTo(x1, y1);
+          g.lineTo(x1 - Math.cos(a + 0.7) * 5, y1 - Math.sin(a + 0.7) * 5);
+          g.stroke();
+        }
+        g.lineCap = "butt";
+        g.globalAlpha = 1;
+        continue;
+      }
+
+      if (en.kind === "sniper") {
+        // a hair-thin lane across the room with a pulsing target dot at the far end
+        const reach = Math.hypot(this.world.room.widthPx, this.world.room.heightPx);
+        const x1 = cx + Math.cos(en.telegraphDir) * reach;
+        const y1 = cy + Math.sin(en.telegraphDir) * reach;
+        if (glowOnly) {
+          g.globalAlpha = 0.4 + 0.6 * prog;
+          g.strokeStyle = P.TELEGRAPH_EDGE;
+          g.lineWidth = 4;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.lineTo(x1, y1);
+          g.stroke();
+        } else {
+          g.globalAlpha = 0.35 + 0.65 * prog;
+          g.strokeStyle = P.TELEGRAPH_EDGE;
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.lineTo(x1, y1);
+          g.stroke();
+          // target dot: where the shot will land, brightening as it locks
+          g.globalAlpha = 0.5 + 0.5 * prog;
+          g.fillStyle = P.TELEGRAPH_EDGE;
+          g.beginPath();
+          g.arc(x1, y1, 2 + prog * 1.5, 0, Math.PI * 2);
+          g.fill();
+        }
+        g.globalAlpha = 1;
+        continue;
+      }
+
+      if (en.kind === "exploder") {
+        // a swelling blast disc that flashes harder the closer it is to popping
+        if (glowOnly) {
+          g.globalAlpha = 0.35 + 0.65 * prog;
+          g.fillStyle = P.TELEGRAPH_EDGE;
+          g.beginPath();
+          g.arc(cx, cy, Math.max(1, e.ATTACK_REACH * prog), 0, Math.PI * 2);
+          g.fill();
+        } else {
+          g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.5 + 0.5 * prog * prog);
+          g.fillStyle = P.TELEGRAPH_FILL;
+          g.beginPath();
+          g.arc(cx, cy, Math.max(1, e.ATTACK_REACH * prog), 0, Math.PI * 2);
+          g.fill();
+          g.globalAlpha = 0.55 + 0.45 * prog;
+          g.strokeStyle = P.TELEGRAPH_EDGE;
+          g.beginPath();
+          g.arc(cx, cy, e.ATTACK_REACH, 0, Math.PI * 2);
+          g.stroke();
+          // final flash: an inner ring that blooms right before detonation
+          if (prog > 0.75) {
+            g.globalAlpha = (prog - 0.75) * 4 * 0.8;
+            g.strokeStyle = "#ffffff";
+            g.beginPath();
+            g.arc(cx, cy, e.ATTACK_REACH * prog * 0.7, 0, Math.PI * 2);
+            g.stroke();
+          }
+        }
+        g.globalAlpha = 1;
+        continue;
+      }
+
       if (e.RADIAL || (en.kind === "warden" && en.pattern !== "laser")) {
         /** the disc grows into a fixed rim: read the rim, that is the line you must cross */
         g.globalAlpha = CONFIG.READABILITY.TELEGRAPH_FILL * (0.55 + 0.45 * prog);
@@ -881,6 +1234,18 @@ export class Renderer {
         g.arc(cx, cy, e.ATTACK_REACH, 0, Math.PI * 2);
         g.stroke();
         if (!glowOnly) g.setLineDash([]);
+        // boss ring carries a countdown read at the centre (whole seconds remaining)
+        if (en.kind === "boss" && !glowOnly) {
+          g.globalAlpha = 0.9;
+          g.textAlign = "center";
+          g.textBaseline = "middle";
+          g.font = "bold 7px ui-monospace, monospace";
+          const secs = String(Math.ceil(en.telegraphTicksLeft / 60));
+          g.fillStyle = P.VOID;
+          g.fillText(secs, cx + 1, cy + 1);
+          g.fillStyle = "#ffe66b";
+          g.fillText(secs, cx, cy);
+        }
         g.globalAlpha = 1;
         continue;
       }
@@ -898,25 +1263,55 @@ export class Renderer {
       this.wedge(g, cx, cy, en.telegraphDir, reach, deg, 0.1);
       g.stroke();
       if (!glowOnly) g.setLineDash([]);
+      // warden laser: a bright core down the wedge centre so the sweep lane reads instantly
+      if (laser) {
+        const lx = cx + Math.cos(en.telegraphDir) * reach;
+        const ly = cy + Math.sin(en.telegraphDir) * reach;
+        if (glowOnly) {
+          g.globalAlpha = 0.4 + 0.6 * prog;
+          g.strokeStyle = "#ff5a3c";
+          g.lineWidth = 6;
+        } else {
+          g.globalAlpha = 0.55 + 0.45 * prog;
+          g.strokeStyle = "#ff5a3c";
+          g.lineWidth = 2;
+        }
+        g.beginPath();
+        g.moveTo(cx, cy);
+        g.lineTo(lx, ly);
+        g.stroke();
+      }
       g.globalAlpha = 1;
     }
   }
 
   private drawShadows(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    const s = this.sprites.shadow;
     for (const en of this.world.enemies) {
       if (en.removed) continue;
       if (en.state === ENEMY_STATE.VANISH) continue;
       const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
-      const w = Math.max(s.w, Math.round(sp.w * 0.9));
-      const sx = Math.round(en.x - w / 2 - ox);
-      const sy = Math.round(en.y - s.ay - oy);
-      this.ditherRect(g, sx + 1, sy + 1, w - 2, s.h - 1, P.VOID, 0.45);
+      const sc = en.isElite ? 1.3 : 1;
+      const shadow = this.shadowSprites[en.def.SPRITE_KEY] ?? this.shadowSprites.enemy;
+      const x = Math.round(en.x - sp.ax * sc - ox);
+      const y = Math.round(en.y - sp.ay * sc - oy);
+      const w = Math.round(sp.w * sc);
+      const h = Math.round(sp.h * sc);
+      g.globalAlpha = 0.3;
+      g.drawImage(shadow, x, y + 1, w, h);
+      g.globalAlpha = 0.15;
+      g.drawImage(shadow, x, y + 2, w, h);
     }
     const pl = this.world.player;
-    const px = Math.round(pl.x - s.ax - ox);
-    const py = Math.round(pl.y - s.ay - oy);
-    this.ditherRect(g, px + 1, py + 1, s.w - 2, s.h - 1, P.VOID, 0.5);
+    const key = `player_${pl.character}`;
+    const sp = this.sprites[key] ?? this.sprites.player;
+    const shadow = this.shadowSprites[key] ?? this.shadowSprites.player;
+    const x = Math.round(pl.x - sp.ax - ox);
+    const y = Math.round(pl.y - sp.ay - oy);
+    g.globalAlpha = 0.3;
+    g.drawImage(shadow, x, y + 1, sp.w, sp.h);
+    g.globalAlpha = 0.15;
+    g.drawImage(shadow, x, y + 2, sp.w, sp.h);
+    g.globalAlpha = 1;
   }
 
   /** depth sort: enemies, player, projectiles and particles in one y-sorted draw list.
@@ -950,14 +1345,39 @@ export class Renderer {
     const white = this.white[en.def.SPRITE_KEY] ?? this.white.enemy;
     const sc = en.isElite ? 1.3 : 1;
 
-    // --- multi-frame walk + right-facing mirror ---
-    const set = this.anims[en.def.SPRITE_KEY] ?? this.anims.enemy;
+    // --- multi-frame anim + state clips, right-facing mirror ---
+    const key = en.def.SPRITE_KEY;
+    let set = this.anims[key] ?? this.anims.enemy;
+    let phaseFrame: number | null = null;
+    if (en.state === ENEMY_STATE.TELEGRAPH) {
+      const windup = this.anims[`${key}_attack`];
+      if (windup) { set = windup; phaseFrame = 0; }
+    } else if (en.state === ENEMY_STATE.ATTACK && en.swing !== null) {
+      const atk = this.anims[`${key}_attack`];
+      if (atk) { set = atk; phaseFrame = en.swing.phase === "active" ? 1 : 2; }
+    } else if (en.state === ENEMY_STATE.APPEAR) {
+      const spawn = this.anims[`${key}_spawn`];
+      if (spawn) set = spawn;
+    }
     let sp = baseSprite;
     if (set) {
-      const fi = Math.floor(en.animTicks / set.tickDur) % set.frames.length;
+      const fi = phaseFrame !== null
+        ? Math.min(set.frames.length - 1, phaseFrame)
+        : en.state === ENEMY_STATE.APPEAR
+          ? Math.min(set.frames.length - 1, Math.floor(en.ticksInState / set.tickDur))
+          : Math.floor(en.animTicks / set.tickDur) % set.frames.length;
       sp = Math.cos(en.facing) > 0.15 ? set.mirrored[fi] : set.frames[fi];
     } else if (Math.cos(en.facing) > 0.15) {
       sp = this.mirrored(baseSprite, en.def.SPRITE_KEY);
+    }
+    // death clip: crumble frames advance as the corpse fades out
+    if (en.dead) {
+      const death = this.anims[`${key}_death`];
+      if (death) {
+        const total = en.def.CORPSE_TICKS;
+        const fi = Math.min(death.frames.length - 1, Math.floor((1 - en.corpseTicks / total) * death.frames.length));
+        sp = Math.cos(en.facing) > 0.15 ? death.mirrored[fi] : death.frames[fi];
+      }
     }
 
     // --- squash & stretch during the attack's active window ---
@@ -985,7 +1405,7 @@ export class Renderer {
     }
 
     if (en.state === ENEMY_STATE.VANISH) return;
-    const appearTicks = en.def.APPEAR_TICKS;
+    const appearTicks = en.isElite ? CONFIG.ENEMY.ELITE_SPAWN_TICKS : en.def.APPEAR_TICKS;
     const fade =
       en.state === ENEMY_STATE.APPEAR && appearTicks > 0
         ? 0.3 + 0.7 * Math.min(1, en.ticksInState / appearTicks)
@@ -1006,6 +1426,14 @@ export class Renderer {
         g.globalAlpha = 0.55 * fade;
         g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y, w, h);
         g.globalAlpha = 1;
+      }
+      if (en.isElite) {
+        const elite = this.eliteSprites[en.def.SPRITE_KEY];
+        if (elite !== undefined) {
+          g.globalAlpha = 0.22 * fade;
+          g.drawImage(elite, x, y, w, h);
+          g.globalAlpha = 1;
+        }
       }
     }
     g.restore();
@@ -1057,6 +1485,21 @@ export class Renderer {
       g.lineWidth = 1;
       g.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
       g.globalAlpha = 1;
+      const crownX = Math.round(en.x - ox - 1);
+      const crownY = y - 4;
+      g.fillStyle = "#ffd166";
+      g.fillRect(crownX, crownY + 1, 3, 2);
+      g.fillRect(crownX, crownY, 1, 1);
+      g.fillRect(crownX + 2, crownY, 1, 1);
+      if (en.state === ENEMY_STATE.APPEAR) {
+        g.globalAlpha = 0.45 + 0.35 * Math.sin(en.animTicks * 0.3);
+        g.strokeStyle = "#ff3b3b";
+        g.lineWidth = 1;
+        g.beginPath();
+        g.arc(Math.round(en.x - ox), Math.round(en.y - oy), 9 + (en.animTicks % 4), 0, Math.PI * 2);
+        g.stroke();
+        g.globalAlpha = 1;
+      }
     }
     if (en.def.SHIELD) {
       g.strokeStyle = "#d8f0ff";
@@ -1203,10 +1646,20 @@ export class Renderer {
     // --- multi-frame anim: idle-breath / walk cycle, mirrored when facing right ---
     const idle = this.anims[`${spriteKey}_idle`];
     const walk = this.anims[spriteKey];
-    const set = pl.state === PLAYER_STATE.IDLE ? (idle ?? walk) : (walk ?? idle);
+    // swing/hurt clips override the locomotion loop, framed by the swing phase
+    let set: SpriteSet | undefined;
+    let phaseFrame: number | null = null;
+    if (pl.state === PLAYER_STATE.ATTACK && pl.swing !== null) {
+      set = this.anims[`${spriteKey}_attack`];
+      if (set) phaseFrame = pl.swing.phase === "startup" ? 0 : pl.swing.phase === "active" ? 1 : 2;
+    } else if (pl.state === PLAYER_STATE.HURT) {
+      set = this.anims[`${spriteKey}_hurt`];
+      if (set) phaseFrame = pl.hurtTicks > CONFIG.PLAYER.HURT_TICKS / 2 ? 0 : 1;
+    }
+    if (set === undefined) set = pl.state === PLAYER_STATE.IDLE ? (idle ?? walk) : (walk ?? idle);
     let sp = base;
     if (set) {
-      const fi = Math.floor(pl.animTicks / set.tickDur) % set.frames.length;
+      const fi = phaseFrame !== null ? Math.min(set.frames.length - 1, phaseFrame) : Math.floor(pl.animTicks / set.tickDur) % set.frames.length;
       sp = Math.cos(dir) > 0.15 ? set.mirrored[fi] : set.frames[fi];
     } else if (Math.cos(dir) > 0.15) {
       sp = this.mirrored(base, spriteKey);
@@ -1295,10 +1748,12 @@ export class Renderer {
     if (this.texts.length === 0) return;
     g.textAlign = "center";
     g.textBaseline = "alphabetic";
-    g.font = "bold 5px ui-monospace, monospace";
     for (const ft of this.texts) {
-      const x = Math.round(ft.x - ox);
+      let x = Math.round(ft.x - ox);
       const y = Math.round(ft.y - oy);
+      g.font = ft.style === "crit" ? "bold 7px ui-monospace, monospace" : "bold 5px ui-monospace, monospace";
+      // crits jitter ±1px so the blow reads heavy
+      if (ft.style === "crit") x += Math.floor((ft.left * 7) % 3) - 1;
       g.globalAlpha = Math.min(1, (ft.left / ft.total) * 1.8);
       g.fillStyle = P.VOID;
       g.fillText(ft.text, x + 1, y + 1);
@@ -1308,16 +1763,17 @@ export class Renderer {
     g.globalAlpha = 1;
   }
 
-  private drawVignette(g: CanvasRenderingContext2D, flags: DrawFlags): void {
+  private drawVignette(g: CanvasRenderingContext2D, flags: DrawFlags, glOwnsHurt = false): void {
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
-    if (this.vignette > 0.001) {
-      g.globalAlpha = this.vignette;
+    if (!glOwnsHurt && this.vignette > 0.001) {
+      g.globalAlpha = Math.min(0.75, this.vignette * 1.4);
       g.fillStyle = P.VIGNETTE_HURT;
-      g.fillRect(0, 0, iw, 3);
-      g.fillRect(0, ih - 3, iw, 3);
-      g.fillRect(0, 0, 3, ih);
-      g.fillRect(iw - 3, 0, 3, ih);
+      const thickness = 3 + Math.round(this.vignette * 10);
+      g.fillRect(0, 0, iw, thickness);
+      g.fillRect(0, ih - thickness, iw, thickness);
+      g.fillRect(0, 0, thickness, ih);
+      g.fillRect(iw - thickness, 0, thickness, ih);
       g.globalAlpha = 1;
     }
     if (flags.hitStop && this.world.hitStopTicks > 0) {
@@ -1327,9 +1783,9 @@ export class Renderer {
       g.strokeRect(1.5, 1.5, iw - 3, ih - 3);
       g.globalAlpha = 1;
     }
-    // the forgotten king drops into a new phase: a one-second white bloom + a centred gold label
+    // boss and king intros share the same brief white bloom and centred title card
     if (this.kingCine > 0) {
-      const a = this.kingCine / 60;
+      const a = this.kingCine / this.kingCineTotal;
       g.globalAlpha = Math.min(0.8, a * 0.8);
       g.fillStyle = "#ffffff";
       g.fillRect(0, 0, iw, ih);

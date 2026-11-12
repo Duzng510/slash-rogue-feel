@@ -5,11 +5,15 @@ import { writeFileSync } from "node:fs";
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9333;
-const URL = "http://localhost:5199/?manual=1&seed=42";
+const GL = process.env.RENDERER === "gl";
+const URL = "http://localhost:5199/?manual=1&seed=42" + (GL ? "&renderer=gl" : "&renderer=2d");
 const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools/out";
 
 const chrome = spawn(CHROME, [
-  "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
+  "--headless=new", "--no-sandbox", "--hide-scrollbars",
+  ...(GL
+    ? ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
+    : ["--disable-gpu"]),
   `--user-data-dir=${OUT}/cdp`, `--remote-debugging-port=${PORT}`,
   "--window-size=960,540", "about:blank",
 ], { stdio: "ignore" });
@@ -68,7 +72,7 @@ for (let i = 0; i < 60; i++) {
 // desktop pointer path: a real click on the middle card must pick that character and start the run
 await evalJs("window.__game.advance(1/60)");
 const modalShot = await send("Page.captureScreenshot", { format: "png" });
-writeFileSync(`${OUT}/shot-character-modal.png`, Buffer.from(modalShot.result.data, "base64"));
+writeFileSync(`${OUT}/shot-character-modal${GL ? "-gl" : ""}.png`, Buffer.from(modalShot.result.data, "base64"));
 const card = await evalJs(`(() => { const r = document.getElementById("overlay").getBoundingClientRect();
   return { x: r.left + r.width * (160 / 320), y: r.top + r.height * (100 / 180) }; })()`);
 for (const type of ["mousePressed", "mouseReleased"]) {
@@ -112,7 +116,7 @@ const caught = await evalJs(`(() => {
 
 if (caught) {
   const shot = await send("Page.captureScreenshot", { format: "png" });
-  writeFileSync(`${OUT}/shot-slash.png`, Buffer.from(shot.result.data, "base64"));
+  writeFileSync(`${OUT}/shot-slash${GL ? "-gl" : ""}.png`, Buffer.from(shot.result.data, "base64"));
   console.log("slash frame:", JSON.stringify(caught));
 } else {
   console.log("no active-swing+hitstop frame caught");

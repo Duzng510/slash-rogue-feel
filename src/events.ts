@@ -26,12 +26,14 @@ export type VisualEvent =
   | { t: "flash"; ent: number; ticks: number }
   | { t: "hurtVignette"; strength: number }
   | { t: "slashArc"; x: number; y: number; dir: number; reach: number; deg: number; combo: number; ticks: number }
-  | { t: "dmgNumber"; x: number; y: number; value: number }
+  | { t: "dmgNumber"; x: number; y: number; value: number; style?: "normal" | "crit" | "heal" | "element"; color?: string }
   | { t: "roomBanner"; text: string }
+  | { t: "roomTransition"; x: number; y: number }
   | { t: "artifactText"; x: number; y: number; text: string; color: string }
   | { t: "slice"; x: number; y: number; dir: number; len: number }
   | { t: "beam"; x: number; y: number; dir: number; len: number }
   | { t: "kingPhase"; phase: 1 | 2 | 3 }
+  | { t: "bossIntro"; name: string; x: number; y: number }
   | { t: "achievement"; id: AchievementId }
   | { t: "hitImpact" };
 
@@ -64,6 +66,12 @@ export function sfx(e: EventQueue, name: SfxName, gain = 1, pitch = 1): void {
 /** a short world-space label that floats up from the trigger point (artifact procs) */
 export function artifactText(e: EventQueue, x: number, y: number, text: string, color: string): void {
   e.push({ t: "artifactText", x, y, text, color });
+}
+
+/** floating damage number; owns the dmgNumbers slider guard so every call site stays terse */
+export function dmgNumber(e: EventQueue, x: number, y: number, value: number, style?: "normal" | "crit" | "heal" | "element", color?: string): void {
+  if (CONFIG.SLIDERS.dmgNumbers <= 0) return;
+  e.push({ t: "dmgNumber", x, y, value, style, color });
 }
 
 export function shake(e: EventQueue, x: number, y: number, dir: number, mult = 1): void {

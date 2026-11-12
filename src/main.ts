@@ -1,5 +1,4 @@
 import { CONFIG } from "./config.ts";
-import type { EnemyKind } from "./config.ts";
 import { dist } from "./mathx.ts";
 import { GameLoop } from "./loop.ts";
 import { World } from "./world/world.ts";
@@ -17,15 +16,16 @@ import type { OrientationLike } from "./ui/immersive.ts";
 import { startDiag } from "./ui/diag.ts";
 import { DebugHud, type DebugFlags } from "./ui/debug.ts";
 import { Sfx } from "./audio/sfx.ts";
-import { createSwing } from "./systems/combat.ts";
 import type { Intent } from "./sim/types.ts";
 import type { ArtifactId, CurseId } from "./systems/artifacts.ts";
 import type { CharacterId } from "./systems/characters.ts";
 import type { WeaponId } from "./systems/weapons.ts";
-import type { RunStats, EndAction, EndMode } from "./systems/runStats.ts";
+import type { EndAction } from "./systems/runStats.ts";
 import { parseAchievements, stringifyAchievements, emptyAchievements } from "./systems/unlocks.ts";
 import type { Achievements } from "./systems/unlocks.ts";
-import { APP_VERSION, CHANGELOG } from "./ui/changelog.ts";
+import { initChangelog } from "./ui/changelogModal.ts";
+import { installHarness } from "./harness.ts";
+import { initSliders, syncSliderLabels } from "./ui/sliders.ts";
 
 const qs = new URLSearchParams(location.search);
 const autoplay = qs.get("autoplay") === "1";
@@ -323,35 +323,7 @@ const onViewport = (): void => {
 };
 onViewport();
 
-const SLIDERS: { id: string; label: string; key: keyof typeof CONFIG.SLIDERS; fmt: (v: number) => string }[] = [
-  { id: "s-shake", label: "v-shake", key: "shake", fmt: (v) => v.toFixed(2) },
-  { id: "s-volume", label: "v-volume", key: "volume", fmt: (v) => v.toFixed(2) },
-  { id: "s-particles", label: "v-particles", key: "particles", fmt: (v) => v.toFixed(2) },
-  { id: "s-timescale", label: "v-timescale", key: "timescale", fmt: (v) => v.toFixed(2) },
-  { id: "s-hitstop", label: "v-hitstop", key: "hitStopScale", fmt: (v) => `${v}` },
-  { id: "s-dmgnum", label: "v-dmgnum", key: "dmgNumbers", fmt: (v) => (v > 0 ? "on" : "off") },
-  { id: "s-bright", label: "v-bright", key: "brightness", fmt: (v) => v.toFixed(2) },
-];
-
-function syncSliderLabels(): void {
-  for (const s of SLIDERS) {
-    const input = document.getElementById(s.id) as HTMLInputElement | null;
-    const out = document.getElementById(s.label) as HTMLElement | null;
-    if (input === null || out === null) continue;
-    input.value = String(CONFIG.SLIDERS[s.key]);
-    out.textContent = s.fmt(CONFIG.SLIDERS[s.key]);
-  }
-}
-
-for (const s of SLIDERS) {
-  const input = document.getElementById(s.id) as HTMLInputElement | null;
-  if (input === null) continue;
-  input.addEventListener("input", () => {
-    CONFIG.SLIDERS[s.key] = Number(input.value);
-    syncSliderLabels();
-  });
-}
-syncSliderLabels();
+initSliders();
 
 let immersiveNote = "not tried";
 
@@ -495,218 +467,6 @@ if (autoplay || qs.get("manual") === "1") {
   }, { once: true });
 }
 
-/** release-notes popup: opens automatically only for a version the player hasn't seen yet */
-const CHANGELOG_SEEN_KEY = "ruby.changelogSeen.v1";
-function initChangelog(): void {
-  const modal = document.getElementById("changelog-modal") as HTMLDivElement;
-  const body = document.getElementById("changelog-body") as HTMLDivElement;
-  const closeBtn = document.getElementById("changelog-close") as HTMLButtonElement;
-  const openBtn = document.getElementById("btn-changelog") as HTMLButtonElement;
-  const versionEl = document.getElementById("version") as HTMLSpanElement;
-
-  versionEl.textContent = APP_VERSION;
-  body.innerHTML = CHANGELOG.map(
-    (e) =>
-      `<section class="mb-4">` +
-      `<div class="flex items-baseline justify-between mb-1.5 pb-1 border-b border-[#233045]">` +
-      `<span class="text-[12px] font-bold text-[#00f0ff]">${e.version}</span>` +
-      `<span class="text-[10px] text-[#6b7d99]">${e.date}</span></div>` +
-      `<ul class="list-none p-0 m-0">` +
-      e.items
-        .map((i) => `<li class="mb-1.5 relative pl-3.5 before:content-['⚡'] before:absolute before:left-0 before:text-[#00f0ff] before:text-[9px]">${i}</li>`)
-        .join("") +
-      `</ul></section>`
-  ).join("");
-
-  const open = (): void => {
-    modal.hidden = false;
-  };
-  const close = (): void => {
-    modal.hidden = true;
-    try {
-      localStorage.setItem(CHANGELOG_SEEN_KEY, APP_VERSION);
-    } catch {
-      /** private mode: the popup just reappears next load */
-    }
-  };
-  openBtn.addEventListener("click", open);
-  closeBtn.addEventListener("click", close);
-  modal.addEventListener("click", (ev) => {
-    if (ev.target === modal) close();
-  });
-  window.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !modal.hidden) close();
-  });
-
-  let seen: string | null = null;
-  try {
-    seen = localStorage.getItem(CHANGELOG_SEEN_KEY);
-  } catch {
-    seen = null;
-  }
-  if (seen !== APP_VERSION) open();
-}
 if (!autoplay && qs.get("manual") !== "1") initChangelog();
 
-type Harness = {
-  ready: true;
-  advance: (dt: number) => number;
-  pressAttack: () => void;
-  pressDash: () => void;
-  pressSkill: () => void;
-  pickCharacter: (id: CharacterId) => boolean;
-  setMove: (x: number, y: number) => void;
-  setAim: (x: number, y: number) => void;
-  addEnemies: (n: number, kinds?: EnemyKind[], elite?: boolean) => void;
-  clearEnemies: () => void;
-  damageEnemy: (id: number, dmg: number) => boolean;
-  applyStatus: (id: number, status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed") => boolean;
-  gotoRoom: (i: number) => void;
-  chooseArtifact: (id: ArtifactId) => boolean;
-  chooseWeapon: (id: WeaponId) => boolean;
-  buyShop: (i: number) => boolean;
-  leaveShop: () => void;
-  setCurseTab: (v: boolean) => void;
-  forceEnd: (mode: EndMode) => void;
-  state: () => {
-    tick: number;
-    hitStop: number;
-    player: { x: number; y: number; hp: number; state: string; swing: string | null; invuln: boolean };
-    roomIndex: number;
-    character: string;
-    characterChoices: CharacterId[];
-    artifacts: ArtifactId[];
-    artifactChoices: ArtifactId[];
-    curseOffer: string[] | null;
-    shopOffers: number;
-    shopKinds: string[];
-    enemies: {
-      id: number;
-      x: number;
-      y: number;
-      hp: number;
-      state: string;
-      kind: string;
-      pattern: string;
-      enraged: boolean;
-      elite: boolean;
-      telegraphTicksLeft: number;
-    }[];
-    particles: number;
-    projectiles: number;
-    fx: { arcs: number; flashes: number; vignette: number; shake: number };
-    runStats: RunStats;
-    pendingEnd: EndMode | null;
-  };
-};
-
-const harness: Harness = {
-  ready: true,
-  advance: (dt) => loop.advance(dt),
-  pressAttack: () => intent.pressAttack(world.tickCount),
-  pressDash: () => intent.pressDash(world.tickCount),
-  pressSkill: () => intent.pressSkill(world.tickCount),
-  pickCharacter: (id) => {
-    const picked = world.pickCharacter(id);
-    if (picked) resetInput();
-    syncArtifactModal();
-    return picked;
-  },
-  setMove: (x, y) => {
-    intent.moveX = x;
-    intent.moveY = y;
-  },
-  setAim: (x, y) => {
-    intent.aim = { x, y };
-  },
-  addEnemies: (n, kinds, elite) => world.addEnemies(n, kinds, elite),
-  clearEnemies: () => world.clearEnemies(),
-  damageEnemy: (id, dmg) => {
-    const e = world.enemies.find((x) => x.id === id);
-    if (e === undefined || e.dead) return false;
-    e.onHit(
-      createSwing(world, {
-        side: "player",
-        combo: 1,
-        dir: 0,
-        ox: e.x,
-        oy: e.y,
-        reach: 8,
-        deg: 90,
-        dmg,
-        knockback: 0,
-        fd: { startup: 1, active: 1, recovery: 1 },
-      }),
-      e.x,
-      e.y,
-      world
-    );
-    return true;
-  },
-  applyStatus: (id, status) => {
-    const e = world.enemies.find((x) => x.id === id);
-    if (e === undefined || e.dead) return false;
-    e.applyStatus(status, world);
-    return true;
-  },
-  gotoRoom: (i) => { world.characterChoices = []; world.weaponChoices = null; world.loadRoom(i); syncArtifactModal(); },
-  chooseArtifact,
-  chooseWeapon: (id: WeaponId) => {
-    const picked = world.pickWeapon(id);
-    syncArtifactModal();
-    return picked;
-  },
-  buyShop: (i) => {
-    const bought = world.chooseShop(i);
-    syncArtifactModal();
-    return bought;
-  },
-  leaveShop: () => { world.leaveShop(); syncArtifactModal(); },
-  setCurseTab: (v) => { world.curseTab = v; },
-  forceEnd: (mode) => {
-    if (mode === "won") world.runStats.roomsCleared = world.roomTotal;
-    world.pendingEnd = mode;
-  },
-  state: () => ({
-    tick: world.tickCount,
-    hitStop: world.hitStopTicks,
-    player: {
-      x: world.player.x,
-      y: world.player.y,
-      hp: world.player.hp,
-      state: world.player.state,
-      swing: world.player.swing === null ? null : `${world.player.swing.combo}:${world.player.swing.phase}`,
-      invuln: !world.player.canBeHit(),
-    },
-    roomIndex: world.roomIndex,
-    character: world.player.character,
-    weapon: world.player.weapon,
-    characterChoices: [...world.characterChoices],
-    weaponChoices: world.weaponChoices ? [...world.weaponChoices] : null,
-    artifacts: [...world.artifacts],
-    artifactChoices: world.artifactChoices.map((artifact) => artifact.id),
-    curseOffer: world.curseOffer === null ? null : world.curseOffer.curses.map((c) => c.id),
-    shopOffers: world.shopOffers?.length ?? 0,
-    shopKinds: world.shopOffers?.map((o) => o.kind) ?? [],
-    enemies: world.enemies.map((e) => ({
-      id: e.id,
-      x: e.x,
-      y: e.y,
-      hp: e.hp,
-      state: e.state,
-      kind: e.kind,
-      pattern: e.pattern,
-      enraged: e.enraged,
-      elite: e.isElite,
-      telegraphTicksLeft: e.telegraphTicksLeft,
-    })),
-    particles: world.particles.alive,
-    projectiles: world.projectiles.length,
-    fx: renderer.fxInfo,
-    runStats: world.runStats,
-    pendingEnd: world.pendingEnd,
-  }),
-};
-
-(window as unknown as { __game: Harness & { config: typeof CONFIG } }).__game =
-  Object.assign(harness, { config: CONFIG });
+installHarness({ loop, intent, world, renderer, resetInput, syncArtifactModal, chooseArtifact });

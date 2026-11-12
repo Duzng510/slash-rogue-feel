@@ -807,7 +807,6 @@ test("elites double HP, hit 1.5x and drop 3 gold instead of 1", () => {
   const w = sandbox();
   const e = makeEnemy(200, 100, "chaser", true);
   assert.equal(e.hp, 6);
-  e.setState(ENEMY_STATE.CHASE);
   e.setState(ENEMY_STATE.TELEGRAPH);
   e.telegraphTicksLeft = 1;
   e.telegraphTotal = 27;

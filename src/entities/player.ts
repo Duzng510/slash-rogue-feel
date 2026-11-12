@@ -1,7 +1,7 @@
 import { CONFIG } from "../config.ts";
 import { angleLerp, clamp, dist, normAngle } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
-import { createSwing, hitFeedback, playerSwingInit, stepSwing } from "../systems/combat.ts";
+import { createSwing, hitFeedback, instantSwing, playerSwingInit, stepSwing } from "../systems/combat.ts";
 import { CHARACTERS, COMBO_HITS, COMBO_WINDOW, executeSkill, type CharacterId } from "../systems/characters.ts";
 import { WEAPONS, type WeaponId } from "../systems/weapons.ts";
 import { ENEMY_STATE } from "./enemy.ts";
@@ -213,6 +213,12 @@ export class Player implements Unit {
     }
 
     const hasCursor = Number.isFinite(intent.aimX) && Number.isFinite(intent.aimY);
+
+    // low-HP heartbeat: a slow low-pitch pulse while at or below 30% health
+    if (this.hp > 0 && this.hp / this.maxHp < 0.3 && this.animTicks % 60 === 0) {
+      sfx(src.queue, "pursuit_proc", 0.5, 0.55);
+    }
+
     if (hasCursor) this.facing = Math.atan2(intent.aimY - this.y, intent.aimX - this.x);
     else if (intent.moveX !== 0 || intent.moveY !== 0) {
       this.facing = angleLerp(this.facing, Math.atan2(intent.moveY, intent.moveX), 0.55);
@@ -344,7 +350,7 @@ export class Player implements Unit {
       while (step < 60 && !blocked(src.room, this.x + Math.cos(dir) * (step + 6), this.y + Math.sin(dir) * (step + 6), this.bodyW, this.bodyH)) step += 6;
       this.x += Math.cos(dir) * step;
       this.y += Math.sin(dir) * step;
-      const slash = createSwing(src, { side: "player", combo: 0, dir, ox, oy, reach: 0, deg: 0, dmg: 2, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+      const slash = instantSwing(src, { side: "player", dir, ox, oy, dmg: 2 });
       for (const e of src.enemies) {
         if (e.dead || !e.canBeHit()) continue;
         if ([0, 0.5, 1].some(t => dist(e.x, e.y, ox + (this.x - ox) * t, oy + (this.y - oy) * t) < 14)) {

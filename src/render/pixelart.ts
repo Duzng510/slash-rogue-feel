@@ -1,4 +1,5 @@
 import { CONFIG, enemyDef } from "../config.ts";
+import { ARTIFACT_COLORS, ARTIFACTS } from "../systems/artifacts.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -84,7 +85,19 @@ function bakeBiomeTiles(S: Record<string, Sprite>, T: number, id: string, floor:
 export function buildSprites(): Record<string, Sprite> {
   const S: Record<string, Sprite> = {};
   const T = CONFIG.WORLD.TILE;
+  buildPlayerSprites(S);
+  buildEnemySprites(S);
+  buildHudSprites(S);
+  buildTileSprites(S, T);
+  buildParallaxSprites(S);
+  buildPropSprites(S, T);
+  buildWeaponSprites(S);
+  buildTorchSprites(S);
+  buildArtifactSprites(S);
+  return S;
+}
 
+function buildPlayerSprites(S: Record<string, Sprite>): void {
   // Swordsman (Kiếm Khách) - Agile, light armor, sharp visor slit, sword hilt
   S.player_swordsman = bake(14, 15, 7, 14, (g) => {
     // Dark outline / cape undertone
@@ -164,7 +177,9 @@ export function buildSprites(): Record<string, Sprite> {
   });
 
   S.player = S.player_swordsman;
+}
 
+function buildEnemySprites(S: Record<string, Sprite>): void {
   S.enemy = bake(12, 13, 6, 12, (g) => {
     const body = enemyDef("chaser").BODY_COLOR;
     // Horns / spikes
@@ -369,7 +384,9 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 5, 16, 4, 2, P.VOID);
     rect(g, 11, 16, 4, 2, P.VOID);
   });
+}
 
+function buildHudSprites(S: Record<string, Sprite>): void {
   S.shadow = bake(10, 4, 5, 2, (g) => {
     g.globalAlpha = CONFIG.READABILITY.SHADOW_ALPHA;
     rect(g, 1, 1, 8, 2, P.VOID);
@@ -393,7 +410,9 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 2, 5, 4, 1, P.HP_EMPTY);
     rect(g, 3, 6, 2, 1, P.HP_EMPTY);
   });
+}
 
+function buildTileSprites(S: Record<string, Sprite>, T: number): void {
   S.floor = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 0, T, T, P.FLOOR);
     // Beveled stone tile borders
@@ -443,7 +462,9 @@ export function buildSprites(): Record<string, Sprite> {
   bakeBiomeTiles(S, T, "caverns", "#16222e", "#2a4862", "#1e3f61");
   bakeBiomeTiles(S, T, "forge", "#25150c", "#4d2316", "#391c15");
   bakeBiomeTiles(S, T, "void", "#110a1c", "#2a163d", "#221033");
+}
 
+function buildParallaxSprites(S: Record<string, Sprite>): void {
   // --- distant parallax backdrops, baked at 640×360 and scrolled at 0.4x camera speed ---
   const bakeParallax = (id: string, paint: (g: CanvasRenderingContext2D) => void): void => {
     S[`parallax_${id}`] = bake(640, 360, 0, 0, paint);
@@ -526,7 +547,9 @@ export function buildSprites(): Record<string, Sprite> {
     }
     g.globalAlpha = 1;
   });
+}
 
+function buildPropSprites(S: Record<string, Sprite>, T: number): void {
   S.crate = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 2, T, T - 2, P.WALL);
     rect(g, 0, 2, T, 2, P.WALL_TOP);
@@ -565,7 +588,9 @@ export function buildSprites(): Record<string, Sprite> {
     g.globalAlpha = 0.8;
     rect(g, 3, 3, T - 6, T - 6, P.DOOR_OPEN);
   });
+}
 
+function buildWeaponSprites(S: Record<string, Sprite>): void {
   // --- 5 Weapon Icons (16x16) ---
   S.weapon_katana = bake(16, 16, 8, 8, (g) => {
     // Handle wrap (bottom-left)
@@ -639,7 +664,9 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 10, 9, 2, 2, "#e0455a");
     rect(g, 8, 11, 2, 2, "#ffffff"); // crack tip
   });
+}
 
+function buildTorchSprites(S: Record<string, Sprite>): void {
   // --- Wall torch, 2 flicker frames (anchor: bottom-centre) ---
   const torchPaint = (g: CanvasRenderingContext2D, lean: number): void => {
     // iron sconce
@@ -654,8 +681,24 @@ export function buildSprites(): Record<string, Sprite> {
   };
   S.torch = bake(5, 8, 2, 7, (g) => torchPaint(g, 0));
   S.torch_flicker = bake(5, 8, 2, 7, (g) => torchPaint(g, -1));
+}
 
-  return S;
+function buildArtifactSprites(S: Record<string, Sprite>): void {
+  for (const [index, artifact] of ARTIFACTS.entries()) {
+    const color = ARTIFACT_COLORS[artifact.id];
+    S[`artifact_${artifact.id}`] = bake(12, 12, 0, 0, (g) => {
+      rect(g, 5, 0, 2, 1, color);
+      rect(g, 3, 1, 6, 2, color);
+      rect(g, 2, 3, 8, 5, color);
+      rect(g, 3, 8, 6, 2, color);
+      rect(g, 5, 10, 2, 1, color);
+      rect(g, 4, 3, 2, 2, "#ffffff");
+      rect(g, 6, 7, 3, 1, index % 2 === 0 ? "#1b1f28" : "#ffffff");
+      if (index % 3 === 0) rect(g, 4, 6, 1, 2, "#ffffff");
+      if (index % 3 === 1) rect(g, 7, 3, 2, 2, "#1b1f28");
+      if (index % 3 === 2) rect(g, 5, 8, 2, 1, "#1b1f28");
+    });
+  }
 }
 
 export function facingOffsets(dir: number): { x: number; y: number } {
@@ -720,11 +763,31 @@ export function buildAnimSets(): Record<string, SpriteSet> {
     if (!base) continue;
     set(`${key}_idle`, [copyOfSprite(base), bobDown(base)], 40);
     set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1), copyOfSprite(base)], 6);
+    // swing clip: windup lean-back → active lunge → recovery settle
+    set(`${key}_attack`, [shiftX(base, 2), shiftX(base, -2), bobDown(base)], 3);
+    // hurt clip: recoil lean-back → white flash
+    set(`${key}_hurt`, [shiftX(base, 2), whiteOf(base)], 4);
   }
   for (const kind of ["chaser", "charger", "splitter", "small", "boss", "ranged", "teleporter", "healer", "exploder", "shielder", "sniper", "jumper", "warden", "golem", "king"] as const) {
     const key = enemyDef(kind).SPRITE_KEY;
     const base = S[key];
-    if (base) set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1)], 8);
+    if (!base) continue;
+    set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1)], 8);
+    // attack clip: telegraph windup → strike lunge → recovery
+    set(`${key}_attack`, [shiftX(base, 1), shiftX(base, -2), copyOfSprite(base)], 3);
+    // spawn clip: materialize from a dither (3 frames)
+    set(`${key}_spawn`, [
+      materialize(base, 1, 0.3),
+      materialize(base, 1, 0.6),
+      materialize(base, 1, 0.9),
+    ], 5);
+    // death clip: crumble outward (4 frames)
+    set(`${key}_death`, [
+      scatter(base, 2, 0.8, 0.9),
+      scatter(base, 2, 1.8, 0.7),
+      scatter(base, 2, 2.8, 0.5),
+      scatter(base, 2, 4, 0.3),
+    ], 3);
   }
   return out;
 }
@@ -732,5 +795,75 @@ export function buildAnimSets(): Record<string, SpriteSet> {
 function copyOfSprite(base: Sprite): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
     g.drawImage(base.c, 0, 0);
+  });
+}
+
+/** body shifted sideways: a windup lean-back / lunge lean-in (feet stay at ay) */
+function shiftX(base: Sprite, dx: number): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    g.drawImage(base.c, dx, 0);
+  });
+}
+
+/** re-bake the sprite as a solid white silhouette (hurt flash frame) */
+function whiteOf(base: Sprite): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    g.drawImage(base.c, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = "#ffffff";
+    g.fillRect(0, 0, base.w, base.h);
+  });
+}
+
+/** per-pixel deterministic hash so dissolve frames never perturb any seeded rng */
+function pixelHash(x: number, y: number, seed: number): number {
+  let h = ((x * 2654435761) ^ (y * 40503) ^ (seed * 97)) >>> 0;
+  h = (h * 1664525 + 1013904223) >>> 0;
+  return h / 4294967296;
+}
+
+/** materialize frame: a fraction of the body's pixels are present, dithered */
+function materialize(base: Sprite, seed: number, keep: number): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    const img = g.getImageData(0, 0, base.w, base.h);
+    const src = bake(base.w, base.h, 0, 0, (gg) => gg.drawImage(base.c, 0, 0));
+    const data = src.c.getContext("2d")?.getImageData(0, 0, base.w, base.h).data;
+    if (!data) return;
+    for (let y = 0; y < base.h; y++) {
+      for (let x = 0; x < base.w; x++) {
+        const i = (y * base.w + x) * 4;
+        if (data[i + 3] === 0) continue;
+        if (pixelHash(x, y, seed) > keep) continue;
+        img.data[i] = data[i];
+        img.data[i + 1] = data[i + 1];
+        img.data[i + 2] = data[i + 2];
+        img.data[i + 3] = data[i + 3];
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+/** crumble frame: pixels scatter outward from the body centre and fade */
+function scatter(base: Sprite, seed: number, amount: number, alpha: number): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    const src = bake(base.w, base.h, 0, 0, (gg) => gg.drawImage(base.c, 0, 0));
+    const data = src.c.getContext("2d")?.getImageData(0, 0, base.w, base.h).data;
+    if (!data) return;
+    const cx = base.w / 2;
+    for (let y = 0; y < base.h; y++) {
+      for (let x = 0; x < base.w; x++) {
+        const i = (y * base.w + x) * 4;
+        if (data[i + 3] === 0) continue;
+        const h1 = pixelHash(x, y, seed);
+        const h2 = pixelHash(x, y, seed + 13);
+        const dx = Math.round((h1 - 0.5) * 8 * amount + Math.sign(x + 0.5 - cx) * amount * 1.5);
+        const dy = Math.round((h2 - 0.5) * 4 * amount - amount);
+        g.globalAlpha = alpha * (0.4 + 0.6 * pixelHash(x, y, seed + 7));
+        g.fillStyle = `rgb(${data[i]},${data[i + 1]},${data[i + 2]})`;
+        g.fillRect(x + dx, y + dy, 1, 1);
+      }
+    }
+    g.globalAlpha = 1;
   });
 }

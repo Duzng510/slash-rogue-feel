@@ -1,7 +1,7 @@
 import { CONFIG } from "../config.ts";
 import type { FrameData } from "../config.ts";
 import { normAngle, pointInArc, rectsOverlap } from "../mathx.ts";
-import { artifactText, shake, sfx } from "../events.ts";
+import { artifactText, dmgNumber, shake, sfx } from "../events.ts";
 import { requestHitStop } from "./feelSim.ts";
 import { CHARACTERS } from "./characters.ts";
 import { WEAPONS } from "./weapons.ts";
@@ -44,6 +44,24 @@ export function createSwing(src: Sim, init: SwingInit): Swing {
     knockback: init.knockback,
     seen: new Set<number>(),
   };
+}
+
+/** a zero-geometry swing used purely as a damage carrier (traps, thorns, aftershock, blast) */
+export function instantSwing(src: Sim, o: { side: Side; dir: number; ox: number; oy: number; dmg: number; combo?: number; knockback?: number; status?: Swing["status"]; kind?: string }): Swing {
+  return createSwing(src, {
+    side: o.side,
+    kind: o.kind,
+    combo: o.combo ?? 0,
+    dir: o.dir,
+    ox: o.ox,
+    oy: o.oy,
+    reach: 0,
+    deg: 0,
+    dmg: o.dmg,
+    knockback: o.knockback ?? 0,
+    fd: { startup: 0, active: 1, recovery: 0 },
+    status: o.status,
+  });
 }
 
 export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit {
@@ -134,18 +152,7 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
       hitFeedback(src, target, sw, cx, cy, killed, !exec);
       if (target.side === "player" && src.artifacts.has("thorns") && !attacker.dead) {
         const dir = Math.atan2(attacker.y - target.y, attacker.x - target.x);
-        const thornsSwing = createSwing(src, {
-          side: "player",
-          combo: 0,
-          dir,
-          ox: target.x,
-          oy: target.y,
-          reach: 0,
-          deg: 0,
-          dmg: 1,
-          knockback: 30,
-          fd: { startup: 0, active: 1, recovery: 0 },
-        });
+        const thornsSwing = instantSwing(src, { side: "player", dir, ox: target.x, oy: target.y, dmg: 1, knockback: 30 });
         attacker.onHit(thornsSwing, attacker.x, attacker.y, src);
         src.queue.push({ t: "artifactText", x: attacker.x, y: attacker.y - 14, text: "GAI", color: "#c8ff8a" });
         sfx(src.queue, "slash_hit", 0.5, 1.4);
@@ -198,7 +205,7 @@ export function resolveFire(src: Sim): void {
       const hb = enemy.hurtRect();
       if (!trail.points.some(p => rectsOverlap({ x: p.x - 6, y: p.y - 6, w: 12, h: 12 }, hb))) continue;
       trail.seen.add(enemy.id);
-      const fire = createSwing(src, { side: "player", status: "burn", combo: 1, dir: 0, ox: enemy.x, oy: enemy.y, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+      const fire = instantSwing(src, { side: "player", status: "burn", combo: 1, dir: 0, ox: enemy.x, oy: enemy.y, dmg: 1 });
       const killed = enemy.onHit(fire, enemy.x, enemy.y, src);
       hitFeedback(src, enemy, fire, enemy.x, enemy.y, killed, false);
     }
@@ -226,6 +233,16 @@ function addDecal(src: Sim, x: number, y: number, killed: boolean): void {
   src.decals.push({ x, y, kind: "blood", color: CONFIG.PALETTE.BLOOD, life: Number.POSITIVE_INFINITY, spots });
 }
 
+/** element hit-spray + damage-number color per swing status (colors live in CONFIG.PALETTE.ELEMENT) */
+const ELEMENT_FX: Record<NonNullable<Swing["status"]>, { color: string; burst?: "ember" | "bolt" | "ice" | "bubble" }> = {
+  burn: { color: CONFIG.PALETTE.ELEMENT.burn, burst: "ember" },
+  wet: { color: CONFIG.PALETTE.ELEMENT.wet },
+  shock: { color: CONFIG.PALETTE.ELEMENT.shock, burst: "bolt" },
+  poison: { color: CONFIG.PALETTE.ELEMENT.poison, burst: "bubble" },
+  freeze: { color: CONFIG.PALETTE.ELEMENT.freeze, burst: "ice" },
+  bleed: { color: CONFIG.PALETTE.ELEMENT.bleed },
+};
+
 export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
@@ -239,8 +256,17 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     }
     src.particles.burstBlood(cx, cy, dir, killed ? f.DEATH_SHARDS : f.BLOOD, src.rng);
     src.particles.burstSpark(cx, cy, f.SPARK, src.rng);
+    // element read: a distinct burst per status so the player sees the element land
+    const fx = sw.status !== undefined ? ELEMENT_FX[sw.status] : undefined;
+    if (fx?.burst === "ember") src.particles.burstEmber(cx, cy, 6);
+    else if (fx?.burst === "bolt") src.particles.burstBolt(cx, cy, 5);
+    else if (fx?.burst === "ice") src.particles.burstIce(cx, cy, 6);
+    else if (fx?.burst === "bubble") src.particles.burstBubble(cx, cy, 5);
     if (killed) src.particles.burstShards(cx, cy, f.DEATH_SHARDS, CONFIG.PALETTE.ENEMY_SHADE, src.rng);
-    if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: cx, y: cy - 8, value: sw.dmg });
+    // crit: a landed player kill; element: any status swing; both read bigger/colored
+    const style = killed && sw.side === "player" ? "crit" as const
+      : sw.status !== undefined ? "element" as const : "normal" as const;
+    dmgNumber(src.queue, cx, cy - 8, sw.dmg, style, fx?.color);
     shake(src.queue, cx, cy, dir, killed ? f.SHAKE_KILL_MULT : 1);
     addDecal(src, cx, cy, killed);
     if (killed && sw.side === "player") src.queue.push({ t: "hitImpact" });

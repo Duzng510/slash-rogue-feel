@@ -5,11 +5,44 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.27.0";
+export const APP_VERSION = "v0.30.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.30.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Dọn code thừa:</b> xoá các hằng số và hàm chết (cửa sổ chain-cancel, ghost dash, budget số damage, modifier Ascension chưa dùng, bảng biome không ai gọi).",
+      "<b>Gom trùng lặp:</b> một helper <i>shuffle</i> dùng chung, <i>instantSwing</i> cho đòn tức thời, <i>dmgNumber</i> cho số damage, màu element đưa hết về <i>CONFIG.PALETTE</i>.",
+      "<b>Hằng số về CONFIG + clock sim:</b> mọi bán kính sáng, số hạt, giới hạn text và nhịp đuốc nằm trong <i>CONFIG.RENDER</i>; hiệu ứng hình ảnh dùng <i>visualTime</i> của sim thay vì đồng hồ tường.",
+      "<b>Tách file quá khổ:</b> <i>buildSprites</i> chia thành 9 hàm theo họ sprite; <i>main.ts</i> đẩy slider, changelog modal và test harness sang module riêng.",
+    ],
+  },
+  {
+    version: "v0.29.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Ánh sáng bám mặt đất:</b> bóng sprite khớp hình dáng nhân vật và quái, chân tường có bóng tiếp xúc mảnh.",
+      "<b>Sắc thái và méo hình theo biome:</b> ánh màu riêng cho từng vùng, hơi nóng ở Lò Rèn, gợn viền Hang Băng và viền màu ở Hư Không.",
+      "<b>Elite và boss dễ nhận diện:</b> elite có vòng báo đỏ khi xuất hiện, viền vàng, vương miện và tia lấp lánh; boss có màn giới thiệu, tên gọi, vết nứt mặt đất và camera tập trung.",
+      "<b>HUD tinh chỉnh:</b> tim nhịp khi nguy cấp, vàng nhấp nhô, hồi kỹ năng dạng vòng và icon riêng cho cổ vật.",
+    ],
+  },
+  {
+    version: "v0.28.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Animation clip:</b> người chơi có 3 frame đòn (windup → active → recovery) và 2 frame trúng đòn; quái có clip telegraph/đòn, 3 frame hiện dần khi spawn và 4 frame vỡ vụn khi chết.",
+      "<b>Tia lửa theo element:</b> đòn cháy bắn tàn lửa cam bay lên, sét toả tia vàng, đóng băng văng tinh thể xanh, độc nổi bong bóng tím — nhìn là biết element vừa dính.",
+      "<b>Số damage có cá tính:</b> đòn kết liễu hiện số to 7px vàng rung nhẹ, đòn theo element tô màu riêng, hồi máu hiện dấu + xanh lá.",
+      "<b>Telegraph riêng từng quái:</b> charger vẽ đường đâm dày có mũi tên, sniper kẻ vệt mảnh xuyên phòng với chấm ngắm nhấp nháy, exploder đĩa nổ phồng dần và lóe trắng trước khi nổ, laser Warden có lõi sáng, boss vòng tròn kèm số đếm ngược giây.",
+      "<b>Chuyển phòng iris wipe:</b> màn đen khép vòng tròn quanh cửa rồi mở ra ở phòng mới.",
+      "<b>Vignette nhịp tim:</b> dưới 30% HP viền màn hình đập đỏ theo nhịp, kèm tiếng tim trầm.",
+      "<b>Aura trạng thái:</b> quái dính burn/freeze/poison/shock tỏa hạt riêng bay quanh người mỗi 3 tick.",
+    ],
+  },
   {
     version: "v0.27.0",
     date: "2026-11-12",

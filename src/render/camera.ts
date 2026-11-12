@@ -13,6 +13,9 @@ export class Camera {
   private dir = 0;
   private sx = 0;
   private sy = 0;
+  private focusTicks = 0;
+  private focusX = 0;
+  private focusY = 0;
 
   snap(tx: number, ty: number): void {
     this.x = tx;
@@ -20,6 +23,12 @@ export class Camera {
     this.mag = 0;
     this.sx = 0;
     this.sy = 0;
+  }
+
+  focus(tx: number, ty: number, ticks: number): void {
+    this.focusX = tx;
+    this.focusY = ty;
+    this.focusTicks = Math.max(this.focusTicks, ticks);
   }
 
   addShake(mag: number, dir: number): void {
@@ -34,15 +43,22 @@ export class Camera {
   }
 
   follow(tx: number, ty: number, aimX: number, aimY: number, room: Room, dt: number): void {
-    const c = CONFIG.CAMERA;
-    const k = 1 - Math.pow(1 - c.FOLLOW_LERP, dt * 60);
-    const lead = c.LEAD_CLAMP;
-    const lx = clamp(aimX - tx, -lead, lead);
-    const ly = clamp(aimY - ty, -lead, lead);
-    const gx = tx + lx * c.LEAD;
-    const gy = ty + ly * c.LEAD;
-    this.x = lerp(this.x, gx, k);
-    this.y = lerp(this.y, gy, k);
+    if (this.focusTicks > 0) {
+      this.focusTicks = Math.max(0, this.focusTicks - dt * 60);
+      const k = 1 - Math.pow(1 - 0.09, dt * 60);
+      this.x = lerp(this.x, this.focusX, k);
+      this.y = lerp(this.y, this.focusY, k);
+    } else {
+      const c = CONFIG.CAMERA;
+      const k = 1 - Math.pow(1 - c.FOLLOW_LERP, dt * 60);
+      const lead = c.LEAD_CLAMP;
+      const lx = clamp(aimX - tx, -lead, lead);
+      const ly = clamp(aimY - ty, -lead, lead);
+      const gx = tx + lx * c.LEAD;
+      const gy = ty + ly * c.LEAD;
+      this.x = lerp(this.x, gx, k);
+      this.y = lerp(this.y, gy, k);
+    }
     const clamped = room.clampCamera(this.x, this.y);
     this.x = clamped.x;
     this.y = clamped.y;

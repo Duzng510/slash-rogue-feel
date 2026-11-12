@@ -481,7 +481,7 @@ export class Hud {
   drawOwnedArtifacts(o: CanvasRenderingContext2D, scale: number): void {
     const ids = [...this.world.artifacts];
     if (ids.length === 0) return;
-    const size = 6;
+    const size = 8;
     const gap = 2;
     const pad = 2;
     const left = 6;
@@ -495,13 +495,14 @@ export class Hud {
       Math.round((size + pad * 2) * scale)
     );
     ids.forEach((id, i) => {
-      o.fillStyle = ARTIFACT_COLORS[id];
-      o.fillRect(
-        Math.round((left + i * (size + gap)) * scale),
-        Math.round(top * scale),
-        Math.round(size * scale),
-        Math.round(size * scale)
-      );
+      const icon = this.sprites[`artifact_${id}`];
+      const x = Math.round((left + i * (size + gap)) * scale);
+      const y = Math.round(top * scale);
+      if (icon !== undefined) o.drawImage(icon.c, x, y, Math.round(size * scale), Math.round(size * scale));
+      else {
+        o.fillStyle = ARTIFACT_COLORS[id];
+        o.fillRect(x, y, Math.round(size * scale), Math.round(size * scale));
+      }
     });
   }
 
@@ -517,7 +518,14 @@ export class Hud {
     const height = full.h * scale;
     const fill = Math.max(0, Math.min(1, w.player.hp - i));
     o.drawImage(empty.c, x, y, empty.w * scale, empty.h * scale);
-    if (fill >= 1) o.drawImage(full.c, x, y, width, height);
+    if (fill >= 1 && i === 0 && w.player.hp <= 1) {
+      const pulse = 1 + 0.05 * Math.sin(w.tickCount * 0.18);
+      o.save();
+      o.translate(x + width / 2, y + height / 2);
+      o.scale(pulse, pulse);
+      o.drawImage(full.c, -width / 2, -height / 2, width, height);
+      o.restore();
+    } else if (fill >= 1) o.drawImage(full.c, x, y, width, height);
     else if (fill >= 0.5) {
       o.save();
       o.beginPath();
@@ -570,16 +578,31 @@ export class Hud {
     /** vertical skill gauge, top-right (the bottom-left corner belongs to the touch stick) */
     const total = cdef.skillCd;
     const ratio = w.player.skillCd <= 0 ? 1 : 1 - w.player.skillCd / total;
-    const gx = Math.round(310 * scale);
-    const gy = Math.round(8 * scale);
-    const gw = Math.round(6 * scale);
-    const gh = Math.round(30 * scale);
-    o.fillStyle = P.VOID;
-    o.fillRect(gx - Math.round(scale), gy - Math.round(scale), gw + 2 * Math.round(scale), gh + 2 * Math.round(scale));
-    o.fillStyle = ratio >= 1 ? cdef.color : "#2b3242";
-    o.fillRect(gx, Math.round(gy + (1 - ratio) * gh), gw, Math.round(ratio * gh));
+    const gx = Math.round(312 * scale);
+    const gy = Math.round(14 * scale);
+    const radius = Math.max(3, Math.round(5 * scale));
+    o.beginPath();
+    o.strokeStyle = P.VOID;
+    o.lineWidth = Math.max(2, Math.round(2 * scale));
+    o.arc(gx, gy, radius, 0, Math.PI * 2);
+    o.stroke();
+    o.beginPath();
+    o.strokeStyle = ratio >= 1 ? "#ffffff" : "#2b3242";
+    o.lineWidth = Math.max(1, Math.round(scale));
+    o.arc(gx, gy, radius, -Math.PI / 2, -Math.PI / 2 + ratio * Math.PI * 2);
+    if (ratio >= 1) {
+      o.save();
+      const pulse = 0.7 + 0.3 * (0.5 + 0.5 * Math.sin(w.tickCount * 0.2));
+      o.globalAlpha = pulse;
+      o.shadowColor = "#ffffff";
+      o.shadowBlur = 4 * scale;
+      o.stroke();
+      o.restore();
+    } else o.stroke();
     o.fillStyle = P.TEXT;
-    o.fillText("E", gx, gy + gh + Math.round(2 * scale));
+    o.textAlign = "center";
+    o.fillText("E", gx, gy + radius + Math.round(2 * scale));
+    o.textAlign = "left";
 
     let boss: World["enemies"][number] | null = null;
     for (const e of w.enemies) if (e.def.HP_BAR && !e.dead) boss = e;
@@ -601,7 +624,8 @@ export class Hud {
     o.globalAlpha = 0.75;
     o.fillText(`${w.roomIndex + 1}/${w.roomTotal}  ${w.room.name}`, Math.round(6 * scale), Math.round(16 * scale));
     o.fillStyle = P.ENEMY_EYE;
-    o.fillText(`◆ ${w.runStats.gold}`, Math.round(6 * scale), Math.round(24 * scale));
+    const coinY = Math.round((24 + Math.sin(w.tickCount * 0.1)) * scale);
+    o.fillText(`◆ ${w.runStats.gold}`, Math.round(6 * scale), coinY);
     o.globalAlpha = 1;
 
   if (w.bannerTicks > 0 && w.bannerText.length > 0) {

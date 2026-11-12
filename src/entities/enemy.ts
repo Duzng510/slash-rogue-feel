@@ -1,8 +1,8 @@
 import { CONFIG, enemyDef } from "../config.ts";
 import type { EnemyDef, EnemyKind } from "../config.ts";
 import { angleLerp, dist, normAngle } from "../mathx.ts";
-import { artifactText, sfx, shake } from "../events.ts";
-import { createSwing, hitFeedback, stepSwing } from "../systems/combat.ts";
+import { artifactText, dmgNumber, sfx, shake } from "../events.ts";
+import { createSwing, hitFeedback, instantSwing, stepSwing } from "../systems/combat.ts";
 import { knockback, pulse } from "../systems/feelSim.ts";
 import { WEAPONS } from "../systems/weapons.ts";
 import { moveBody } from "../world/collision.ts";
@@ -25,7 +25,7 @@ export type EnemyState = (typeof ENEMY_STATE)[keyof typeof ENEMY_STATE];
 
 /** one table for every archetype, so the transition law has a single source */
 export const ENEMY_TRANSITIONS: Record<EnemyState, EnemyState[]> = {
-  idle: ["chase", "telegraph", "hurt", "dead"],
+  idle: ["chase", "telegraph", "hurt", "dead", "appear"],
   chase: ["idle", "telegraph", "hurt", "dead", "vanish"],
   telegraph: ["attack", "hurt", "dead", "chase"],
   vanish: ["appear", "dead"],
@@ -127,6 +127,7 @@ export class Enemy implements Unit {
     this.telegraphTicksLeft = def.TELEGRAPH_TICKS;
     this.x = x;
     this.y = y;
+    if (elite) this.setState(ENEMY_STATE.APPEAR);
   }
 
   setState(next: EnemyState): void {
@@ -242,7 +243,7 @@ export class Enemy implements Unit {
     src.queue.push({ t: "slashArc", x: this.x, y: this.y, dir: 0, reach: 50, deg: 360, combo: 2, ticks: 12 });
     sfx(src.queue, "aftershock_boom", 1, 0.7);
     artifactText(src.queue, this.x, this.y - 12, "BỘC HỎA", "#ff7a3c");
-    const blast = createSwing(src, { side: "player", combo: 0, dir: 0, ox: this.x, oy: this.y, reach: 0, deg: 0, dmg: 3, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+    const blast = instantSwing(src, { side: "player", dir: 0, ox: this.x, oy: this.y, dmg: 3 });
     for (const other of src.enemies.slice()) {
       if (other === this || other.dead) continue;
       const hb = other.hurtRect();
@@ -261,7 +262,7 @@ export class Enemy implements Unit {
       src.runStats.comboSeen = true;
       this.takeDamage(2, src);
       src.particles.burstSpark(this.x, this.y - 5, 6, src.rng);
-      if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 2 });
+      dmgNumber(src.queue, this.x, this.y - 10, 2);
     } else if (status === "burn") {
       if (this.burnTicks === 0) this.burnPulse = 60;
       this.burnTicks = 120;
@@ -328,6 +329,25 @@ export class Enemy implements Unit {
       return;
     }
 
+    // status aura: a slow orbit particle per active status, so the affliction reads at a glance
+    if (this.animTicks % 3 === 0) {
+      const orbA = this.animTicks * 0.3;
+      const ox = this.x + Math.cos(orbA) * 8;
+      const oy = this.y - 5 + Math.sin(orbA) * 3;
+      const h = ((this.animTicks * 2654435761) ^ (this.id * 97)) >>> 0;
+      const jit = ((h % 100) / 100 - 0.5) * 20;
+      if (this.burnTicks > 0) src.particles.emit("ember", ox, oy, jit * 0.6, -26 - (h % 20), "#ff963f");
+      else if (this.freezeTicks > 0) src.particles.emit("ice", ox, oy + 4, jit * 0.4, 8 + (h % 10), "#a8e8ff");
+      else if (this.poisonTicks > 0) src.particles.emit("bubble", ox, oy, jit * 0.5, -16 - (h % 14), "#8f63ae");
+      else if (this.shockTicks > 0) src.particles.emit("bolt", ox, oy, jit, 8 - (h % 30), "#ffe66b");
+      else if (this.wetTicks > 0) src.particles.emit("bubble", ox, oy, jit * 0.5, -10 - (h % 10), "#58caff");
+      else if (this.bleedTicks > 0) src.particles.emit("blood", ox, oy, jit * 0.4, 6 + (h % 12), CONFIG.PALETTE.BLOOD);
+    }
+    if (this.isElite && this.animTicks % 10 === 0) {
+      const a = this.animTicks * 0.37;
+      src.particles.emit("spark", this.x + Math.cos(a) * 7, this.y - 5 + Math.sin(a) * 3, 0, -24, "#ffd166", { life: 0.3 });
+    }
+
     if (this.burnTicks > 0) {
       this.burnTicks--;
       if (--this.burnPulse === 0) {
@@ -338,8 +358,8 @@ export class Enemy implements Unit {
           src.particles.emit("spark", this.x + src.rng.range(-3, 3), this.y - 6, src.rng.range(-12, 12), src.rng.range(-42, -18), "#ff963f", { life: 0.28 });
         }
         sfx(src.queue, "burn_tick", 0.3, 1);
-        artifactText(src.queue, this.x, this.y - 13, "CHÁY", "#ff963f");
-        if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 1 });
+        artifactText(src.queue, this.x, this.y - 13, "CHÁY", CONFIG.PALETTE.ELEMENT.burn);
+        dmgNumber(src.queue, this.x, this.y - 10, 1, "element", CONFIG.PALETTE.ELEMENT.burn);
         if (this.dead) return;
       }
     }
@@ -351,8 +371,8 @@ export class Enemy implements Unit {
         this.takeDamage(dmg, src);
         src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
         sfx(src.queue, "burn_tick", 0.3, 0.7);
-        artifactText(src.queue, this.x, this.y - 13, "ĐỘC", "#8f63ae");
-        if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: dmg });
+        artifactText(src.queue, this.x, this.y - 13, "ĐỘC", CONFIG.PALETTE.ELEMENT.poison);
+        dmgNumber(src.queue, this.x, this.y - 10, dmg, "element", CONFIG.PALETTE.ELEMENT.poison);
         if (this.dead) return;
       }
     }
@@ -363,6 +383,7 @@ export class Enemy implements Unit {
         if (dist(this.x, this.y, other.x, other.y) > e.HEAL_RADIUS) continue;
         other.hp = Math.min(other.maxHp, other.hp + e.HEAL_AMOUNT);
         src.particles.emit("spark", other.x, other.y - 6, 0, -30, "#58ff8a");
+        dmgNumber(src.queue, other.x, other.y - 10, e.HEAL_AMOUNT, "heal");
       }
       sfx(src.queue, "pursuit_proc", 0.3, 1.4);
     }
@@ -451,9 +472,10 @@ export class Enemy implements Unit {
         break;
 
       case ENEMY_STATE.APPEAR: {
+        const appearTicks = this.isElite ? CONFIG.ENEMY.ELITE_SPAWN_TICKS : e.APPEAR_TICKS;
         this.brake(dt);
-        this.z = 6 * (1 - Math.min(1, this.ticksInState / e.APPEAR_TICKS));
-        if (this.ticksInState >= e.APPEAR_TICKS) {
+        this.z = 6 * (1 - Math.min(1, this.ticksInState / appearTicks));
+        if (this.ticksInState >= appearTicks) {
           const toPlayer = Math.atan2(src.player.y - this.y, src.player.x - this.x);
           this.beginTelegraph(src, toPlayer);
         }
@@ -477,8 +499,8 @@ export class Enemy implements Unit {
     if (!this.dead && this.bleedTicks > 0 && this.bleedCd <= 0 && (Math.hypot(this.vx, this.vy) > 10 || this.state === ENEMY_STATE.ATTACK)) {
       this.bleedCd = 30;
       this.takeDamage(1, src);
-      artifactText(src.queue, this.x, this.y - 13, "MÁU", "#c2182b");
-      if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: this.x, y: this.y - 10, value: 1 });
+      artifactText(src.queue, this.x, this.y - 13, "MÁU", CONFIG.PALETTE.ELEMENT.bleed);
+      dmgNumber(src.queue, this.x, this.y - 10, 1);
     }
   }
 
@@ -603,35 +625,27 @@ export class Enemy implements Unit {
     this.setState(ENEMY_STATE.ATTACK);
   }
 
-  private fireShot(src: Sim): void {
+  private spawnShot(src: Sim, a: number, kind?: "ghost" | "lava"): void {
     const e = this.def;
-    const dir = this.telegraphDir;
     src.projectiles.push({
       x: this.x,
       y: this.y - e.BODY_H * 0.5,
-      vx: Math.cos(dir) * e.SHOT_SPEED,
-      vy: Math.sin(dir) * e.SHOT_SPEED,
+      vx: Math.cos(a) * e.SHOT_SPEED,
+      vy: Math.sin(a) * e.SHOT_SPEED,
       dmg: e.SHOT_DMG * this.dmgScale,
       ticksLeft: e.SHOT_LIFE_TICKS,
       owner: "enemy",
+      ...(kind !== undefined ? { kind } : {}),
     });
+  }
+
+  private fireShot(src: Sim): void {
+    this.spawnShot(src, this.telegraphDir);
     sfx(src.queue, "shoot", 0.8, 1);
   }
 
   private fireSpiral(src: Sim): void {
-    const e = this.def;
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2 + this.animTicks * 0.05;
-      src.projectiles.push({
-        x: this.x,
-        y: this.y - e.BODY_H * 0.5,
-        vx: Math.cos(a) * e.SHOT_SPEED,
-        vy: Math.sin(a) * e.SHOT_SPEED,
-        dmg: e.SHOT_DMG * this.dmgScale,
-        ticksLeft: e.SHOT_LIFE_TICKS,
-        owner: "enemy",
-      });
-    }
+    for (let i = 0; i < 8; i++) this.spawnShot(src, (i / 8) * Math.PI * 2 + this.animTicks * 0.05);
     sfx(src.queue, "shoot", 0.8, 0.7);
   }
 
@@ -659,36 +673,14 @@ export class Enemy implements Unit {
     const n = this.kingPhase === 3 ? 8 : 1;
     for (let i = 0; i < n; i++) {
       const a = this.kingPhase === 3 ? (i / n) * Math.PI * 2 : this.telegraphDir + src.rng.range(-0.1, 0.1);
-      src.projectiles.push({
-        x: this.x,
-        y: this.y - e.BODY_H * 0.5,
-        vx: Math.cos(a) * e.SHOT_SPEED,
-        vy: Math.sin(a) * e.SHOT_SPEED,
-        dmg: e.SHOT_DMG * this.dmgScale,
-        ticksLeft: e.SHOT_LIFE_TICKS,
-        owner: "enemy",
-        kind: "ghost",
-      });
+      this.spawnShot(src, a, "ghost");
     }
     sfx(src.queue, "shoot", 0.8, 0.6);
   }
 
   /** a raging golem's slam spits three lava globs out at 120° */
   private fireLava(src: Sim): void {
-    const e = this.def;
-    for (let i = 0; i < 3; i++) {
-      const a = this.telegraphDir + ((i - 1) * Math.PI * 2) / 3;
-      src.projectiles.push({
-        x: this.x,
-        y: this.y - e.BODY_H * 0.5,
-        vx: Math.cos(a) * e.SHOT_SPEED,
-        vy: Math.sin(a) * e.SHOT_SPEED,
-        dmg: e.SHOT_DMG * this.dmgScale,
-        ticksLeft: e.SHOT_LIFE_TICKS,
-        owner: "enemy",
-        kind: "lava",
-      });
-    }
+    for (let i = 0; i < 3; i++) this.spawnShot(src, this.telegraphDir + ((i - 1) * Math.PI * 2) / 3, "lava");
     sfx(src.queue, "aftershock_boom", 0.5, 1.2);
   }
 

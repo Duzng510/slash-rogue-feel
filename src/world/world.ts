@@ -1,8 +1,8 @@
 import { CONFIG, isScripted, type EnemyKind } from "../config.ts";
-import { makeRng } from "../mathx.ts";
+import { makeRng, shuffle } from "../mathx.ts";
 import { EventQueue, sfx } from "../events.ts";
 import { ParticlePool } from "../systems/particles.ts";
-import { resolveHits, resolveFire, createSwing, hitFeedback } from "../systems/combat.ts";
+import { resolveHits, resolveFire, hitFeedback, instantSwing } from "../systems/combat.ts";
 import { resolveProjectiles } from "../systems/projectiles.ts";
 import { ARTIFACTS, ARTIFACT_UNLOCKS, CURSES, CURSE_UNLOCKS, type Artifact, type ArtifactId, type Curse, type CurseId, type FireTrail } from "../systems/artifacts.ts";
 import { emptyStats, resetStats, type RunStats, type EndMode } from "../systems/runStats.ts";
@@ -88,6 +88,7 @@ export class World implements Sim {
   private lastRooms = 0;
   private lastArtifacts = 0;
   private lastTaken = 0;
+  private bossIntroPending = false;
 
   constructor(seed: number = CONFIG.SEED, achievements: Achievements = emptyAchievements()) {
     this.rng = makeRng(seed);
@@ -152,10 +153,7 @@ export class World implements Sim {
   });
     const bosses = markers.filter((spawn) => isScripted(spawn.kind));
     const pool = markers.filter((spawn) => !isScripted(spawn.kind));
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(this.rng.next() * (i + 1));
-      [pool[i], pool[j]] = [pool[j]!, pool[i]!];
-    }
+    shuffle(pool, this.rng.next);
     const want = CONFIG.ROOMS.WAVES[index] ?? pool.length;
     const baseCount = Math.min(pool.length, Math.max(0, want - bosses.length));
     const selected = pool.slice(0, baseCount);
@@ -173,6 +171,8 @@ export class World implements Sim {
   }
 
   loadRoom(index: number, keepSweep = true): void {
+    // iris-wipe transition centred on where the player stood at the door
+    this.queue.push({ t: "roomTransition", x: this.player.x, y: this.player.y });
     const previousBiome = this.currentBiome.id;
     this.roomIndex = ((index % this.roomTotal) + this.roomTotal) % this.roomTotal;
     this.currentBiome = biomeForRoom(this.roomIndex);
@@ -188,13 +188,14 @@ export class World implements Sim {
     this.curseTab = false;
     this.shopOffers = null;
     this.runStats.roomKills = 0;
+    this.hitStopTicks = 0;
     for (const s of this.waveSpawns(this.roomIndex)) {
       this.spawnEnemy(s.x, s.y, s.kind, !isScripted(s.kind) && this.rng.next() < 0.15);
     }
+    this.bossIntroPending = this.enemies.some((enemy) => enemy.kind === "boss" || enemy.kind === "king");
     this.syncUnits();
     this.player.reset(this.room.start.x, this.room.start.y);
     if (keepSweep) this.particles.reset();
-    this.hitStopTicks = 0;
     this.victory = false;
     this.banner(
       biomeChanged ? `VÀO ${this.currentBiome.name.toLocaleUpperCase("vi-VN")}` : `${this.roomIndex + 1}/${this.roomTotal}  ${this.room.name}`,
@@ -264,13 +265,15 @@ export class World implements Sim {
     return n;
   }
 
+  private applyGlasscannon(): void {
+    this.player.maxHp = 3;
+    this.player.hp = Math.min(this.player.hp, 3);
+  }
+
   chooseArtifact(id: ArtifactId): boolean {
     if (!this.artifactChoices.some(b => b.id === id) || this.artifacts.has(id)) return false;
     this.artifacts.add(id);
-    if (id === "glasscannon") {
-      this.player.maxHp = 3;
-      this.player.hp = Math.min(this.player.hp, 3);
-    }
+    if (id === "glasscannon") this.applyGlasscannon();
     this.rewardedRooms.add(this.roomIndex);
     this.runStats.artifactsTaken++;
     this.artifactChoices = [];
@@ -289,10 +292,7 @@ export class World implements Sim {
     this.runStats.gold -= offer.price;
     if (offer.kind === "artifact" && offer.artifact !== undefined) {
       this.artifacts.add(offer.artifact.id);
-      if (offer.artifact.id === "glasscannon") {
-        this.player.maxHp = 3;
-        this.player.hp = Math.min(this.player.hp, 3);
-      }
+      if (offer.artifact.id === "glasscannon") this.applyGlasscannon();
       this.runStats.artifactsTaken++;
     } else if (offer.kind === "heal") {
       this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2 * CONFIG.ASCENSION.playerHealMultiplier);
@@ -327,10 +327,7 @@ export class World implements Sim {
       pool.push({ kind: "artifact", price: CONFIG.SHOP.ARTIFACT, artifact: arts[Math.floor(this.artifactRng.next() * arts.length)] });
     }
     if (this.curses.size > 0) pool.push({ kind: "curse", price: CONFIG.SHOP.CURSE });
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(this.artifactRng.next() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]];
-    }
+    shuffle(pool, this.artifactRng.next);
     return pool.slice(0, 3).map((offer) => ({
       ...offer,
       price: Math.ceil(offer.price * CONFIG.ASCENSION.shopPriceMultiplier),
@@ -366,10 +363,7 @@ export class World implements Sim {
     }
     for (const a of offer.artifacts) {
       this.artifacts.add(a.id);
-      if (a.id === "glasscannon") {
-        this.player.maxHp = 3;
-        this.player.hp = Math.min(this.player.hp, 3);
-      }
+      if (a.id === "glasscannon") this.applyGlasscannon();
     }
     this.runStats.artifactsTaken += offer.artifacts.length;
     this.rewardedRooms.add(this.roomIndex);
@@ -414,6 +408,15 @@ export class World implements Sim {
     if (this.artifactChoices.length > 0) return;
     if (this.shopOffers !== null) return;
     if (this.pendingEnd !== null) return;
+    if (this.bossIntroPending) {
+      this.bossIntroPending = false;
+      const boss = this.enemies.find((enemy) => enemy.kind === "boss" || enemy.kind === "king");
+      if (boss !== undefined) {
+        this.hitStopTicks = Math.max(this.hitStopTicks, 60);
+        const name = boss.kind === "king" ? "VUA LÃNG QUÊN" : "BẠO CHÚA";
+        this.queue.push({ t: "bossIntro", name, x: boss.x, y: boss.y });
+      }
+    }
     this.tickCount++;
     if (this.bannerTicks > 0) this.bannerTicks--;
     if (this.introLineTicks > 0) this.introLineTicks--;
@@ -460,18 +463,7 @@ export class World implements Sim {
       const tx = Math.floor(u.x / T);
       const ty = Math.floor(u.y / T);
       if (this.room.at(tx, ty) !== TILE.TRAP || !u.canBeHit()) continue;
-      const sw = createSwing(this, {
-        side: "enemy",
-        combo: 0,
-        dir: 0,
-        ox: u.x,
-        oy: u.y,
-        reach: 0,
-        deg: 0,
-        dmg: CONFIG.ROOMS.TRAP_DMG * CONFIG.ASCENSION.trapDamageMultiplier,
-        knockback: 0,
-        fd: { startup: 0, active: 1, recovery: 0 },
-      });
+      const sw = instantSwing(this, { side: "enemy", dir: 0, ox: u.x, oy: u.y, dmg: CONFIG.ROOMS.TRAP_DMG * CONFIG.ASCENSION.trapDamageMultiplier });
       const killed = u.onHit(sw, u.x, u.y, this);
       hitFeedback(this, u, sw, u.x, u.y, killed, false);
       this.room.setTile(tx, ty, TILE.TRAP_ARMED);
@@ -525,19 +517,13 @@ export class World implements Sim {
           const gate = ARTIFACT_UNLOCKS[b.id];
           return gate === null || isUnlocked(gate, this.achievements);
         });
-        for (let i = pool.length - 1; i > 0; i--) {
-          const j = Math.floor(this.artifactRng.next() * (i + 1));
-          [pool[i], pool[j]] = [pool[j], pool[i]];
-        }
+        shuffle(pool, this.artifactRng.next);
         this.artifactChoices = pool.slice(0, CONFIG.ASCENSION.artifactChoices);
         if (this.runStats.roomsCleared % CONFIG.CURSES.OFFER_EVERY === 0 &&
           this.curses.size < CONFIG.CURSES.MAX_CURSES && pool.length >= 5) {
           const cursePool = CURSES.filter(c => !this.curses.has(c.id) &&
             (CURSE_UNLOCKS[c.id] === null || this.achievements.earned.has(CURSE_UNLOCKS[c.id]!)));
-          for (let i = cursePool.length - 1; i > 0; i--) {
-            const j = Math.floor(this.artifactRng.next() * (i + 1));
-            [cursePool[i], cursePool[j]] = [cursePool[j], cursePool[i]];
-          }
+          shuffle(cursePool, this.artifactRng.next);
           this.curseOffer = { artifacts: pool.slice(3, 5), curses: cursePool.slice(0, 2) };
         }
         if (this.artifactChoices.length > 0) return;
