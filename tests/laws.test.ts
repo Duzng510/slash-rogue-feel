@@ -337,6 +337,16 @@ heading("Player defence");
   ok("dash grants i-frames", w.player.dashIframeTicks > 0 && !w.player.canBeHit());
   ok("dash is stateful", w.player.state === PLAYER_STATE.DASH);
 
+  const wm = sandbox();
+  wm.player.character = "mage";
+  wm.tick(intent({ dash: true }));
+  for (let i = 0; i < 8; i++) wm.tick(intent());
+  let ghostSprite = "";
+  wm.particles.visit((s) => {
+    if (s.kind === "ghost") ghostSprite = s.sprite ?? "";
+  });
+  ok("dash afterimage matches the active character's sprite", ghostSprite === "player_mage", `got ${ghostSprite || "none"}`);
+
   const w2 = sandbox();
   const e = makeEnemy(w2.player.x + 10, w2.player.y);
   w2.enemies.push(e);

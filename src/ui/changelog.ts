@@ -5,11 +5,32 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.24.0";
+export const APP_VERSION = "v0.27.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.27.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Lớp CRT:</b> scanline + tối dần rìa màn hình kiểu màn hình bóng đèn hình, canvas game nudge contrast/saturation — bật/tắt bằng class 'crt' trên body, không đụng code.",
+    ],
+  },
+  {
+    version: "v0.26.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Vệt chém theo hình vũ khí:</b> giáo & song dao đâm thành đường thẳng xuyên qua, đao & roi combo 2 quét thành vệt dày 4 lớp trailing, kiếm và roi combo 1 giữ cung chém gọn — đổi vũ khí là đổi 'chữ ký' trên màn hình.",
+    ],
+  },
+  {
+    version: "v0.25.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Đuôi đạn:</b> mỗi viên đạn kéo 4 lớp afterimage theo màu riêng — vệt cam cho cầu lửa, tím cho ma hồn/tinh linh, dung nham cho lava; boss bắn vòng giờ tỏa cả chùm vệt.",
+    ],
+  },
   {
     version: "v0.24.0",
     date: "2026-11-12",

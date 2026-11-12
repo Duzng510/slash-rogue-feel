@@ -300,10 +300,10 @@ export class Renderer {
     this.drawArcs(gg, ox, oy, true);
     this.drawSlices(gg, ox, oy, true);
     this.drawBeams(gg, ox, oy, true);
+    this.drawProjectileTrails(gg, ox, oy, true);
     this.drawProjectiles(gg, ox, oy, true);
     this.drawTelegraphs(gg, ox, oy, true);
     this.drawTorches(gg, ox, oy, true);
-
     // Fake gaussian blur via downscale -> upscale
     const hg = this.glowHalfG;
     hg.clearRect(0, 0, hw, hh);
@@ -320,6 +320,7 @@ export class Renderer {
     this.drawArcs(g, ox, oy, false);
     this.drawSlices(g, ox, oy, false);
     this.drawBeams(g, ox, oy, false);
+    this.drawProjectileTrails(g, ox, oy, false);
     this.drawProjectiles(g, ox, oy, false);
 
     this.drawParticles(g, ox, oy);
@@ -696,6 +697,76 @@ export class Renderer {
       const baseColor = isCombo2 ? P.SLASH_GOLD : P.SLASH_CYAN;
       const deepColor = isCombo2 ? P.SLASH_ORANGE_DEEP : P.SLASH_CYAN_DEEP;
 
+      // --- thrust weapons (spear, dagger): a piercing line, not an arc ---
+      if (a.deg <= 50) {
+        const x2 = cx + Math.cos(a.dir) * r;
+        const y2 = cy + Math.sin(a.dir) * r;
+        g.globalAlpha = rd.SLASH_ALPHA * (0.4 + 0.6 * t);
+        g.strokeStyle = baseColor;
+        g.lineWidth = glowOnly ? 5 : 3;
+        g.beginPath();
+        g.moveTo(cx, cy);
+        g.lineTo(x2, y2);
+        g.stroke();
+        if (!glowOnly) {
+          g.globalAlpha = rd.SLASH_ALPHA * t * 0.9;
+          g.strokeStyle = P.SLASH_EDGE;
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(cx, cy);
+          g.lineTo(x2, y2);
+          g.stroke();
+          // sharp tip spark
+          g.fillStyle = P.SLASH_EDGE;
+          g.fillRect(x2 - 1, y2 - 1, 2, 2);
+        }
+        continue;
+      }
+
+      // --- sweep weapons (greatsword, whip combo 2): thick body + heavy follow-through ---
+      if (a.deg >= 150) {
+        g.globalAlpha = rd.SLASH_ALPHA * (0.35 + 0.65 * t);
+        const grad = g.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
+        grad.addColorStop(0, deepColor);
+        grad.addColorStop(0.7, baseColor);
+        grad.addColorStop(1, P.SLASH_EDGE);
+        g.fillStyle = grad;
+        this.wedge(g, cx, cy, a.dir, r, a.deg, 0.4);
+        g.fill();
+
+        // four trailing wedges instead of two — reads as a heavy follow-through
+        g.fillStyle = baseColor;
+        for (let k = 1; k <= 4; k++) {
+          g.globalAlpha = rd.SLASH_ALPHA * t * (0.32 - 0.06 * k);
+          this.wedge(g, cx, cy, a.dir - 0.06 * k, r * (0.98 - 0.02 * k), a.deg * (0.9 - 0.04 * k), 0.5);
+          g.fill();
+        }
+
+        if (glowOnly) continue;
+
+        g.globalAlpha = rd.SLASH_ALPHA * (0.65 + 0.35 * t);
+        g.strokeStyle = P.SLASH_EDGE;
+        g.lineWidth = 1.5;
+        g.beginPath();
+        g.arc(cx, cy, r, a.dir - half, a.dir + half);
+        g.stroke();
+
+        g.globalAlpha = rd.SLASH_ALPHA * t * 0.85;
+        g.strokeStyle = P.SLASH_EDGE;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.arc(cx, cy, r * 0.88, a.dir - half * 0.9, a.dir + half * 0.9);
+        g.stroke();
+
+        const tipX = cx + Math.cos(a.dir + half) * r;
+        const tipY = cy + Math.sin(a.dir + half) * r;
+        g.fillStyle = P.SLASH_EDGE;
+        g.fillRect(tipX - 1, tipY - 1, 2, 2);
+        continue;
+      }
+
+      // --- strike weapons (katana, whip combo 1): the standard arc ---
+
       // Layer 1: Body glow gradient
       g.globalAlpha = rd.SLASH_ALPHA * (0.35 + 0.65 * t);
       const grad = g.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
@@ -1033,6 +1104,33 @@ export class Renderer {
 
   private drawProjectiles(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     for (const p of this.world.projectiles) this.drawOneProjectile(g, p, ox, oy, glowOnly);
+  }
+
+  /** afterimage trails: 4 faded ghosts behind each shot, matching its palette */
+  private drawProjectileTrails(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
+    for (const p of this.world.projectiles) {
+      if (!p.trail) continue;
+      for (let i = 0; i < p.trail.length; i++) {
+        const t = p.trail[i];
+        const fade = 1 - i / p.trail.length;
+        const x = Math.round(t.x - ox);
+        const y = Math.round(t.y - oy);
+        let color: string;
+        if (p.kind === "ghost" || p.kind === "bolt") color = "#c99ae6";
+        else if (p.kind === "lava") color = "#ffb14d";
+        else color = p.owner === "player" ? "#ff963f" : P.PROJ;
+        if (glowOnly) {
+          g.globalAlpha = fade * 0.45;
+          g.fillStyle = color;
+          g.fillRect(x - 2, y - 2, 4, 4);
+        } else {
+          g.globalAlpha = fade * 0.75;
+          g.fillStyle = color;
+          g.fillRect(x - 1, y - 1, 2, 2);
+        }
+      }
+    }
+    g.globalAlpha = 1;
   }
 
   private drawOneProjectile(g: CanvasRenderingContext2D, p: Projectile, ox: number, oy: number, glowOnly = false): void {

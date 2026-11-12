@@ -44,6 +44,8 @@ export type Projectile = {
   vy: number;
   dmg: number;
   ticksLeft: number;
+  /** render-only: recent positions for an afterimage trail */
+  trail?: { x: number; y: number }[];
   owner: Side;
   status?: Swing["status"];
   kind?: "bolt" | "fireball" | "ghost" | "lava";

@@ -10,6 +10,11 @@ export function resolveProjectiles(src: Sim): void {
   const hb = pl.hurtRect();
   const keep: Projectile[] = [];
   for (const p of src.projectiles) {
+    // render-only afterimage: record positions before moving (no sim effect)
+    if (!p.trail) p.trail = [];
+    p.trail.unshift({ x: p.x, y: p.y });
+    if (p.trail.length > 4) p.trail.pop();
+
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     p.ticksLeft--;

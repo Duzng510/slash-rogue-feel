@@ -355,7 +355,7 @@ export class Player implements Unit {
       this.dashTicks = 0;
       this.dashIframeTicks = 0;
       this.setState(PLAYER_STATE.IDLE);
-      src.particles.afterimage(ox, oy - CONFIG.PLAYER.BODY_H, "player");
+      src.particles.afterimage(ox, oy - CONFIG.PLAYER.BODY_H, `player_${this.character}`);
       sfx(src.queue, "teleport", 0.7, 1.1);
     } else {
       this.dashTicks = d.TICKS;
@@ -371,7 +371,7 @@ export class Player implements Unit {
       this.vx = Math.cos(this.dashDir) * CONFIG.DASH.SPEED;
       this.vy = Math.sin(this.dashDir) * CONFIG.DASH.SPEED;
       this.ghostTick++;
-      if (this.ghostTick % 2 === 0) src.particles.afterimage(this.x, this.y - p.BODY_H, "player");
+      if (this.ghostTick % 2 === 0) src.particles.afterimage(this.x, this.y - p.BODY_H, `player_${this.character}`);
       if (--this.dashTicks <= 0) this.setState(PLAYER_STATE.IDLE);
       return;
     }
