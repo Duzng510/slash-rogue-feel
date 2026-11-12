@@ -1218,6 +1218,8 @@ heading("Priority 4 — ranged & teleporter");
   while (tp.state !== ENEMY_STATE.VANISH && vg++ < 120) wt.tick(intent());
   ok("a teleporter in range enters VANISH", tp.state === ENEMY_STATE.VANISH, `state ${tp.state}`);
   ok("a vanished teleporter cannot be hit", !tp.canBeHit());
+  wt.tick(intent());
+  ok("vanishing lifts the body off its shadow", tp.z > 0 && tp.z <= 6, `z ${tp.z.toFixed(2)}`);
 
   // teleporter cycle: VANISH -> APPEAR -> TELEGRAPH -> ATTACK, materialising at or behind the player
   let sawAppear = false;
@@ -1240,6 +1242,7 @@ heading("Priority 4 — ranged & teleporter");
   ok("it reappears at its materialise distance", Math.abs(apd - enemyDef("teleporter").APPEAR_DIST) < 0.5, `dist ${apd}`);
   ok("it never reappears in front of the player", dot <= 0.001, `dot ${dot.toFixed(2)}`);
   ok("after reappearing it telegraphs an attack", sawTelegraph, `state ${tp.state}`);
+  ok("the body lands after materialising", tp.z === 0, `z ${tp.z}`);
 
   // determinism: identical seeds fire the shot on the same tick
   const d1 = sandbox();

@@ -73,6 +73,8 @@ export class Enemy implements Unit {
   hurtTicks = 0;
   corpseTicks: number;
   animTicks = 0;
+  /** z-height in px: body hovers above its ground shadow (jumper/teleporter vanish arcs) */
+  z = 0;
   burnTicks = 0;
   wetTicks = 0;
   shockTicks = 0;
@@ -132,6 +134,8 @@ export class Enemy implements Unit {
     if (next !== this.state) {
       this.state = next;
       this.ticksInState = 0;
+      // only the vanish/appear pair keeps altitude; every other state lands the body
+      if (next !== ENEMY_STATE.VANISH && next !== ENEMY_STATE.APPEAR) this.z = 0;
     }
   }
 
@@ -442,11 +446,13 @@ export class Enemy implements Unit {
 
       case ENEMY_STATE.VANISH:
         this.brake(dt);
+        this.z = 6 * Math.min(1, this.ticksInState / e.VANISH_TICKS);
         if (this.ticksInState >= e.VANISH_TICKS) this.doAppear(src);
         break;
 
       case ENEMY_STATE.APPEAR: {
         this.brake(dt);
+        this.z = 6 * (1 - Math.min(1, this.ticksInState / e.APPEAR_TICKS));
         if (this.ticksInState >= e.APPEAR_TICKS) {
           const toPlayer = Math.atan2(src.player.y - this.y, src.player.x - this.x);
           this.beginTelegraph(src, toPlayer);

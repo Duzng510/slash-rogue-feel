@@ -1,10 +1,12 @@
-import { CONFIG } from "../config.ts";
+import { CONFIG, enemyDef } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
-import { ENEMY_STATE } from "../entities/enemy.ts";
+import { ENEMY_STATE, type Enemy } from "../entities/enemy.ts";
 import { PLAYER_STATE } from "../entities/player.ts";
 import { TILE } from "../world/rooms.ts";
 import { fitAxes, isRotated } from "../ui/immersive.ts";
 import { facingOffsets, buildAnimSets, flipH, type Sprite, type SpriteSet } from "./pixelart.ts";
+import type { Slot } from "../systems/particles.ts";
+import type { Projectile } from "../sim/types.ts";
 import type { Camera } from "./camera.ts";
 import type { World } from "../world/world.ts";
 
@@ -257,6 +259,7 @@ export class Renderer {
 
     g.fillStyle = this.world.currentBiome.palette.outside;
     g.fillRect(0, 0, CONFIG.WORLD.INTERNAL_W, CONFIG.WORLD.INTERNAL_H);
+    this.drawParallax(g);
 
     // kill-cam: everything world-space gets the zoom punch; first frame also desaturates
     const iw = CONFIG.WORLD.INTERNAL_W;
@@ -285,8 +288,7 @@ export class Renderer {
     g.globalAlpha = 1;
     this.drawTelegraphs(g, ox, oy);
     this.drawShadows(g, ox, oy);
-    this.drawEnemies(g, ox, oy);
-    this.drawPlayer(g, ox, oy);
+    this.drawSortedWorld(g, ox, oy);
 
     // --- Glow Bloom Pass ---
     const hw = Math.floor(iw / 2);
@@ -447,6 +449,25 @@ export class Renderer {
     g.save();
     g.globalCompositeOperation = "multiply";
     g.drawImage(this.lightCanvas, 0, 0);
+    g.restore();
+  }
+
+  /** distant biome backdrop, scrolled at 0.4x camera speed; drawn behind everything */
+  private drawParallax(g: CanvasRenderingContext2D): void {
+    const bg = this.sprites[`parallax_${this.world.currentBiome.id}`];
+    if (bg === undefined) return;
+    const iw = CONFIG.WORLD.INTERNAL_W;
+    const ih = CONFIG.WORLD.INTERNAL_H;
+    const px = Math.round(-this.origin.x * 0.4) % iw;
+    const py = Math.round(-this.origin.y * 0.4) % ih;
+    g.save();
+    // the distant layer is the one place a touch of smoothing reads as "far away"
+    g.imageSmoothingEnabled = true;
+    for (let kx = -1; kx <= 1; kx++) {
+      for (let ky = -1; ky <= 1; ky++) {
+        g.drawImage(bg.c, px + kx * iw, py + ky * ih, iw, ih);
+      }
+    }
     g.restore();
   }
 
@@ -624,6 +645,22 @@ export class Renderer {
       for (let tx = x0; tx <= x1; tx++) {
         const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
         g.drawImage(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy));
+      }
+    }
+
+    // --- oblique wall faces: bottom 6px strip over walls (and closed doors) that stand above floor ---
+    // collision and room data are untouched; this only changes what is drawn
+    const face = this.sprites[`wallface_${this.world.currentBiome.id}`];
+    if (face !== undefined) {
+      const FACE_H = face.h;
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          const t = room.at(tx, ty);
+          if (t !== TILE.WALL && t !== TILE.DOOR) continue;
+          const below = room.at(tx, ty + 1);
+          if (below === TILE.WALL || below === TILE.CRATE) continue;
+          g.drawImage(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - FACE_H - oy));
+        }
       }
     }
   }
@@ -811,134 +848,157 @@ export class Renderer {
     this.ditherRect(g, px + 1, py + 1, s.w - 2, s.h - 1, P.VOID, 0.5);
   }
 
-  private drawEnemies(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    const target = this.world.player.autoTargetId;
+  /** depth sort: enemies, player, projectiles and particles in one y-sorted draw list.
+   *  Floor indicators (telegraphs, arcs, beams) stay below; damage numbers stay above. */
+  private drawSortedWorld(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    type Item = { y: number; draw: () => void };
+    const items: Item[] = [];
     for (const en of this.world.enemies) {
       if (en.removed) continue;
-      const baseSprite = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
-      const white = this.white[en.def.SPRITE_KEY] ?? this.white.enemy;
-      const sc = en.isElite ? 1.3 : 1;
+      items.push({ y: en.y, draw: () => this.drawOneEnemy(g, en, ox, oy) });
+    }
+    items.push({ y: this.world.player.y, draw: () => this.drawPlayer(g, ox, oy) });
+    for (const p of this.world.projectiles) {
+      items.push({ y: p.y, draw: () => this.drawOneProjectile(g, p, ox, oy, false) });
+    }
+    const density = CONFIG.SLIDERS.particles;
+    if (density > 0.01) {
+      this.world.particles.visit((s) => {
+        if (!s.live) return;
+        items.push({ y: s.y, draw: () => this.drawOneParticle(g, s, ox, oy, density) });
+      });
+    }
+    items.sort((a, b) => a.y - b.y);
+    for (const it of items) it.draw();
+  }
 
-      // --- multi-frame walk + right-facing mirror ---
-      const set = this.anims[en.def.SPRITE_KEY] ?? this.anims.enemy;
-      let sp = baseSprite;
-      if (set) {
-        const fi = Math.floor(en.animTicks / set.tickDur) % set.frames.length;
-        sp = Math.cos(en.facing) > 0.15 ? set.mirrored[fi] : set.frames[fi];
-      } else if (Math.cos(en.facing) > 0.15) {
-        sp = this.mirrored(baseSprite, en.def.SPRITE_KEY);
-      }
+  private drawOneEnemy(g: CanvasRenderingContext2D, en: Enemy, ox: number, oy: number): void {
+    const target = this.world.player.autoTargetId;
+    if (en.removed) return;
+    const baseSprite = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
+    const white = this.white[en.def.SPRITE_KEY] ?? this.white.enemy;
+    const sc = en.isElite ? 1.3 : 1;
 
-      // --- squash & stretch during the attack's active window ---
-      let sx = 1;
-      let sy = 1;
-      if (en.state === ENEMY_STATE.ATTACK && en.swing !== null && en.swing.phase === "active") {
-        const t = 1 - en.swing.ticksLeft / Math.max(1, en.swing.fd.active);
-        const pulse = 0.08 * Math.sin(Math.min(1, Math.max(0, t)) * Math.PI);
-        sx = 1 + pulse;
-        sy = 1 - pulse;
-      }
-      const w = Math.round(sp.w * sc);
-      const h = Math.round(sp.h * sc);
-      const x = Math.round(en.x - sp.ax * sc - ox);
-      const y = Math.round(en.y - sp.ay * sc - oy);
-      const flashing = (this.flash.get(en.id) ?? 0) > 0;
+    // --- multi-frame walk + right-facing mirror ---
+    const set = this.anims[en.def.SPRITE_KEY] ?? this.anims.enemy;
+    let sp = baseSprite;
+    if (set) {
+      const fi = Math.floor(en.animTicks / set.tickDur) % set.frames.length;
+      sp = Math.cos(en.facing) > 0.15 ? set.mirrored[fi] : set.frames[fi];
+    } else if (Math.cos(en.facing) > 0.15) {
+      sp = this.mirrored(baseSprite, en.def.SPRITE_KEY);
+    }
 
-      if (en.dead) {
-        const total = en.def.CORPSE_TICKS;
-        g.globalAlpha = Math.max(0, en.corpseTicks / total);
-        g.drawImage(sp.c, x, y + (total - en.corpseTicks), w, h);
-        g.globalAlpha = 1;
-        continue;
-      }
+    // --- squash & stretch during the attack's active window ---
+    let sx = 1;
+    let sy = 1;
+    if (en.state === ENEMY_STATE.ATTACK && en.swing !== null && en.swing.phase === "active") {
+      const t = 1 - en.swing.ticksLeft / Math.max(1, en.swing.fd.active);
+      const pulse = 0.08 * Math.sin(Math.min(1, Math.max(0, t)) * Math.PI);
+      sx = 1 + pulse;
+      sy = 1 - pulse;
+    }
+    const w = Math.round(sp.w * sc);
+    const h = Math.round(sp.h * sc);
+    const x = Math.round(en.x - sp.ax * sc - ox);
+    // z-height lifts the body off the ground; the shadow (drawShadows) stays put
+    const y = Math.round(en.y - sp.ay * sc - en.z * sc - oy);
+    const flashing = (this.flash.get(en.id) ?? 0) > 0;
 
-      if (en.state === ENEMY_STATE.VANISH) continue;
-      const appearTicks = en.def.APPEAR_TICKS;
-      const fade =
-        en.state === ENEMY_STATE.APPEAR && appearTicks > 0
-          ? 0.3 + 0.7 * Math.min(1, en.ticksInState / appearTicks)
-          : 1;
-      const ecx = Math.round(en.x - ox);
-      const ecy = Math.round(en.y - oy);
-      g.save();
-      g.translate(ecx, ecy);
-      g.scale(sx, sy);
-      g.translate(-ecx, -ecy);
-      if (flashing) g.drawImage(white, x, y, w, h);
-      else {
-        g.globalAlpha = fade;
-        g.drawImage(sp.c, x, y, w, h);
-        g.globalAlpha = 1;
-        const status = en.shockTicks > 0 ? 2 : en.wetTicks > 0 ? 1 : en.burnTicks > 0 ? 0 : -1;
-        if (status >= 0) {
-          g.globalAlpha = 0.55 * fade;
-          g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y, w, h);
-          g.globalAlpha = 1;
-        }
-      }
-      g.restore();
-      if (en.shockTicks > 0) {
-        const bx = x + Math.floor(sp.w / 2) - 1;
-        const by = y - 4;
-        g.globalAlpha = 0.9;
-        g.fillStyle = "#ffe66b";
-        g.fillRect(bx, by, 3, 1);
-        g.fillRect(bx - 1, by + 1, 3, 1);
-        g.fillRect(bx, by + 2, 2, 1);
-        g.fillRect(bx - 2, by + 3, 3, 1);
-        g.globalAlpha = 1;
-      }
-      const active = [en.burnTicks, en.wetTicks, en.shockTicks, en.poisonTicks, en.freezeTicks, en.bleedTicks];
-      const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100", "00100/01110/11111/01110/00100", "10101/01110/11111/01110/10101", "00100/01110/11111/11111/01110"];
-      let iconX = Math.round(en.x - ox - (active.filter(t => t > 0).length * 7 - 2) / 2);
-      for (let i = 0; i < active.length; i++) {
-        if (active[i] <= 0) continue;
-        g.fillStyle = P.VOID;
-        g.fillRect(iconX - 1, y - 9, 7, 7);
-        g.fillStyle = ["#ff963f", "#58caff", "#ffe66b", "#8f63ae", "#a8e8ff", "#c2182b"][i];
-        icons[i].split("/").forEach((row, iy) => {
-          for (let ix = 0; ix < row.length; ix++) if (row[ix] === "1") g.fillRect(iconX + ix, y - 8 + iy, 1, 1);
-        });
-        iconX += 7;
-      }
+    if (en.dead) {
+      const total = en.def.CORPSE_TICKS;
+      g.globalAlpha = Math.max(0, en.corpseTicks / total);
+      g.drawImage(sp.c, x, y + (total - en.corpseTicks), w, h);
+      g.globalAlpha = 1;
+      return;
+    }
 
-      if (en.blink()) {
-        g.globalAlpha = 0.5;
-        g.drawImage(white, x, y, w, h);
+    if (en.state === ENEMY_STATE.VANISH) return;
+    const appearTicks = en.def.APPEAR_TICKS;
+    const fade =
+      en.state === ENEMY_STATE.APPEAR && appearTicks > 0
+        ? 0.3 + 0.7 * Math.min(1, en.ticksInState / appearTicks)
+        : 1;
+    const ecx = Math.round(en.x - ox);
+    const ecy = Math.round(en.y - oy);
+    g.save();
+    g.translate(ecx, ecy);
+    g.scale(sx, sy);
+    g.translate(-ecx, -ecy);
+    if (flashing) g.drawImage(white, x, y, w, h);
+    else {
+      g.globalAlpha = fade;
+      g.drawImage(sp.c, x, y, w, h);
+      g.globalAlpha = 1;
+      const status = en.shockTicks > 0 ? 2 : en.wetTicks > 0 ? 1 : en.burnTicks > 0 ? 0 : -1;
+      if (status >= 0) {
+        g.globalAlpha = 0.55 * fade;
+        g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y, w, h);
         g.globalAlpha = 1;
       }
+    }
+    g.restore();
+    if (en.shockTicks > 0) {
+      const bx = x + Math.floor(sp.w / 2) - 1;
+      const by = y - 4;
+      g.globalAlpha = 0.9;
+      g.fillStyle = "#ffe66b";
+      g.fillRect(bx, by, 3, 1);
+      g.fillRect(bx - 1, by + 1, 3, 1);
+      g.fillRect(bx, by + 2, 2, 1);
+      g.fillRect(bx - 2, by + 3, 3, 1);
+      g.globalAlpha = 1;
+    }
+    const active = [en.burnTicks, en.wetTicks, en.shockTicks, en.poisonTicks, en.freezeTicks, en.bleedTicks];
+    const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100", "00100/01110/11111/01110/00100", "10101/01110/11111/01110/10101", "00100/01110/11111/11111/01110"];
+    let iconX = Math.round(en.x - ox - (active.filter(t => t > 0).length * 7 - 2) / 2);
+    for (let i = 0; i < active.length; i++) {
+      if (active[i] <= 0) continue;
+      g.fillStyle = P.VOID;
+      g.fillRect(iconX - 1, y - 9, 7, 7);
+      g.fillStyle = ["#ff963f", "#58caff", "#ffe66b", "#8f63ae", "#a8e8ff", "#c2182b"][i];
+      icons[i].split("/").forEach((row, iy) => {
+        for (let ix = 0; ix < row.length; ix++) if (row[ix] === "1") g.fillRect(iconX + ix, y - 8 + iy, 1, 1);
+      });
+      iconX += 7;
+    }
 
-      if (en.id === target) {
-        g.strokeStyle = P.TARGET_RIM;
-        g.lineWidth = 1;
-        g.strokeRect(x - 0.5, y - 0.5, sp.w + 1, sp.h + 1);
-      }
+    if (en.blink()) {
+      g.globalAlpha = 0.5;
+      g.drawImage(white, x, y, w, h);
+      g.globalAlpha = 1;
+    }
 
-      if (en.kind === "boss" && en.enraged) {
-        g.strokeStyle = P.ENEMY_CHARGER;
-        g.lineWidth = 1;
-        g.strokeRect(x - 1.5, y - 1.5, sp.w + 3, sp.h + 3);
-      }
-      if (en.isElite) {
-        g.globalAlpha = 0.6 + 0.4 * Math.sin(en.animTicks * 0.15);
-        g.strokeStyle = "#ff3b3b";
-        g.lineWidth = 1;
-        g.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
-        g.globalAlpha = 1;
-      }
-      if (en.def.SHIELD) {
-        g.strokeStyle = "#d8f0ff";
-        g.lineWidth = 2;
-        g.globalAlpha = 0.85;
-        g.beginPath();
-        g.arc(Math.round(en.x - ox), Math.round(en.y - en.bodyH / 2 - oy), Math.max(en.bodyW, en.bodyH) / 2 + 2, en.facing - 0.9, en.facing + 0.9);
-        g.stroke();
-        g.globalAlpha = 1;
-      }
-      if (en.state === ENEMY_STATE.ATTACK && en.swing !== null && en.swing.phase === "recover") {
-        g.fillStyle = P.ENEMY_EYE;
-        g.fillRect(x + Math.floor(sp.w / 2) - 1, y - 3, 3, 1);
-      }
+    if (en.id === target) {
+      g.strokeStyle = P.TARGET_RIM;
+      g.lineWidth = 1;
+      g.strokeRect(x - 0.5, y - 0.5, sp.w + 1, sp.h + 1);
+    }
+
+    if (en.kind === "boss" && en.enraged) {
+      g.strokeStyle = P.ENEMY_CHARGER;
+      g.lineWidth = 1;
+      g.strokeRect(x - 1.5, y - 1.5, sp.w + 3, sp.h + 3);
+    }
+    if (en.isElite) {
+      g.globalAlpha = 0.6 + 0.4 * Math.sin(en.animTicks * 0.15);
+      g.strokeStyle = "#ff3b3b";
+      g.lineWidth = 1;
+      g.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3);
+      g.globalAlpha = 1;
+    }
+    if (en.def.SHIELD) {
+      g.strokeStyle = "#d8f0ff";
+      g.lineWidth = 2;
+      g.globalAlpha = 0.85;
+      g.beginPath();
+      g.arc(Math.round(en.x - ox), Math.round(en.y - en.bodyH / 2 - oy), Math.max(en.bodyW, en.bodyH) / 2 + 2, en.facing - 0.9, en.facing + 0.9);
+      g.stroke();
+      g.globalAlpha = 1;
+    }
+    if (en.state === ENEMY_STATE.ATTACK && en.swing !== null && en.swing.phase === "recover") {
+      g.fillStyle = P.ENEMY_EYE;
+      g.fillRect(x + Math.floor(sp.w / 2) - 1, y - 3, 3, 1);
     }
   }
 
@@ -972,58 +1032,63 @@ export class Renderer {
   }
 
   private drawProjectiles(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
-    for (const p of this.world.projectiles) {
-      const x = Math.round(p.x - ox);
-      const y = Math.round(p.y - oy);
-      // the mage's arcane bolt reads violet so it never passes for the orange fireball skill
-      if (p.owner === "player" && p.kind === "bolt") {
-        if (glowOnly) {
-          g.fillStyle = "#c99ae6";
-          g.fillRect(x - 3, y - 3, 6, 6);
-        } else {
-          g.fillStyle = "#3a1450";
-          g.fillRect(x - 2, y - 2, 4, 4);
-          g.fillStyle = "#c99ae6";
-          g.fillRect(x - 1, y - 1, 2, 2);
-        }
-        continue;
-      }
-      // the forgotten king's ghost shots: a cold violet, distinct from the warm fireball
-      if (p.kind === "ghost") {
-        if (glowOnly) {
-          g.fillStyle = "#c99ae6";
-          g.fillRect(x - 4, y - 4, 8, 8);
-        } else {
-          g.fillStyle = "#3a1252";
-          g.fillRect(x - 3, y - 3, 6, 6);
-          g.fillStyle = "#c99ae6";
-          g.fillRect(x - 1, y - 1, 3, 3);
-        }
-        continue;
-      }
-      // the forge golem's lava globs: molten orange over a dark crust
-      if (p.kind === "lava") {
-        if (glowOnly) {
-          g.fillStyle = "#ffb14d";
-          g.fillRect(x - 4, y - 4, 8, 8);
-        } else {
-          g.fillStyle = "#8a2f1c";
-          g.fillRect(x - 3, y - 3, 6, 6);
-          g.fillStyle = "#ffb14d";
-          g.fillRect(x - 1, y - 1, 3, 3);
-        }
-        continue;
-      }
-      const hot = p.owner === "player";
+    for (const p of this.world.projectiles) this.drawOneProjectile(g, p, ox, oy, glowOnly);
+  }
+
+  private drawOneProjectile(g: CanvasRenderingContext2D, p: Projectile, ox: number, oy: number, glowOnly = false): void {
+    const x = Math.round(p.x - ox);
+    const y = Math.round(p.y - oy);
+    // the mage's arcane bolt reads violet so it never passes for the orange fireball skill
+    if (p.owner === "player" && p.kind === "bolt") {
       if (glowOnly) {
-        g.fillStyle = hot ? "#ff963f" : P.PROJ;
+        g.fillStyle = "#c99ae6";
         g.fillRect(x - 3, y - 3, 6, 6);
       } else {
-        g.fillStyle = hot ? "#3a1c08" : P.VOID;
+        g.fillStyle = "#3a1450";
         g.fillRect(x - 2, y - 2, 4, 4);
-        g.fillStyle = hot ? "#ff963f" : P.PROJ;
+        g.fillStyle = "#c99ae6";
         g.fillRect(x - 1, y - 1, 2, 2);
       }
+      return;
+    }
+    // the forgotten king's ghost shots: a cold violet, distinct from the warm fireball
+    if (p.kind === "ghost") {
+      if (glowOnly) {
+        g.fillStyle = "#c99ae6";
+        g.fillRect(x - 4, y - 4, 8, 8);
+      } else {
+        g.fillStyle = "#3a1252";
+        g.fillRect(x - 3, y - 3, 6, 6);
+        g.fillStyle = "#c99ae6";
+        g.fillRect(x - 1, y - 1, 3, 3);
+      }
+      return;
+    }
+    // the forge golem's lava globs: molten orange over a dark crust, flying in an arc
+    if (p.kind === "lava") {
+      const total = enemyDef("golem").SHOT_LIFE_TICKS;
+      const t = 1 - p.ticksLeft / Math.max(1, total);
+      const arc = Math.sin(Math.min(1, Math.max(0, t)) * Math.PI) * 8;
+      if (glowOnly) {
+        g.fillStyle = "#ffb14d";
+        g.fillRect(x - 4, y - 4 - arc, 8, 8);
+      } else {
+        g.fillStyle = "#8a2f1c";
+        g.fillRect(x - 3, y - 3 - arc, 6, 6);
+        g.fillStyle = "#ffb14d";
+        g.fillRect(x - 1, y - 1 - arc, 3, 3);
+      }
+      return;
+    }
+    const hot = p.owner === "player";
+    if (glowOnly) {
+      g.fillStyle = hot ? "#ff963f" : P.PROJ;
+      g.fillRect(x - 3, y - 3, 6, 6);
+    } else {
+      g.fillStyle = hot ? "#3a1c08" : P.VOID;
+      g.fillRect(x - 2, y - 2, 4, 4);
+      g.fillStyle = hot ? "#ff963f" : P.PROJ;
+      g.fillRect(x - 1, y - 1, 2, 2);
     }
   }
 
@@ -1071,7 +1136,9 @@ export class Renderer {
     }
 
     const x = Math.round(pl.x - sp.ax - ox) + leanX;
-    const y = Math.round(pl.y - sp.ay - oy) + leanY;
+    // a dash lifts the body 2px off its shadow — reads as a hop, not a slide
+    const lift = pl.state === PLAYER_STATE.DASH ? 2 : 0;
+    const y = Math.round(pl.y - sp.ay - oy) + leanY - lift;
     const flashing = (this.flash.get(pl.id) ?? 0) > 0;
 
     g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
@@ -1105,20 +1172,24 @@ export class Renderer {
   private drawParticles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
     const density = CONFIG.SLIDERS.particles;
     if (density <= 0.01) return;
-    this.world.particles.visit((s) => {
-      const t = s.life / s.maxLife;
-      const alpha = Math.min(1, (0.25 + 0.75 * t) * s.alphaScale * density);
-      if (s.sprite !== null) {
-        const sp = this.sprites[s.sprite];
-        g.globalAlpha = alpha * 0.35;
-        g.drawImage(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy));
-        return;
-      }
-      g.globalAlpha = alpha;
-      g.fillStyle = s.color;
-      const sz = Math.max(1, Math.round(s.size));
-      g.fillRect(Math.round(s.x - ox), Math.round(s.y - oy), sz, sz);
-    });
+    this.world.particles.visit((s) => this.drawOneParticle(g, s, ox, oy, density));
+  }
+
+  private drawOneParticle(g: CanvasRenderingContext2D, s: Slot, ox: number, oy: number, density: number): void {
+    if (!s.live) return;
+    const t = s.life / s.maxLife;
+    const alpha = Math.min(1, (0.25 + 0.75 * t) * s.alphaScale * density);
+    if (s.sprite !== null) {
+      const sp = this.sprites[s.sprite];
+      if (sp === undefined) return;
+      g.globalAlpha = alpha * 0.35;
+      g.drawImage(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy));
+      return;
+    }
+    g.globalAlpha = alpha;
+    g.fillStyle = s.color;
+    const sz = Math.max(1, Math.round(s.size));
+    g.fillRect(Math.round(s.x - ox), Math.round(s.y - oy), sz, sz);
     g.globalAlpha = 1;
   }
 
@@ -1177,4 +1248,4 @@ export class Renderer {
       g.globalAlpha = 1;
     }
   }
-}
+}

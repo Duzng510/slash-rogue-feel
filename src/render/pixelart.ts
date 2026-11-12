@@ -53,6 +53,18 @@ function bakeBiomeTiles(S: Record<string, Sprite>, T: number, id: string, floor:
     rect(g, 6, 6, 4, 4, floor);
   });
 
+  /** oblique face: the bottom 6px strip drawn over a wall tile that stands above walkable floor */
+  S[`wallface_${id}`] = bake(T, 6, 0, 0, (g) => {
+    rect(g, 0, 0, T, 6, wallTop);
+    rect(g, 0, 0, T, 1, wallRim);
+    g.globalAlpha = 0.55;
+    rect(g, 0, 3, T, 1, shadow);
+    rect(g, 5, 1, 1, 4, shadow);
+    rect(g, 11, 1, 1, 4, shadow);
+    g.globalAlpha = 0.8;
+    rect(g, 0, 5, T, 1, shadow);
+  });
+
   S[`wall_${id}`] = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 0, T, T, wall);
     rect(g, 0, 0, T, 3, wallTop);
@@ -431,6 +443,89 @@ export function buildSprites(): Record<string, Sprite> {
   bakeBiomeTiles(S, T, "caverns", "#16222e", "#2a4862", "#1e3f61");
   bakeBiomeTiles(S, T, "forge", "#25150c", "#4d2316", "#391c15");
   bakeBiomeTiles(S, T, "void", "#110a1c", "#2a163d", "#221033");
+
+  // --- distant parallax backdrops, baked at 640×360 and scrolled at 0.4x camera speed ---
+  const bakeParallax = (id: string, paint: (g: CanvasRenderingContext2D) => void): void => {
+    S[`parallax_${id}`] = bake(640, 360, 0, 0, paint);
+  };
+  bakeParallax("dungeon", (g) => {
+    rect(g, 0, 0, 640, 360, "#0b0e14");
+    // distant arches + pillars
+    g.globalAlpha = 0.5;
+    for (let i = 0; i < 7; i++) {
+      const x = 24 + i * 88;
+      const y = 140 + (i % 2) * 26;
+      rect(g, x, y, 44, 360 - y, "#12161f");
+      rect(g, x + 9, y - 26, 26, 28, "#12161f");
+    }
+    g.globalAlpha = 0.3;
+    for (let i = 0; i < 5; i++) rect(g, 70 + i * 130, 64 + (i % 3) * 20, 8, 296, "#171c27");
+    g.globalAlpha = 1;
+  });
+  bakeParallax("caverns", (g) => {
+    rect(g, 0, 0, 640, 360, "#0a1016");
+    // two rows of hanging stalactites
+    for (let row = 0; row < 2; row++) {
+      g.globalAlpha = row === 0 ? 0.55 : 0.3;
+      const depth = 40 + row * 52;
+      for (let i = 0; i < 14; i++) {
+        const x = 12 + i * 46 + (row * 17) % 23;
+        const h = depth + ((i * 37) % 30);
+        for (let r = 0; r < h; r += 2) {
+          const half = Math.max(1, 5 - Math.floor((r / h) * 5));
+          rect(g, x - half, r, half * 2, 2, "#14222e");
+        }
+      }
+    }
+    g.globalAlpha = 0.2;
+    for (let i = 0; i < 6; i++) rect(g, 40 + i * 104, 250 + (i % 2) * 18, 52, 110, "#0e1822");
+    g.globalAlpha = 1;
+  });
+  bakeParallax("forge", (g) => {
+    rect(g, 0, 0, 640, 360, "#140a06");
+    // far furnace mouths glowing behind the haze
+    for (let i = 0; i < 4; i++) {
+      const x = 40 + i * 156;
+      const glow = g.createRadialGradient(x + 40, 190, 4, x + 40, 190, 120);
+      glow.addColorStop(0, "rgba(255, 110, 40, 0.5)");
+      glow.addColorStop(1, "rgba(255, 110, 40, 0)");
+      g.fillStyle = glow;
+      g.fillRect(x - 60, 90, 200, 200);
+      g.globalAlpha = 0.7;
+      rect(g, x, 160, 80, 60, "#200f07");
+      rect(g, x + 18, 176, 44, 28, "#ff5a3c");
+      g.globalAlpha = 1;
+    }
+    // distant catwalk silhouettes
+    g.globalAlpha = 0.4;
+    for (let i = 0; i < 6; i++) rect(g, 20 + i * 104, 120 + (i % 2) * 14, 64, 6, "#1c0e08");
+    g.globalAlpha = 1;
+  });
+  bakeParallax("void", (g) => {
+    rect(g, 0, 0, 640, 360, "#0a0512");
+    // nebula wisps
+    for (let i = 0; i < 6; i++) {
+      const x = 60 + ((i * 217) % 560);
+      const y = 60 + ((i * 131) % 240);
+      const r = 70 + ((i * 53) % 60);
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, "rgba(120, 60, 190, 0.28)");
+      grad.addColorStop(0.6, "rgba(80, 40, 140, 0.12)");
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      g.fillStyle = grad;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    // floating shard silhouettes
+    g.globalAlpha = 0.5;
+    for (let i = 0; i < 10; i++) {
+      const x = 30 + ((i * 149) % 590);
+      const y = 40 + ((i * 83) % 280);
+      const s = 4 + ((i * 13) % 10);
+      rect(g, x, y, 1, s + 6, "#2a163d");
+      rect(g, x - 1, y + s, 3, 4, "#221033");
+    }
+    g.globalAlpha = 1;
+  });
 
   S.crate = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 2, T, T - 2, P.WALL);

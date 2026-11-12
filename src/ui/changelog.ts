@@ -5,11 +5,41 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.20.0";
+export const APP_VERSION = "v0.24.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.24.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Parallax nền xa:</b> mỗi biome có lớp background riêng cuộn 0.4× camera — vòm đá & cột arch ở ngục, măng đá hai tầng ở hang, lò nung phát sáng ở lò rèn, tinh vân & mảnh vỡ ở hư không.",
+    ],
+  },
+  {
+    version: "v0.23.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Chiều cao z:</b> teleporter/jumper nhấc thân lên 6px khi biến mất và hạ xuống khi hiện ra — bóng vẫn nằm trên đất nên đọc rõ là đang bay.",
+      "Người chơi dash nhấc nhẹ 2px; cầu lửa của Golem bay theo vòng cung thật (sin arc 8px).",
+    ],
+  },
+  {
+    version: "v0.22.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Tường oblique:</b> tường có mặt trước 6px như đang cao — góc chữ L tự nhiên đúng, cửa khóa cũng cao, collision và dữ liệu phòng không đổi.",
+    ],
+  },
+  {
+    version: "v0.21.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Depth sort:</b> quái, người chơi, đạn và hạt hiệu ứng cùng xếp lớp theo toạ độ y — đứng trên/quanh quái giờ đúng chiều sâu, thay vì người chơi luôn vẽ trên cùng.",
+      "Telegraph/vệt chém luôn nằm dưới sàn chỉ dẫn, số sát thương luôn nổi trên cùng.",
+    ],
+  },
   {
     version: "v0.20.0",
     date: "2026-11-12",

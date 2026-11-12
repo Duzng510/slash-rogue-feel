@@ -11,7 +11,7 @@ export const PARTICLE_KIND = {
 
 export type ParticleKind = (typeof PARTICLE_KIND)[keyof typeof PARTICLE_KIND];
 
-type Slot = {
+export type Slot = {
   live: boolean;
   kind: ParticleKind;
   tier: number;
