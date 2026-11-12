@@ -5,11 +5,74 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.31.0";
+export const APP_VERSION = "v0.40.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.40.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Damage type visualization:</b> damage number có type physical/burn/shock/freeze/poison/bleed; thêm màu riêng, jitter/flash, ember, frost, bubble và blood-drop micro FX; heal pulse và crit emphasis được giữ riêng.",
+    ],
+  },
+  {
+    version: "v0.39.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL FX batch:</b> slice và beam được render bằng rotated solid-rect với additive glow; các arc wedge phức tạp vẫn giữ Canvas 2D.",
+    ],
+  },
+  {
+    version: "v0.38.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL telegraph batch:</b> charger và sniper lane được render bằng rotated solid-rect batch, kèm target marker additive cho sniper.",
+    ],
+  },
+  {
+    version: "v0.37.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL shadow batch:</b> bóng enemy/player được render từ atlas với tint đen và alpha theo lớp, không còn upload/draw shadow canvas trong chế độ GL.",
+    ],
+  },
+  {
+    version: "v0.36.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL projectile batch:</b> thêm solid-rect primitive có tint/additive trong SpriteBatch; projectile và trail không còn vẽ lại bằng Canvas 2D ở chế độ GL.",
+    ],
+  },
+  {
+    version: "v0.35.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL world migration:</b> các particle dùng sprite được queue qua atlas batch; particle hình học vẫn giữ overlay Canvas 2D để bảo toàn hình dạng pixel.",
+    ],
+  },
+  {
+    version: "v0.34.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL world migration:</b> enemy và player rig được queue vào sprite batch, gồm animation frame, elite scale, iframe alpha, rotation và squash/stretch cơ bản.",
+    ],
+  },
+  {
+    version: "v0.33.0",
+    date: "2026-11-13",
+    items: [
+      "<b>WebGL world migration:</b> nền tile được queue vào sprite batch và vẽ trực tiếp lên scene render target; pipeline có cầu nối hybrid cho các lớp Canvas 2D chưa migrate.",
+    ],
+  },
+  {
+    version: "v0.32.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Player sprite rig:</b> tách đầu, thân, tay, chân và cape thành các phần có keyframe animation; vũ khí đang trang bị hiện trên tay và xoay theo nhịp chém, cape có vật lý vải nhẹ.",
+    ],
+  },
   {
     version: "v0.31.0",
     date: "2026-11-13",

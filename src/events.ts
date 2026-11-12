@@ -26,7 +26,7 @@ export type VisualEvent =
   | { t: "flash"; ent: number; ticks: number }
   | { t: "hurtVignette"; strength: number }
   | { t: "slashArc"; x: number; y: number; dir: number; reach: number; deg: number; combo: number; ticks: number }
-  | { t: "dmgNumber"; x: number; y: number; value: number; style?: "normal" | "crit" | "heal" | "element"; color?: string }
+  | { t: "dmgNumber"; x: number; y: number; value: number; style?: "normal" | "crit" | "heal" | "element"; color?: string; damageType?: "physical" | "burn" | "shock" | "freeze" | "poison" | "bleed" }
   | { t: "roomBanner"; text: string }
   | { t: "roomTransition"; x: number; y: number }
   | { t: "artifactText"; x: number; y: number; text: string; color: string }
@@ -69,9 +69,9 @@ export function artifactText(e: EventQueue, x: number, y: number, text: string, 
 }
 
 /** floating damage number; owns the dmgNumbers slider guard so every call site stays terse */
-export function dmgNumber(e: EventQueue, x: number, y: number, value: number, style?: "normal" | "crit" | "heal" | "element", color?: string): void {
+export function dmgNumber(e: EventQueue, x: number, y: number, value: number, style?: "normal" | "crit" | "heal" | "element", color?: string, damageType?: "physical" | "burn" | "shock" | "freeze" | "poison" | "bleed"): void {
   if (CONFIG.SLIDERS.dmgNumbers <= 0) return;
-  e.push({ t: "dmgNumber", x, y, value, style, color });
+  e.push({ t: "dmgNumber", x, y, value, style, color, damageType });
 }
 
 export function shake(e: EventQueue, x: number, y: number, dir: number, mult = 1): void {

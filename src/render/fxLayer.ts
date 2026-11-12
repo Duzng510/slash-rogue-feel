@@ -4,13 +4,15 @@
 // the effect bookkeeping lives in one place instead of scattered across the Renderer class.
 import { CONFIG } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
+import type { SpriteBatch } from "./gl/batch.ts";
 
 const P = CONFIG.PALETTE;
 
 type Arc = { x: number; y: number; dir: number; reach: number; deg: number; combo: number; left: number; total: number };
 type Slice = { x: number; y: number; dir: number; len: number; left: number; total: number };
 type Beam = { x: number; y: number; dir: number; len: number; left: number; total: number };
-type FloatText = { x: number; y: number; text: string; color: string; left: number; total: number; style: "normal" | "crit" | "heal" | "element" };
+type DamageType = "physical" | "burn" | "shock" | "freeze" | "poison" | "bleed";
+type FloatText = { x: number; y: number; text: string; color: string; left: number; total: number; style: "normal" | "crit" | "heal" | "element"; damageType?: DamageType };
 
 /** fills a pie-slice ring between `reach * innerRatio` and `reach` around `dir` */
 export function wedge(
@@ -59,12 +61,14 @@ export class FxLayer {
       else if (e.t === "dmgNumber") {
         if (this.texts.length >= CONFIG.RENDER.TEXT_CAP) this.texts.shift();
         const style = e.style ?? "normal";
+        const damageType: DamageType | undefined = e.damageType ?? (style === "element" ? (e.color === CONFIG.PALETTE.ELEMENT.burn ? "burn" : e.color === CONFIG.PALETTE.ELEMENT.poison ? "poison" : "physical") : style === "heal" ? undefined : "physical");
+        const palette: Record<DamageType, string> = { physical: "#ffffff", burn: "#ff963f", shock: "#ffe66b", freeze: "#8fe8ff", poison: "#c99ae6", bleed: "#ff4d5e" };
         this.texts.push({
           x: e.x, y: e.y,
           text: style === "heal" ? `+${Math.round(e.value)}` : String(Math.round(e.value)),
-          color: style === "crit" ? "#ffd166" : style === "heal" ? "#58ff8a" : e.color ?? "#ffffff",
+          color: style === "crit" ? "#ffd166" : style === "heal" ? "#58ff8a" : (damageType ? palette[damageType] : undefined) ?? e.color ?? "#ffffff",
           left: style === "crit" ? 42 : 36, total: style === "crit" ? 42 : 36,
-          style,
+          style, damageType,
         });
       }
     }
@@ -261,6 +265,28 @@ export class FxLayer {
     g.globalCompositeOperation = "source-over";
   }
 
+  queueGL(batch: SpriteBatch, ox: number, oy: number): void {
+    for (const s of this.slices) {
+      const prog = Math.max(0, s.left / Math.max(1, s.total));
+      const cx = Math.round(s.x - ox);
+      const cy = Math.round(s.y - oy);
+      const angle = s.dir + Math.PI * 0.5;
+      const half = s.len * 0.5;
+      const x = Math.round(cx - half);
+      const y = Math.round(cy - 1);
+      batch.drawSolidRect(x, y - 1, s.len, 2, [0.35, 0.85, 1, prog * 0.8], true, angle);
+      batch.drawSolidRect(x, y, s.len, 1, [1, 1, 1, prog], true, angle);
+    }
+    for (const b of this.beams) {
+      const alpha = Math.max(0, b.left / Math.max(1, b.total));
+      const x = b.x - ox;
+      const y = b.y - oy;
+      batch.drawSolidRect(x - b.len * 0.5, y - 3, b.len, 6, [0.65, 0.25, 0.82, alpha], true, b.dir);
+      batch.drawSolidRect(x - b.len * 0.5, y - 2, b.len, 4, [0.06, 0.03, 0.10, alpha], false, b.dir);
+      batch.drawSolidRect(x - b.len * 0.5, y - 1, b.len, 2, [0.67, 0.39, 0.82, alpha], true, b.dir);
+    }
+  }
+
   drawBeams(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     for (const b of this.beams) {
       const x1 = Math.round(b.x - ox);
@@ -297,14 +323,45 @@ export class FxLayer {
     for (const ft of this.texts) {
       let x = Math.round(ft.x - ox);
       const y = Math.round(ft.y - oy);
-      g.font = ft.style === "crit" ? "bold 7px ui-monospace, monospace" : "bold 5px ui-monospace, monospace";
+      const type = ft.damageType;
+      const crit = ft.style === "crit";
+      const shockFlash = type === "shock" && ft.left > ft.total - 2;
+      const pulse = ft.style === "heal" ? 1 + 0.12 * Math.sin(ft.left * 0.55) : 1;
+      g.font = crit ? "bold 7px ui-monospace, monospace" : "bold 5px ui-monospace, monospace";
       // crits jitter ±1px so the blow reads heavy
-      if (ft.style === "crit") x += Math.floor((ft.left * 7) % 3) - 1;
+      if (crit || type === "shock") x += Math.floor((ft.left * (type === "shock" ? 17 : 7)) % (type === "shock" ? 5 : 3)) - (type === "shock" ? 2 : 1);
       g.globalAlpha = Math.min(1, (ft.left / ft.total) * 1.8);
+      if (shockFlash) g.globalAlpha = 1;
+      if (pulse !== 1) g.globalAlpha *= 0.8 + 0.2 * pulse;
+      if (type === "burn") {
+        g.fillStyle = "#ffb14d";
+        g.fillRect(x - 5, y - 4 - (ft.left % 3), 1, 1);
+        g.fillRect(x + 5, y - 2 - ((ft.left + 1) % 3), 1, 1);
+      } else if (type === "freeze") {
+        g.fillStyle = "#8fe8ff";
+        g.fillRect(x - 5, y + 2 + (ft.left % 4), 1, 2);
+        g.fillRect(x + 4, y + 1 + ((ft.left + 2) % 4), 1, 1);
+      } else if (type === "poison") {
+        g.fillStyle = "#c99ae6";
+        g.fillRect(x - 5, y - 4 - (ft.left % 4), 2, 2);
+        g.fillRect(x + 4, y - 2 - ((ft.left + 1) % 4), 1, 1);
+      } else if (type === "bleed") {
+        g.fillStyle = "#ff4d5e";
+        g.fillRect(x - 5, y + 2 + (ft.left % 3), 1, 2);
+        g.fillRect(x + 5, y + 2 + ((ft.left + 2) % 3), 1, 2);
+      }
       g.fillStyle = P.VOID;
       g.fillText(ft.text, x + 1, y + 1);
-      g.fillStyle = ft.color;
-      g.fillText(ft.text, x, y);
+      g.fillStyle = shockFlash ? "#ffffff" : ft.color;
+      g.save();
+      if (pulse !== 1) {
+        g.translate(x, y);
+        g.scale(pulse, pulse);
+        g.fillText(ft.text, 0, 0);
+      } else {
+        g.fillText(ft.text, x, y);
+      }
+      g.restore();
     }
     g.globalAlpha = 1;
   }

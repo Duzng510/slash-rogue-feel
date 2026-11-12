@@ -2,9 +2,12 @@ import { CONFIG, enemyDef } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
 import { ENEMY_STATE, type Enemy } from "../entities/enemy.ts";
 import { PLAYER_STATE } from "../entities/player.ts";
+import { angleLerp } from "../mathx.ts";
 import { TILE } from "../world/rooms.ts";
 import { fitAxes, isRotated } from "../ui/immersive.ts";
-import { facingOffsets, buildAnimSets, flipH, type Sprite, type SpriteSet } from "./pixelart.ts";
+import { buildAnimSets, facingOffsets, flipH, type Sprite, type SpriteSet } from "./pixelart.ts";
+import { playerRigPose, type RigPart, type RigTransform } from "./playerRig.ts";
+import { WEAPONS, type WeaponId } from "../systems/weapons.ts";
 import type { Slot } from "../systems/particles.ts";
 import type { Projectile } from "../sim/types.ts";
 import type { Camera } from "./camera.ts";
@@ -13,6 +16,15 @@ import { GLPipeline } from "./gl/pipeline.ts";
 import { FxLayer, wedge } from "./fxLayer.ts";
 
 const P = CONFIG.PALETTE;
+
+type VerletPoint = { x: number; y: number; px: number; py: number };
+const WEAPON_GRIPS: Record<WeaponId, { x: number; y: number; scale: number }> = {
+  katana: { x: 3, y: 13, scale: 0.85 },
+  greatsword: { x: 8, y: 13, scale: 0.9 },
+  dagger: { x: 8, y: 12, scale: 0.72 },
+  spear: { x: 3, y: 14, scale: 1.1 },
+  whip: { x: 3, y: 13, scale: 0.9 },
+};
 
 const BAYER4 = [
   [ 0,  8,  2, 10],
@@ -98,6 +110,7 @@ export class Renderer {
   private blueCanvas: HTMLCanvasElement;
   private blueG: CanvasRenderingContext2D;
   private visualTime = 0;
+  private capeChain: VerletPoint[] = [];
 
   /** WebGL2 migration mode (?renderer=gl): scene is drawn offscreen into `sceneCanvas`, then composited by `gl`. */
   private glMode = false;
@@ -194,6 +207,9 @@ export class Renderer {
       this.shadowSprites.player_tank = tinted(sprites.player_tank.c, P.VOID);
     }
     for (const key of Object.keys(sprites)) {
+      if (key.startsWith("playerpart_") || key.startsWith("weapon_")) {
+        this.white[key] = tinted(sprites[key].c, P.FLASH);
+      }
       if (key.startsWith("enemy")) {
         this.white[key] = tinted(sprites[key].c, P.FLASH);
         this.statusSprites[key] = [P.ELEMENT.burn, P.ELEMENT.wet, P.ELEMENT.shock].map(color => tinted(sprites[key].c, color));
@@ -287,6 +303,7 @@ export class Renderer {
   private stepVisual(dtReal: number): void {
     const ticks = dtReal * CONFIG.TIME.TICK_HZ;
     this.visualTime += dtReal;
+    this.updateCape(dtReal);
     this.fx.step(dtReal);
     if (this.transTicks > 0) this.transTicks = Math.max(0, this.transTicks - ticks);
     // low-HP pulse: the vignette breathes while at or below 30% health (sfx heartbeat lives in player tick)
@@ -328,7 +345,8 @@ export class Renderer {
       g.translate(-iw / 2, -ih / 2);
     }
 
-    this.drawTiles(g, ox, oy);
+    if (this.glMode && this.gl) this.queueTilesGL(ox, oy);
+    else this.drawTiles(g, ox, oy);
     this.drawBossIntroCracks(g, ox, oy);
     this.drawDecals(g, ox, oy);
     this.drawTorches(g, ox, oy, false);
@@ -376,8 +394,11 @@ export class Renderer {
 
     // Sharp pixel-crisp foreground layer on main canvas
     this.fx.drawArcs(g, ox, oy, false);
-    this.fx.drawSlices(g, ox, oy, false);
-    this.fx.drawBeams(g, ox, oy, false);
+    if (this.glMode && this.gl) this.fx.queueGL(this.gl.batch, ox, oy);
+    else {
+      this.fx.drawSlices(g, ox, oy, false);
+      this.fx.drawBeams(g, ox, oy, false);
+    }
     this.drawProjectileTrails(g, ox, oy, false);
     this.drawProjectiles(g, ox, oy, false);
 
@@ -409,7 +430,7 @@ export class Renderer {
     if (this.gl && this.sceneCanvas) {
       // GL owns bloom + vignette now; the dynamic hurt pulse rides on uHurt (red push),
       // while the baseline ambient rim comes from CONFIG.CRT.AMBIENT_VIGNETTE in the shader.
-      this.gl.presentScene(this.sceneCanvas, {
+      this.gl.presentSceneWithBatch(this.sceneCanvas, {
         hurt: this.vignette,
         vignette: 0,
         brightness: CONFIG.SLIDERS.brightness,
@@ -549,6 +570,27 @@ export class Renderer {
       for (const s of d.spots) {
         g.fillRect(x + Math.round(s.dx), y + Math.round(s.dy), s.s, s.s);
       }
+    }
+
+    // Vũng máu người chơi lớn dần dưới đất khi chết
+    const pl = this.world.player;
+    if (pl.dead && pl.deadTicks > 0) {
+      const px = Math.round(pl.x - ox);
+      const py = Math.round(pl.y - 2 - oy);
+      const t = Math.min(24, pl.deadTicks);
+      const radius = Math.min(12, Math.floor(2 + t * 0.45));
+      g.save();
+      g.fillStyle = "#8a0303";
+      g.globalAlpha = Math.min(0.85, 0.3 + t * 0.03);
+      g.beginPath();
+      g.ellipse(px, py, radius, Math.max(2, Math.floor(radius * 0.55)), 0, 0, Math.PI * 2);
+      g.fill();
+      // Vệt máu đậm ở tâm
+      g.fillStyle = "#5c0000";
+      g.beginPath();
+      g.ellipse(px, py, Math.floor(radius * 0.6), Math.max(1, Math.floor(radius * 0.35)), 0, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
     }
     g.globalAlpha = 1;
   }
@@ -873,6 +915,33 @@ export class Renderer {
     }
   }
 
+  private queueTilesGL(ox: number, oy: number): void {
+    const T = CONFIG.WORLD.TILE;
+    const room = this.world.room;
+    const x0 = Math.max(0, Math.floor(ox / T));
+    const y0 = Math.max(0, Math.floor(oy / T));
+    const x1 = Math.min(room.w - 1, Math.ceil((ox + CONFIG.WORLD.INTERNAL_W) / T));
+    const y1 = Math.min(room.h - 1, Math.ceil((oy + CONFIG.WORLD.INTERNAL_H) / T));
+    const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
+        this.gl!.batch.drawSprite(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy), s.w, s.h, [1, 1, 1, 1]);
+      }
+    }
+    const face = this.sprites[`wallface_${this.world.currentBiome.id}`];
+    if (!face) return;
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        const tile = room.at(tx, ty);
+        if (tile !== TILE.WALL && tile !== TILE.DOOR) continue;
+        const below = room.at(tx, ty + 1);
+        if (below === TILE.WALL || below === TILE.CRATE) continue;
+        this.gl!.batch.drawSprite(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - face.h - oy), face.w, face.h, [1, 1, 1, 1]);
+      }
+    }
+  }
+
   private drawTelegraphs(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     for (const en of this.world.enemies) {
       if (en.state !== ENEMY_STATE.TELEGRAPH) continue;
@@ -880,6 +949,18 @@ export class Renderer {
       const prog = 1 - en.telegraphTicksLeft / Math.max(1, en.telegraphTotal);
       const cx = Math.round(en.x - ox);
       const cy = Math.round(en.y - e.BODY_H * 0.5 - oy);
+
+      if (this.glMode && this.gl && (en.kind === "charger" || en.kind === "sniper")) {
+        const reach = en.kind === "sniper" ? Math.hypot(this.world.room.widthPx, this.world.room.heightPx) : e.ATTACK_REACH;
+        const alpha = (en.kind === "sniper" ? 0.35 : CONFIG.READABILITY.TELEGRAPH_FILL) * (0.55 + 0.45 * prog);
+        const width = en.kind === "sniper" ? 1 : 4;
+        const dx = Math.cos(en.telegraphDir) * reach;
+        const dy = Math.sin(en.telegraphDir) * reach;
+        const len = Math.max(1, Math.hypot(dx, dy));
+        this.gl.batch.drawSolidRect(Math.round(cx + dx / 2 - len / 2), Math.round(cy - width / 2), len, width, [0.95, 0.32, 0.25, alpha], false, en.telegraphDir);
+        if (en.kind === "sniper") this.gl.batch.drawSolidRect(Math.round(cx + dx - 2), Math.round(cy + dy - 2), 4, 4, [1, 0.35, 0.25, 0.7 + 0.3 * prog], true);
+        continue;
+      }
 
       g.globalAlpha = 0.55 + 0.45 * prog;
       g.strokeStyle = P.TELEGRAPH_EDGE;
@@ -1060,6 +1141,10 @@ export class Renderer {
   }
 
   private drawShadows(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.glMode && this.gl) {
+      this.queueShadowsGL(ox, oy);
+      return;
+    }
     for (const en of this.world.enemies) {
       if (en.removed) continue;
       if (en.state === ENEMY_STATE.VANISH) continue;
@@ -1088,9 +1173,35 @@ export class Renderer {
     g.globalAlpha = 1;
   }
 
+  private queueShadowsGL(ox: number, oy: number): void {
+    const batch = this.gl!.batch;
+    for (const en of this.world.enemies) {
+      if (en.removed || en.state === ENEMY_STATE.VANISH) continue;
+      const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
+      const scale = en.isElite ? 1.3 : 1;
+      const x = Math.round(en.x - sp.ax * scale - ox);
+      const y = Math.round(en.y - sp.ay * scale - oy);
+      const w = Math.round(sp.w * scale);
+      const h = Math.round(sp.h * scale);
+      batch.drawSprite(sp.c, x, y + 1, w, h, [0, 0, 0, 0.3]);
+      batch.drawSprite(sp.c, x, y + 2, w, h, [0, 0, 0, 0.15]);
+    }
+    const pl = this.world.player;
+    const key = `player_${pl.character}`;
+    const sp = this.sprites[key] ?? this.sprites.player;
+    const x = Math.round(pl.x - sp.ax - ox);
+    const y = Math.round(pl.y - sp.ay - oy);
+    batch.drawSprite(sp.c, x, y + 1, sp.w, sp.h, [0, 0, 0, 0.3]);
+    batch.drawSprite(sp.c, x, y + 2, sp.w, sp.h, [0, 0, 0, 0.15]);
+  }
+
   /** depth sort: enemies, player, projectiles and particles in one y-sorted draw list.
    *  Floor indicators (telegraphs, arcs, beams) stay below; damage numbers stay above. */
   private drawSortedWorld(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.glMode && this.gl) {
+      this.queueSortedWorldGL(ox, oy);
+      return;
+    }
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
     for (const en of this.world.enemies) {
@@ -1110,6 +1221,112 @@ export class Renderer {
     }
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.draw();
+  }
+
+  private queueSortedWorldGL(ox: number, oy: number): void {
+    for (const en of this.world.enemies) this.queueEnemyGL(en, ox, oy);
+    this.queuePlayerGL(ox, oy);
+    for (const p of this.world.projectiles) this.queueProjectileGL(p, ox, oy);
+    const density = CONFIG.SLIDERS.particles;
+    if (density > 0.01) {
+      this.world.particles.visit((s) => {
+        if (!s.live || s.sprite === null) return;
+        const sp = this.sprites[s.sprite];
+        if (!sp) return;
+        const t = s.life / s.maxLife;
+        const alpha = Math.min(1, (0.25 + 0.75 * t) * s.alphaScale * density) * 0.35;
+        this.gl!.batch.drawSprite(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy), sp.w, sp.h, [1, 1, 1, alpha]);
+      });
+    }
+  }
+
+  private queueProjectileGL(p: Projectile, ox: number, oy: number): void {
+    const x = Math.round(p.x - ox);
+    const y = Math.round(p.y - oy);
+    const batch = this.gl!.batch;
+    if (p.kind === "ghost") {
+      batch.drawSolidRect(x - 3, y - 3, 6, 6, [0.23, 0.07, 0.32, 1]);
+      batch.drawSolidRect(x - 1, y - 1, 3, 3, [0.79, 0.60, 0.90, 1], true);
+    } else if (p.kind === "lava") {
+      const total = enemyDef("golem").SHOT_LIFE_TICKS;
+      const arc = Math.sin(Math.min(1, Math.max(0, 1 - p.ticksLeft / Math.max(1, total))) * Math.PI) * 8;
+      batch.drawSolidRect(x - 3, y - 3 - arc, 6, 6, [0.54, 0.11, 0.05, 1]);
+      batch.drawSolidRect(x - 1, y - 1 - arc, 2, 2, [1, 0.69, 0.30, 1], true);
+    } else {
+      const hot = p.owner === "player";
+      batch.drawSolidRect(x - 2, y - 2, 4, 4, hot ? [0.23, 0.11, 0.03, 1] : [0.06, 0.03, 0.10, 1]);
+      batch.drawSolidRect(x - 1, y - 1, 2, 2, hot ? [1, 0.59, 0.25, 1] : [0.67, 0.39, 0.82, 1], true);
+    }
+  }
+
+  private queueEnemyGL(en: Enemy, ox: number, oy: number): void {
+    if (en.removed || en.state === ENEMY_STATE.VANISH) return;
+    const key = en.def.SPRITE_KEY;
+    const base = this.sprites[key] ?? this.sprites.enemy;
+    let sp = base;
+    const set = this.anims[key] ?? this.anims.enemy;
+    if (set) {
+      const fi = Math.floor(en.animTicks / set.tickDur) % set.frames.length;
+      sp = Math.cos(en.facing) > 0.15 ? set.mirrored[fi]! : set.frames[fi]!;
+    } else if (Math.cos(en.facing) > 0.15) {
+      sp = this.mirrored(base, key);
+    }
+    if (en.dead) {
+      const death = this.anims[`${key}_death`];
+      if (death) {
+        const fi = Math.min(death.frames.length - 1, Math.floor((1 - en.corpseTicks / en.def.CORPSE_TICKS) * death.frames.length));
+        sp = Math.cos(en.facing) > 0.15 ? death.mirrored[fi]! : death.frames[fi]!;
+      }
+    }
+    const scale = en.isElite ? 1.3 : 1;
+    const fade = en.dead ? Math.max(0, en.corpseTicks / en.def.CORPSE_TICKS)
+      : en.state === ENEMY_STATE.APPEAR ? 0.3 + 0.7 * Math.min(1, en.ticksInState / Math.max(1, en.isElite ? CONFIG.ENEMY.ELITE_SPAWN_TICKS : en.def.APPEAR_TICKS)) : 1;
+    const w = Math.round(sp.w * scale);
+    const h = Math.round(sp.h * scale);
+    const x = Math.round(en.x - sp.ax * scale - ox);
+    const y = Math.round(en.y - sp.ay * scale - en.z * scale - oy) + (en.dead ? en.def.CORPSE_TICKS - en.corpseTicks : 0);
+    const flash = (this.flash.get(en.id) ?? 0) > 0;
+    this.gl!.batch.drawSprite(flash ? (this.white[key] ?? base.c) : sp.c, x, y, w, h, [1, 1, 1, fade], 0, flash ? 1 : 0);
+  }
+
+  private queuePlayerGL(ox: number, oy: number): void {
+    const pl = this.world.player;
+    if (pl.dead) return;
+    const dir = pl.state === PLAYER_STATE.DASH ? pl.dashDir : pl.facing;
+    const faceSign = Math.cos(dir) > 0.15 ? 1 : -1;
+    const pose = playerRigPose(pl, pl.animTicks);
+    const sx = pl.state === PLAYER_STATE.DASH ? 1.15 : 1;
+    const sy = pl.state === PLAYER_STATE.DASH ? 0.85 : 1;
+    const cx = Math.round(pl.x - ox);
+    const cy = Math.round(pl.y - oy) - (pl.state === PLAYER_STATE.DASH ? 2 : 0);
+    const alpha = pl.iframeTicks > 0 && Math.floor(pl.iframeTicks / 3) % 2 === 0 ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
+    const flashing = (this.flash.get(pl.id) ?? 0) > 0;
+    const drawPart = (part: RigPart, transform: RigTransform): void => {
+      const spritePart = part === "leftArm" || part === "rightArm" ? "arm" : part;
+      const key = `playerpart_${pl.character}_${spritePart}`;
+      const sp = this.sprites[key];
+      if (!sp) return;
+      const px = cx + faceSign * sx * transform.x - faceSign * sx * sp.ax;
+      const py = cy + sy * transform.y - sy * sp.ay;
+      this.gl!.batch.drawSprite(flashing ? (this.white[key] ?? sp.c) : sp.c, Math.round(px), Math.round(py), Math.round(sp.w * sx * transform.scaleX), Math.round(sp.h * sy * transform.scaleY), [1, 1, 1, alpha], faceSign * transform.rotation, flashing ? 1 : 0);
+    };
+    drawPart("cape", pose.cape);
+    drawPart("legs", pose.legs);
+    drawPart("torso", pose.torso);
+    drawPart("leftArm", pose.leftArm);
+    if (pl.character === "tank") {
+      const shield = this.sprites.playerpart_tank_shield;
+      if (shield) this.gl!.batch.drawSprite(flashing ? (this.white.playerpart_tank_shield ?? shield.c) : shield.c, Math.round(cx + faceSign * sx * pose.leftArm.x - shield.ax), Math.round(cy + sy * (pose.leftArm.y + 2) - shield.ay), shield.w, shield.h, [1, 1, 1, alpha], faceSign * pose.leftArm.rotation * 0.35, flashing ? 1 : 0);
+    }
+    const weapon = WEAPONS[pl.weapon];
+    const ws = this.sprites[weapon.sprite];
+    if (ws) {
+      const grip = WEAPON_GRIPS[pl.weapon];
+      const local = faceSign > 0 ? this.playerWeaponAngle() + Math.PI / 4 : Math.PI - this.playerWeaponAngle() + Math.PI / 4;
+      this.gl!.batch.drawSprite(flashing ? (this.white[weapon.sprite] ?? ws.c) : ws.c, Math.round(cx + faceSign * sx * pose.weapon.x - grip.x), Math.round(cy + sy * pose.weapon.y - grip.y), Math.round(ws.w * grip.scale), Math.round(ws.h * grip.scale), [1, 1, 1, alpha], local + pose.weapon.rotation, flashing ? 1 : 0);
+    }
+    drawPart("rightArm", pose.rightArm);
+    drawPart("head", pose.head);
   }
 
   private drawOneEnemy(g: CanvasRenderingContext2D, en: Enemy, ox: number, oy: number): void {
@@ -1291,11 +1508,13 @@ export class Renderer {
   }
 
   private drawProjectiles(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
+    if (this.glMode) return;
     for (const p of this.world.projectiles) this.drawOneProjectile(g, p, ox, oy, glowOnly);
   }
 
   /** afterimage trails: 4 faded ghosts behind each shot, matching its palette */
   private drawProjectileTrails(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
+    if (this.glMode) return;
     for (const p of this.world.projectiles) {
       if (!p.trail) continue;
       for (let i = 0; i < p.trail.length; i++) {
@@ -1382,59 +1601,82 @@ export class Renderer {
     const pl = this.world.player;
     if (pl.dead && pl.deadTicks > 12) return;
 
+    // Death animation: 5 frames (deadTicks 1..12), tách thành 4 mảnh bay ra, soul orb bay lên
+    if (pl.dead) {
+      const t = Math.min(12, pl.deadTicks);
+      const prog = t / 12; // 0..1
+      const cx = Math.round(pl.x - ox);
+      const cy = Math.round(pl.y - oy);
+
+      // Soul orb glowing cyan/gold bay lên
+      const orbY = cy - 8 - Math.round(prog * 26);
+      const orbAlpha = Math.max(0, 1 - prog * 0.7);
+      g.save();
+      g.globalAlpha = orbAlpha;
+      // Core
+      g.fillStyle = "#ffffff";
+      g.fillRect(cx - 1, orbY - 1, 2, 2);
+      // Glow aura
+      g.fillStyle = "#4da3ff";
+      g.fillRect(cx - 2, orbY - 1, 1, 2);
+      g.fillRect(cx + 1, orbY - 1, 1, 2);
+      g.fillRect(cx - 1, orbY - 2, 2, 1);
+      g.fillRect(cx - 1, orbY + 1, 2, 1);
+      // Soft outer ring
+      g.globalAlpha = orbAlpha * 0.4;
+      g.fillStyle = "#c99ae6";
+      g.fillRect(cx - 3, orbY - 2, 1, 4);
+      g.fillRect(cx + 2, orbY - 2, 1, 4);
+      g.restore();
+
+      // 4 mảnh cơ thể vỡ ra và phân tán 4 góc
+      const dist = Math.round(prog * 14);
+      const rot = prog * 1.2;
+      const alpha = Math.max(0, 1 - prog * 0.85);
+
+      const parts: { key: string; dx: number; dy: number; r: number }[] = [
+        { key: `playerpart_${pl.character}_head`, dx: -dist, dy: -dist - 4, r: -rot },
+        { key: `playerpart_${pl.character}_torso`, dx: dist * 0.6, dy: -dist * 0.5, r: rot * 0.8 },
+        { key: `playerpart_${pl.character}_arm`, dx: -dist * 1.1, dy: dist * 0.6, r: -rot * 1.5 },
+        { key: `playerpart_${pl.character}_legs`, dx: dist * 0.9, dy: dist * 0.8, r: rot * 1.3 },
+      ];
+
+      g.save();
+      g.globalAlpha = alpha;
+      for (const p of parts) {
+        const sp = this.sprites[p.key] ?? this.sprites[`player_${pl.character}`] ?? this.sprites.player;
+        if (!sp) continue;
+        g.save();
+        g.translate(cx + p.dx, cy + p.dy);
+        g.rotate(p.r);
+        g.drawImage(sp.c, -sp.ax, -sp.ay);
+        g.restore();
+      }
+      g.restore();
+      return;
+    }
+
     const blinkOut = pl.iframeTicks > 0 && Math.floor(pl.iframeTicks / 3) % 2 === 0;
-
-    const spriteKey = `player_${pl.character}`;
-    const base = this.sprites[spriteKey] ?? this.sprites.player;
     const dir = pl.state === PLAYER_STATE.DASH ? pl.dashDir : pl.facing;
-
-    // --- multi-frame anim: idle-breath / walk cycle, mirrored when facing right ---
-    const idle = this.anims[`${spriteKey}_idle`];
-    const walk = this.anims[spriteKey];
-    // swing/hurt clips override the locomotion loop, framed by the swing phase
-    let set: SpriteSet | undefined;
-    let phaseFrame: number | null = null;
-    if (pl.state === PLAYER_STATE.ATTACK && pl.swing !== null) {
-      set = this.anims[`${spriteKey}_attack`];
-      if (set) phaseFrame = pl.swing.phase === "startup" ? 0 : pl.swing.phase === "active" ? 1 : 2;
-    } else if (pl.state === PLAYER_STATE.HURT) {
-      set = this.anims[`${spriteKey}_hurt`];
-      if (set) phaseFrame = pl.hurtTicks > CONFIG.PLAYER.HURT_TICKS / 2 ? 0 : 1;
-    }
-    if (set === undefined) set = pl.state === PLAYER_STATE.IDLE ? (idle ?? walk) : (walk ?? idle);
-    let sp = base;
-    if (set) {
-      const fi = phaseFrame !== null ? Math.min(set.frames.length - 1, phaseFrame) : Math.floor(pl.animTicks / set.tickDur) % set.frames.length;
-      sp = Math.cos(dir) > 0.15 ? set.mirrored[fi] : set.frames[fi];
-    } else if (Math.cos(dir) > 0.15) {
-      sp = this.mirrored(base, spriteKey);
-    }
-
-    // --- squash & stretch: dash stretch, attack swing pulse ---
+    const faceSign = Math.cos(dir) > 0.15 ? 1 : -1;
+    const pose = playerRigPose(pl, pl.animTicks);
     let sx = 1;
     let sy = 1;
     if (pl.state === PLAYER_STATE.DASH) {
       sx = 1.15;
       sy = 0.85;
     } else if (pl.state === PLAYER_STATE.ATTACK && pl.swing !== null) {
-      const t = 1 - pl.swing.ticksLeft / Math.max(1, pl.swing.fd.active);
+      const t = pl.swing.phase === "active"
+        ? 1 - pl.swing.ticksLeft / Math.max(1, pl.swing.fd.active)
+        : 0;
       const pulse = 0.08 * Math.sin(Math.min(1, Math.max(0, t)) * Math.PI);
       sx = 1 + pulse;
       sy = 1 - pulse;
     }
 
-    // Dynamic attack lean
-    let leanX = 0;
-    let leanY = 0;
-    if (pl.state === PLAYER_STATE.ATTACK) {
-      leanX = Math.round(Math.cos(pl.facing) * 1.5);
-      leanY = Math.round(Math.sin(pl.facing) * 1.5);
-    }
-
-    const x = Math.round(pl.x - sp.ax - ox) + leanX;
-    // a dash lifts the body 2px off its shadow — reads as a hop, not a slide
     const lift = pl.state === PLAYER_STATE.DASH ? 2 : 0;
-    const y = Math.round(pl.y - sp.ay - oy) + leanY - lift;
+    const cx = Math.round(pl.x - ox);
+    const cy = Math.round(pl.y - oy) - lift;
     const flashing = (this.flash.get(pl.id) ?? 0) > 0;
 
     g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
@@ -1449,26 +1691,149 @@ export class Renderer {
       g.restore();
       g.globalAlpha = blinkOut ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
     }
-    const flashImg = (this.white[spriteKey] ?? this.white.player);
-    const cxp = Math.round(pl.x - ox) + leanX;
-    const cyp = Math.round(pl.y - oy) + leanY;
+
+    const cape = this.sprites[`playerpart_${pl.character}_cape`];
+    if (cape === undefined) return;
+    const capeRoot = this.capeChain[0];
+    const capeTip = this.capeChain[this.capeChain.length - 1];
+    if (capeRoot !== undefined && capeTip !== undefined) {
+      const worldAngle = Math.atan2(capeTip.y - capeRoot.y, capeTip.x - capeRoot.x);
+      pose.cape.rotation = faceSign > 0 ? worldAngle - Math.PI / 2 : Math.PI / 2 - worldAngle;
+    }
+
     g.save();
-    g.translate(cxp, cyp);
-    g.scale(sx, sy);
-    g.translate(-cxp, -cyp);
-    g.drawImage(flashing ? flashImg : sp.c, x, y);
+    g.translate(cx, cy);
+    g.scale(faceSign * sx, sy);
+    const drawPart = (part: RigPart, transform: RigTransform): void => {
+      const spritePart = part === "leftArm" || part === "rightArm" ? "arm" : part;
+      const key = `playerpart_${pl.character}_${spritePart}`;
+      const sprite = this.sprites[key];
+      if (sprite === undefined) return;
+      g.save();
+      g.translate(transform.x, transform.y);
+      g.rotate(transform.rotation);
+      g.scale(transform.scaleX, transform.scaleY);
+      g.drawImage(flashing ? this.white[key] ?? sprite.c : sprite.c, -sprite.ax, -sprite.ay);
+      g.restore();
+    };
+
+    drawPart("cape", pose.cape);
+    drawPart("legs", pose.legs);
+    drawPart("torso", pose.torso);
+    drawPart("leftArm", pose.leftArm);
+
+    if (pl.character === "tank") {
+      const shield = this.sprites.playerpart_tank_shield;
+      if (shield !== undefined) {
+        g.save();
+        g.translate(pose.leftArm.x, pose.leftArm.y + 2);
+        g.rotate(pose.leftArm.rotation * 0.35);
+        g.drawImage(flashing ? this.white.playerpart_tank_shield ?? shield.c : shield.c, -shield.ax, -shield.ay);
+        g.restore();
+      }
+    }
+
+    const weapon = WEAPONS[pl.weapon];
+    const weaponSprite = this.sprites[weapon.sprite];
+    if (weaponSprite !== undefined) {
+      const grip = WEAPON_GRIPS[pl.weapon];
+      const attackAngle = this.playerWeaponAngle();
+      const localAngle = faceSign > 0 ? attackAngle + Math.PI / 4 : Math.PI - attackAngle + Math.PI / 4;
+      g.save();
+      g.translate(pose.weapon.x, pose.weapon.y);
+      g.rotate(localAngle + pose.weapon.rotation);
+      g.scale(grip.scale * pose.weapon.scaleX, grip.scale * pose.weapon.scaleY);
+      const image = flashing ? this.white[weapon.sprite] ?? weaponSprite.c : weaponSprite.c;
+      g.drawImage(image, -grip.x, -grip.y);
+      g.restore();
+    }
+
+    drawPart("rightArm", pose.rightArm);
+    drawPart("head", pose.head);
     g.restore();
 
-    const f = facingOffsets(dir);
+    const facingOffset = facingOffsets(dir);
     g.fillStyle = P.PLAYER_RIM;
-    g.fillRect(x + sp.ax - 1 + f.x, y + sp.ay - 8 + f.y, 2, 2);
+    g.fillRect(cx - 1 + facingOffset.x, cy - 8 + facingOffset.y, 2, 2);
     g.globalAlpha = 1;
+  }
+
+  private playerWeaponAngle(): number {
+    const pl = this.world.player;
+    const swing = pl.swing;
+    if (pl.state !== PLAYER_STATE.ATTACK || swing === null) return pl.facing - 0.55;
+
+    const combo = WEAPONS[pl.weapon].combos[Math.min(swing.combo - 1, WEAPONS[pl.weapon].combos.length - 1)];
+    if (combo === undefined) return swing.dir;
+    const halfArc = (combo.deg * Math.PI) / 360;
+    const direction = swing.combo % 2 === 0 ? -1 : 1;
+    if (swing.phase === "startup") {
+      const t = 1 - swing.ticksLeft / Math.max(1, swing.fd.startup);
+      return angleLerp(pl.facing - 0.55, swing.dir - halfArc * direction - 0.2 * direction, t);
+    }
+    if (swing.phase === "active") {
+      const t = 1 - swing.ticksLeft / Math.max(1, swing.fd.active);
+      return swing.dir + (-halfArc + 2 * halfArc * t) * direction;
+    }
+    const t = 1 - swing.ticksLeft / Math.max(1, swing.fd.recovery);
+    return angleLerp(swing.dir + halfArc * direction, pl.facing - 0.55, t);
+  }
+
+  private updateCape(dtReal: number): void {
+    const player = this.world.player;
+    const anchorX = player.x;
+    const anchorY = player.y - 11;
+    const segments = 4;
+    if (this.capeChain.length !== segments + 1) {
+      this.capeChain = Array.from({ length: segments + 1 }, (_, i) => {
+        const x = anchorX - Math.cos(player.facing) * i * 1.2;
+        const y = anchorY + i * 2.5;
+        return { x, y, px: x, py: y };
+      });
+      return;
+    }
+
+    const step = Math.min(2, Math.max(0, dtReal * 60));
+    const root = this.capeChain[0]!;
+    root.x = anchorX;
+    root.y = anchorY;
+    root.px = anchorX;
+    root.py = anchorY;
+    const windX = -player.vx * dtReal * 0.12 - Math.cos(player.facing) * step * 0.03;
+    const windY = -player.vy * dtReal * 0.04;
+    for (let i = 1; i < this.capeChain.length; i++) {
+      const point = this.capeChain[i]!;
+      const vx = (point.x - point.px) * 0.92;
+      const vy = (point.y - point.py) * 0.92;
+      point.px = point.x;
+      point.py = point.y;
+      point.x += vx + windX;
+      point.y += vy + windY + 0.14 * step * step;
+    }
+
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 1; i < this.capeChain.length; i++) {
+        const previous = this.capeChain[i - 1]!;
+        const point = this.capeChain[i]!;
+        const dx = point.x - previous.x;
+        const dy = point.y - previous.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const correction = (length - 2.7) / length;
+        point.x -= dx * correction;
+        point.y -= dy * correction;
+      }
+    }
   }
 
   private drawParticles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
     const density = CONFIG.SLIDERS.particles;
     if (density <= 0.01) return;
-    this.world.particles.visit((s) => this.drawOneParticle(g, s, ox, oy, density));
+    this.world.particles.visit((s) => {
+      // Sprite particles are queued into the WebGL batch in GL mode. Geometric
+      // particles stay on this canvas path until a matching atlas primitive exists.
+      if (this.glMode && s.sprite !== null) return;
+      this.drawOneParticle(g, s, ox, oy, density);
+    });
   }
 
   private drawOneParticle(g: CanvasRenderingContext2D, s: Slot, ox: number, oy: number, density: number): void {

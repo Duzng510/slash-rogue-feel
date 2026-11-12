@@ -477,15 +477,15 @@ export class Hud {
     o.restore();
   }
 
-  /** persistent strip of owned artifacts, tucked under the hearts so loot is reviewable at a glance */
+  /** persistent strip of owned artifacts, placed below room info and gold */
   drawOwnedArtifacts(o: CanvasRenderingContext2D, scale: number): void {
     const ids = [...this.world.artifacts];
     if (ids.length === 0) return;
     const size = 8;
-    const gap = 2;
+    const gap = 3;
     const pad = 2;
     const left = 6;
-    const top = 26;
+    const top = 36;
     const width = ids.length * (size + gap) - gap;
     o.fillStyle = "rgba(5, 7, 11, 0.72)";
     o.fillRect(
@@ -510,43 +510,48 @@ export class Hud {
     const w = this.world;
     const full = this.sprites.heart_full;
     const empty = this.sprites.heart_empty;
-  const step = 9;
-  for (let i = 0; i < w.player.maxHp; i++) {
-    const x = Math.round((6 + i * step) * scale);
-    const y = Math.round(6 * scale);
-    const width = full.w * scale;
-    const height = full.h * scale;
-    const fill = Math.max(0, Math.min(1, w.player.hp - i));
-    o.drawImage(empty.c, x, y, empty.w * scale, empty.h * scale);
-    if (fill >= 1 && i === 0 && w.player.hp <= 1) {
-      const pulse = 1 + 0.05 * Math.sin(w.tickCount * 0.18);
-      o.save();
-      o.translate(x + width / 2, y + height / 2);
-      o.scale(pulse, pulse);
-      o.drawImage(full.c, -width / 2, -height / 2, width, height);
-      o.restore();
-    } else if (fill >= 1) o.drawImage(full.c, x, y, width, height);
-    else if (fill >= 0.5) {
-      o.save();
-      o.beginPath();
-      o.rect(x, y, Math.ceil(width / 2), height);
-      o.clip();
-      o.drawImage(full.c, x, y, width, height);
-      o.restore();
-    }
-  }
+    const step = 9;
 
+    // 1. Dãy tim máu (HP)
+    for (let i = 0; i < w.player.maxHp; i++) {
+      const x = Math.round((6 + i * step) * scale);
+      const y = Math.round(6 * scale);
+      const width = full.w * scale;
+      const height = full.h * scale;
+      const fill = Math.max(0, Math.min(1, w.player.hp - i));
+      o.drawImage(empty.c, x, y, empty.w * scale, empty.h * scale);
+      if (fill >= 1 && i === 0 && w.player.hp <= 1) {
+        const pulse = 1 + 0.05 * Math.sin(w.tickCount * 0.18);
+        o.save();
+        o.translate(x + width / 2, y + height / 2);
+        o.scale(pulse, pulse);
+        o.drawImage(full.c, -width / 2, -height / 2, width, height);
+        o.restore();
+      } else if (fill >= 1) o.drawImage(full.c, x, y, width, height);
+      else if (fill >= 0.5) {
+        o.save();
+        o.beginPath();
+        o.rect(x, y, Math.ceil(width / 2), height);
+        o.clip();
+        o.drawImage(full.c, x, y, width, height);
+        o.restore();
+      }
+    }
+
+    // 2. Thông tin nhân vật và vũ khí (Tách sang bên phải với khoảng cách thoáng tối thiểu 72px)
     const cdef = CHARACTERS[w.player.character];
-    const badgeX = 10 + w.player.maxHp * step;
+    const badgeX = Math.max(72, 10 + w.player.maxHp * step + 8);
+
+    // Huy hiệu & Tên nhân vật (Hàng 1: y = 5)
     o.textBaseline = "top";
     o.fillStyle = cdef.color;
-    o.fillRect(Math.round(badgeX * scale), Math.round(7 * scale), Math.round(5 * scale), Math.round(5 * scale));
+    o.fillRect(Math.round(badgeX * scale), Math.round(6 * scale), Math.round(5 * scale), Math.round(5 * scale));
     o.font = `${Math.round(6 * scale)}px ui-monospace, monospace`;
-    o.globalAlpha = 0.85;
+    o.globalAlpha = 0.9;
     o.fillStyle = P.TEXT;
-    o.fillText(cdef.name, Math.round((badgeX + 8) * scale), Math.round(6 * scale));
-    o.globalAlpha = 1;
+    o.fillText(cdef.name, Math.round((badgeX + 8) * scale), Math.round(5 * scale));
 
+    // Huy hiệu & Tên vũ khí (Hàng 2: y = 14)
     const wdef = WEAPONS[w.player.weapon];
     if (wdef) {
       const wy = Math.round(14 * scale);
@@ -556,12 +561,13 @@ export class Hud {
       o.globalAlpha = 0.9;
       o.fillStyle = wdef.color;
       o.fillText(wdef.name, Math.round((badgeX + 8) * scale), wy);
-      o.globalAlpha = 1;
     }
+    o.globalAlpha = 1;
 
+    // Swordsman combo dots
     if (w.player.character === "swordsman") {
       const cx = Math.round(badgeX * scale);
-      const cy = Math.round(22 * scale);
+      const cy = Math.round(23 * scale);
       if (w.player.comboHits > 0 || w.player.comboBonus) {
         for (let i = 0; i < COMBO_HITS; i++) {
           o.fillStyle = (w.player.comboBonus || i < w.player.comboHits) ? "#ffd166" : "#2b3242";
@@ -574,6 +580,17 @@ export class Hud {
         o.fillText("+50%", cx + 17 * scale, cy - Math.round(1 * scale));
       }
     }
+
+    // 3. Tiến trình phòng & Vàng (Tách xuống hàng y = 16 và y = 25)
+    o.font = `${Math.round(6 * scale)}px ui-monospace, monospace`;
+    o.textBaseline = "top";
+    o.fillStyle = P.TEXT;
+    o.globalAlpha = 0.75;
+    o.fillText(`${w.roomIndex + 1}/${w.roomTotal}  ${w.room.name}`, Math.round(6 * scale), Math.round(16 * scale));
+    o.fillStyle = P.ENEMY_EYE;
+    const coinY = Math.round((25 + Math.sin(w.tickCount * 0.1)) * scale);
+    o.fillText(`◆ ${w.runStats.gold}`, Math.round(6 * scale), coinY);
+    o.globalAlpha = 1;
 
     /** vertical skill gauge, top-right (the bottom-left corner belongs to the touch stick) */
     const total = cdef.skillCd;
@@ -617,16 +634,6 @@ export class Hud {
       o.fillStyle = boss.enraged ? P.ENEMY_CHARGER : P.ENEMY_BOSS;
       o.fillRect(x, 6, fill, 4);
     }
-
-    o.font = `${Math.round(6 * scale)}px ui-monospace, monospace`;
-    o.textBaseline = "top";
-    o.fillStyle = P.TEXT;
-    o.globalAlpha = 0.75;
-    o.fillText(`${w.roomIndex + 1}/${w.roomTotal}  ${w.room.name}`, Math.round(6 * scale), Math.round(16 * scale));
-    o.fillStyle = P.ENEMY_EYE;
-    const coinY = Math.round((24 + Math.sin(w.tickCount * 0.1)) * scale);
-    o.fillText(`◆ ${w.runStats.gold}`, Math.round(6 * scale), coinY);
-    o.globalAlpha = 1;
 
   if (w.bannerTicks > 0 && w.bannerText.length > 0) {
     const fadeIn = Math.min(1, (w.bannerDuration - w.bannerTicks + 1) / 6);

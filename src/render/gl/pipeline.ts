@@ -327,6 +327,33 @@ export class GLPipeline {
   }
 
   /**
+   * Compatibility bridge while the world is migrated in layers. The existing
+   * canvas supplies the not-yet-migrated layers; queued batch sprites are then
+   * drawn over it directly in the scene RT, avoiding a second scene upload.
+   */
+  presentSceneWithBatch(scene: HTMLCanvasElement, params: PresentParams): void {
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
+    this.batch.render({
+      width: this.iw,
+      height: this.ih,
+      bind: () => {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneRT.fbo);
+        gl.viewport(0, 0, this.iw, this.ih);
+      },
+      unbind: () => gl.bindFramebuffer(gl.FRAMEBUFFER, null),
+    }, false);
+    this.uploadOverlay(this.fxTex, this.fxPending, false);
+    this.uploadOverlay(this.lightTex, this.lightPending, true);
+    this.fxPending = null;
+    this.lightPending = null;
+    this.runPost(params);
+    this.batch.clear();
+  }
+
+  /**
    * Bootstrap integration path: the scene arrives as a fully-composited 2D canvas (every
    * existing draw* helper reused unchanged, drawn offscreen), uploaded into the scene RT,
    * then run through the GL post chain.

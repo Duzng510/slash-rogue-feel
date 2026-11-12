@@ -257,6 +257,11 @@ for (const type of ["pointerup", "pointercancel"] as const) {
       if (type === "pointerup" && act != null && act === endActionFromClient(e.clientX, e.clientY)) {
         endScreen.close();
         resetInput();
+        if (slowmoRestoreTimer !== null) {
+          clearTimeout(slowmoRestoreTimer);
+          slowmoRestoreTimer = null;
+          CONFIG.SLIDERS.timescale = originalTimescale;
+        }
         if (act === "restart") world.restart();
         else world.continueAfterWin();
       }
@@ -392,9 +397,23 @@ function sim(): void {
   world.tick(live ? { ...b, attack: b.attack || manual.attack, dash: b.dash || manual.dash } : manual);
 }
 
+let slowmoRestoreTimer: number | null = null;
+let originalTimescale = 1;
+
 function frame(dtReal: number): void {
   syncArtifactModal();
   diag.frame();
+
+  // Slowmo 0.3x trong 0.3s khi người chơi vừa hy sinh
+  if (world.player.dead && world.player.deadTicks === 1 && slowmoRestoreTimer === null) {
+    originalTimescale = CONFIG.SLIDERS.timescale;
+    CONFIG.SLIDERS.timescale = 0.3;
+    slowmoRestoreTimer = window.setTimeout(() => {
+      CONFIG.SLIDERS.timescale = originalTimescale;
+      slowmoRestoreTimer = null;
+    }, 300);
+  }
+
   const dtSim = dtReal * CONFIG.SLIDERS.timescale;
   world.particles.update(dtSim);
   const aim = intent.aim ?? { x: world.player.x, y: world.player.y };

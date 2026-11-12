@@ -86,6 +86,7 @@ export function buildSprites(): Record<string, Sprite> {
   const S: Record<string, Sprite> = {};
   const T = CONFIG.WORLD.TILE;
   buildPlayerSprites(S);
+  buildPlayerPartSprites(S);
   buildEnemySprites(S);
   buildHudSprites(S);
   buildTileSprites(S, T);
@@ -177,6 +178,129 @@ function buildPlayerSprites(S: Record<string, Sprite>): void {
   });
 
   S.player = S.player_swordsman;
+}
+
+function buildPlayerPartSprites(S: Record<string, Sprite>): void {
+  S.playerpart_swordsman_cape = bake(10, 10, 5, 0, (g) => {
+    rect(g, 2, 0, 6, 2, P.VOID);
+    rect(g, 1, 2, 8, 6, "#142338");
+    rect(g, 0, 7, 10, 2, "#1f4068");
+    rect(g, 2, 8, 6, 1, "#4da3ff");
+  });
+  S.playerpart_swordsman_legs = bake(10, 5, 5, 5, (g) => {
+    rect(g, 1, 0, 8, 4, P.VOID);
+    rect(g, 2, 0, 6, 3, "#1f4068");
+    rect(g, 0, 3, 4, 2, P.VOID);
+    rect(g, 6, 3, 4, 2, P.VOID);
+    rect(g, 1, 3, 3, 1, "#4da3ff");
+    rect(g, 6, 3, 3, 1, "#4da3ff");
+  });
+  S.playerpart_swordsman_torso = bake(10, 8, 5, 0, (g) => {
+    rect(g, 1, 0, 8, 7, P.VOID);
+    rect(g, 2, 1, 6, 5, "#1f4068");
+    rect(g, 0, 1, 2, 3, "#4da3ff");
+    rect(g, 8, 1, 2, 3, "#4da3ff");
+    rect(g, 4, 1, 2, 5, "#2c6db0");
+    rect(g, 3, 6, 4, 1, "#ffd166");
+  });
+  S.playerpart_swordsman_head = bake(10, 8, 5, 8, (g) => {
+    rect(g, 1, 1, 8, 6, P.VOID);
+    rect(g, 2, 0, 6, 5, "#1f4068");
+    rect(g, 1, 0, 8, 2, "#4da3ff");
+    rect(g, 3, 3, 5, 2, "#07101d");
+    rect(g, 4, 3, 3, 1, "#00e5ff");
+    rect(g, 5, 4, 2, 1, "#ffffff");
+  });
+  S.playerpart_swordsman_arm = bake(5, 8, 2, 1, (g) => {
+    rect(g, 1, 0, 3, 6, P.VOID);
+    rect(g, 1, 1, 2, 4, "#1f4068");
+    rect(g, 0, 1, 2, 3, "#4da3ff");
+    rect(g, 1, 6, 3, 1, "#ffd166");
+  });
+
+  S.playerpart_mage_cape = bake(10, 10, 5, 0, (g) => {
+    rect(g, 2, 0, 6, 2, P.VOID);
+    rect(g, 1, 2, 8, 6, "#3c096c");
+    rect(g, 0, 7, 10, 2, "#5a189a");
+    rect(g, 3, 8, 4, 1, "#c99ae6");
+  });
+  S.playerpart_mage_legs = bake(10, 5, 5, 5, (g) => {
+    rect(g, 1, 0, 8, 4, P.VOID);
+    rect(g, 2, 0, 6, 4, "#5a189a");
+    rect(g, 0, 3, 4, 2, "#3c096c");
+    rect(g, 6, 3, 4, 2, "#3c096c");
+    rect(g, 4, 1, 2, 3, "#c99ae6");
+  });
+  S.playerpart_mage_torso = bake(10, 8, 5, 0, (g) => {
+    rect(g, 1, 0, 8, 7, P.VOID);
+    rect(g, 2, 1, 6, 6, "#5a189a");
+    rect(g, 0, 2, 2, 4, "#4a148c");
+    rect(g, 8, 2, 2, 4, "#4a148c");
+    rect(g, 4, 1, 2, 6, "#c99ae6");
+    rect(g, 3, 6, 4, 1, "#3c096c");
+  });
+  S.playerpart_mage_head = bake(10, 9, 5, 9, (g) => {
+    rect(g, 4, 0, 2, 2, "#c99ae6");
+    rect(g, 3, 2, 4, 2, "#7b2cbf");
+    rect(g, 1, 4, 8, 2, "#4a148c");
+    rect(g, 2, 4, 6, 1, "#9d4edd");
+    rect(g, 3, 6, 4, 2, P.VOID);
+    rect(g, 3, 6, 1, 1, "#ffd166");
+    rect(g, 6, 6, 1, 1, "#ffd166");
+  });
+  S.playerpart_mage_arm = bake(5, 8, 2, 1, (g) => {
+    rect(g, 1, 0, 3, 6, P.VOID);
+    rect(g, 1, 1, 2, 5, "#5a189a");
+    rect(g, 0, 2, 2, 3, "#9d4edd");
+    rect(g, 1, 6, 3, 1, "#c99ae6");
+  });
+
+  S.playerpart_tank_cape = bake(12, 10, 6, 0, (g) => {
+    rect(g, 2, 0, 8, 2, P.VOID);
+    rect(g, 1, 2, 10, 6, "#3d1020");
+    rect(g, 0, 7, 12, 2, "#8f172f");
+    rect(g, 3, 8, 6, 1, "#ff5a3c");
+  });
+  S.playerpart_tank_legs = bake(12, 5, 6, 5, (g) => {
+    rect(g, 1, 0, 10, 4, P.VOID);
+    rect(g, 2, 0, 8, 3, "#2b2d42");
+    rect(g, 0, 3, 5, 2, "#1f2421");
+    rect(g, 7, 3, 5, 2, "#1f2421");
+    rect(g, 1, 3, 3, 1, "#8d99ae");
+    rect(g, 8, 3, 3, 1, "#8d99ae");
+  });
+  S.playerpart_tank_torso = bake(12, 8, 6, 0, (g) => {
+    rect(g, 1, 0, 10, 7, P.VOID);
+    rect(g, 2, 1, 8, 5, "#8d99ae");
+    rect(g, 0, 1, 3, 4, "#2b2d42");
+    rect(g, 9, 1, 3, 4, "#2b2d42");
+    rect(g, 4, 1, 4, 5, "#ef233c");
+    rect(g, 5, 2, 2, 3, "#ff5a3c");
+    rect(g, 3, 6, 6, 1, "#ffd166");
+  });
+  S.playerpart_tank_head = bake(12, 9, 6, 9, (g) => {
+    rect(g, 1, 2, 10, 6, P.VOID);
+    rect(g, 2, 2, 8, 5, "#3a0ca3");
+    rect(g, 3, 3, 6, 3, "#ef233c");
+    rect(g, 0, 0, 3, 4, "#d90429");
+    rect(g, 9, 0, 3, 4, "#d90429");
+    rect(g, 4, 5, 5, 2, "#07101d");
+    rect(g, 5, 5, 3, 1, "#ff5a3c");
+  });
+  S.playerpart_tank_arm = bake(6, 8, 3, 1, (g) => {
+    rect(g, 1, 0, 4, 6, P.VOID);
+    rect(g, 1, 1, 4, 5, "#2b2d42");
+    rect(g, 0, 1, 2, 4, "#8d99ae");
+    rect(g, 2, 2, 2, 3, "#ef233c");
+    rect(g, 1, 6, 4, 1, "#ffd166");
+  });
+  S.playerpart_tank_shield = bake(6, 10, 3, 1, (g) => {
+    rect(g, 1, 0, 4, 8, P.VOID);
+    rect(g, 1, 1, 4, 7, "#ff5a3c");
+    rect(g, 2, 2, 2, 5, "#ffd166");
+    rect(g, 0, 4, 1, 2, "#ffffff");
+    rect(g, 2, 8, 2, 1, "#ff5a3c");
+  });
 }
 
 function buildEnemySprites(S: Record<string, Sprite>): void {

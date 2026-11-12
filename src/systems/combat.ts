@@ -266,7 +266,8 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     // crit: a landed player kill; element: any status swing; both read bigger/colored
     const style = killed && sw.side === "player" ? "crit" as const
       : sw.status !== undefined ? "element" as const : "normal" as const;
-    dmgNumber(src.queue, cx, cy - 8, sw.dmg, style, fx?.color);
+    const damageType = sw.status === "burn" || sw.status === "shock" || sw.status === "freeze" || sw.status === "poison" || sw.status === "bleed" ? sw.status : "physical";
+    dmgNumber(src.queue, cx, cy - 8, sw.dmg, style, fx?.color, damageType);
     shake(src.queue, cx, cy, dir, killed ? f.SHAKE_KILL_MULT : 1);
     addDecal(src, cx, cy, killed);
     if (killed && sw.side === "player") src.queue.push({ t: "hitImpact" });

@@ -39,7 +39,7 @@ in vec4 vTint;
 in float vFlash;
 out vec4 fragColor;
 void main() {
-  vec4 t = texture(uAtlas, vUv);
+  vec4 t = vFlash < -0.5 ? vec4(1.0) : texture(uAtlas, vUv);
   vec3 rgb = mix(t.rgb, vec3(1.0), vFlash);
   fragColor = vec4(rgb * vTint.rgb, t.a * vTint.a);
 }`;
@@ -126,6 +126,19 @@ export class SpriteBatch {
     if (rect) this.push(rect, x, y, w, h, tint, rot, flash, additive);
   }
 
+  /** Queue a pixel-aligned solid rectangle without requiring an atlas entry. */
+  drawSolidRect(x: number, y: number, w: number, h: number, tint: readonly [number, number, number, number], additive = false, rot = 0): void {
+    const n = additive ? this.additiveCount : this.normalCount;
+    if (n >= this.capacity) return;
+    const i = n * FLOATS;
+    const a = this.data;
+    a[i] = x; a[i + 1] = y; a[i + 2] = w; a[i + 3] = h;
+    a[i + 4] = 0; a[i + 5] = 0; a[i + 6] = 0; a[i + 7] = 0;
+    a[i + 8] = tint[0]; a[i + 9] = tint[1]; a[i + 10] = tint[2]; a[i + 11] = tint[3];
+    a[i + 12] = rot; a[i + 13] = -1;
+    if (additive) this.additiveCount = n + 1; else this.normalCount = n + 1;
+  }
+
   push(
     rect: AtlasRect,
     x: number,
@@ -169,7 +182,7 @@ export class SpriteBatch {
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
   }
 
-  render(target: RenderTargetLike | null): void {
+  render(target: RenderTargetLike | null, clear = true): void {
     const gl = this.gl;
     if (target) target.bind();
     else gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -177,8 +190,10 @@ export class SpriteBatch {
     const vh = target ? target.height : gl.drawingBufferHeight;
     gl.viewport(0, 0, vw, vh);
     gl.enable(gl.BLEND);
-    gl.clearColor(this.clearR, this.clearG, this.clearB, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (clear) {
+      gl.clearColor(this.clearR, this.clearG, this.clearB, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
     if (this.normalCount + this.additiveCount === 0) {
       if (target) target.unbind();
       return;
