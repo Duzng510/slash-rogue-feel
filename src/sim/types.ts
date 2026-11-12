@@ -81,10 +81,22 @@ export type Intent = {
   skill: boolean;
 };
 
+export type Decal = {
+  x: number;
+  y: number;
+  kind: "blood" | "crack" | "burn";
+  color: string;
+  /** ticks left; Infinity = lives for the whole room (cleared on loadRoom) */
+  life: number;
+  /** pre-scattered 1-2px spots, hashed from the hit position so sims stay deterministic */
+  spots: { dx: number; dy: number; s: number }[];
+};
+
 export type Sim = {
   artifacts: Set<ArtifactId>;
   curses: Set<CurseId>;
   fireTrails: FireTrail[];
+  decals: Decal[];
   projectiles: Projectile[];
   units: Unit[];
   enemies: Enemy[];

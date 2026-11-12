@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9336;
-const BASE = "http://localhost:3000/?manual=1&seed=42";
+const BASE = "http://localhost:5199/?manual=1&seed=42";
 const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools/out";
 
 const chrome = spawn(CHROME, [

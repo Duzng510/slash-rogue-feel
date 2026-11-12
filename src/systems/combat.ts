@@ -6,7 +6,7 @@ import { requestHitStop } from "./feelSim.ts";
 import { CHARACTERS } from "./characters.ts";
 import { WEAPONS } from "./weapons.ts";
 import type { Rect } from "../mathx.ts";
-import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
+import type { Decal, Side, Sim, Swing, Unit } from "../sim/types.ts";
 import type { Enemy } from "../entities/enemy.ts";
 import type { SpatialGrid } from "../world/grid.ts";
 
@@ -206,6 +206,26 @@ export function resolveFire(src: Sim): void {
   src.fireTrails = src.fireTrails.filter(t => t.points.length > 0);
 }
 
+/**
+ * A permanent floor stain, hashed from the hit position instead of the sim rng so
+ * landing hits never perturbs the seeded determinism oracle. Oldest decal recycles.
+ */
+function addDecal(src: Sim, x: number, y: number, killed: boolean): void {
+  if (src.decals.length >= CONFIG.FEEL.DECAL_CAP) src.decals.shift();
+  let h = ((Math.round(x) * 73856093) ^ (Math.round(y) * 19349663) ^ (Math.round(x + y) * 83492791)) >>> 0;
+  const next = (): number => {
+    h = (h * 1664525 + 1013904223) >>> 0;
+    return h / 4294967296;
+  };
+  const spots: Decal["spots"] = [];
+  const n = killed ? 7 : 4;
+  const spread = killed ? 10 : 6;
+  for (let i = 0; i < n; i++) {
+    spots.push({ dx: (next() - 0.5) * spread, dy: (next() - 0.5) * spread * 0.8, s: next() < 0.3 ? 2 : 1 });
+  }
+  src.decals.push({ x, y, kind: "blood", color: CONFIG.PALETTE.BLOOD, life: Number.POSITIVE_INFINITY, spots });
+}
+
 export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
@@ -222,6 +242,8 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     if (killed) src.particles.burstShards(cx, cy, f.DEATH_SHARDS, CONFIG.PALETTE.ENEMY_SHADE, src.rng);
     if (CONFIG.SLIDERS.dmgNumbers > 0) src.queue.push({ t: "dmgNumber", x: cx, y: cy - 8, value: sw.dmg });
     shake(src.queue, cx, cy, dir, killed ? f.SHAKE_KILL_MULT : 1);
+    addDecal(src, cx, cy, killed);
+    if (killed && sw.side === "player") src.queue.push({ t: "hitImpact" });
     const heavy = !killed && sw.side === "player" && src.artifacts.has("heavy");
     const sname = killed ? "kill" : heavy ? "slash_hit_heavy" : "slash_hit";
     sfx(src.queue, sname, killed ? 1.1 : 1, (killed ? 0.82 : heavy ? 0.85 : 1) * (target.killPitch ?? 1));

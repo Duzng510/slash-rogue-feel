@@ -32,7 +32,8 @@ export type VisualEvent =
   | { t: "slice"; x: number; y: number; dir: number; len: number }
   | { t: "beam"; x: number; y: number; dir: number; len: number }
   | { t: "kingPhase"; phase: 1 | 2 | 3 }
-  | { t: "achievement"; id: AchievementId };
+  | { t: "achievement"; id: AchievementId }
+  | { t: "hitImpact" };
 
 const CAP = 64;
 

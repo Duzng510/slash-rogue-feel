@@ -75,7 +75,7 @@
           id="version"
           class="absolute right-[max(12px,env(safe-area-inset-right))] bottom-[max(10px,env(safe-area-inset-bottom))] text-[var(--dim)] text-[11px]"
         >
-          v0.17.0
+          v0.20.0
         </span>
       </div>
 
@@ -121,6 +121,11 @@
           <input id="s-dmgnum" type="range" min="0" max="1" step="1" value="0" class="w-full accent-[#4da3ff]" />
           <b id="v-dmgnum" class="font-normal text-right">off</b>
         </div>
+        <div class="grid grid-cols-[74px_1fr_34px] gap-1.5 items-center my-[3px] text-[11px]">
+          <span class="text-[var(--dim)]">Brightness</span>
+          <input id="s-bright" type="range" min="0.5" max="2" step="0.05" value="1" class="w-full accent-[#4da3ff]" />
+          <b id="v-bright" class="font-normal text-right">1.00</b>
+        </div>
       </div>
 
       <!-- Điều khiển cảm ứng Touch Controls -->
@@ -131,7 +136,7 @@
         >
           <div
             id="knob"
-            class="absolute left-1/2 top-1/2 w-[62px] h-[62px] m-0 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[rgba(77,163,255,0.55)] border-2 border-[#9fd0ff] shadow-[0_0_12px_rgba(77,163,255,0.45)]"
+            class="absolute left-1/2 top-1/2 w-[62px] h-[62px] m-0 rounded-full bg-[rgba(77,163,255,0.55)] border-2 border-[#9fd0ff] shadow-[0_0_12px_rgba(77,163,255,0.45)]"
           ></div>
         </div>
         <div

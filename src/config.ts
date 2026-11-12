@@ -4,10 +4,10 @@ export type EnemyKind = "chaser" | "charger" | "splitter" | "small" | "boss" | "
 
 const PALETTE = {
   VOID: "#05070b",
-  FLOOR: "#121419",
-  FLOOR_ACCENT: "#1b1f28",
-  WALL: "#2b3242",
-  WALL_TOP: "#3a4358",
+  FLOOR: "#1a1e27",
+  FLOOR_ACCENT: "#242a36",
+  WALL: "#3a4356",
+  WALL_TOP: "#4c5670",
   DOOR_LOCKED: "#6b7280",
   DOOR_OPEN: "#7fd1ff",
   PLAYER_BODY: "#4da3ff",
@@ -580,6 +580,13 @@ export const CONFIG = {
     PLAYER_BLOOD: 6,
     DASH_DUST: 3,
     DECEL_ON_DEATH: 0.9,
+    /** kill-cam: zoom+desat punch when a player swing kills (visual-only, see renderer) */
+    IMPACT_TICKS: 2,
+    IMPACT_ZOOM: 1.04,
+    IMPACT_FLASH_ALPHA: 0.4,
+    IMPACT_SATURATE: 0.45,
+    /** ground blood decals per room; oldest is recycled when full */
+    DECAL_CAP: 64,
   },
 
   READABILITY: {
@@ -620,6 +627,7 @@ export const CONFIG = {
     timescale: 1,
     hitStopScale: 1,
     dmgNumbers: 1,
+    brightness: 1,
   },
 
   LAWS: {

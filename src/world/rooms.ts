@@ -256,6 +256,8 @@ export class Room {
   readonly shop: boolean;
   readonly tiles: Uint8Array;
   readonly spawns: SpawnMark[] = [];
+  /** wall torches: one every ~8 wall tiles, flicker phase varies per torch */
+  readonly torches: { x: number; y: number; phase: number }[] = [];
   readonly start: { x: number; y: number } = { x: 0, y: 0 };
   private readonly doorTiles: number[] = [];
   private hasStart = false;
@@ -294,6 +296,24 @@ export class Room {
           }
         }
         this.tiles[ty * this.w + tx] = t;
+      }
+    }
+
+    // torches: scan wall faces (wall with a walkable tile below) and place one every ~8 tiles
+    const torchRng = makeRng(0x51ee + index * 104729);
+    let sinceLast = 8;
+    for (let ty = 1; ty < this.h; ty++) {
+      for (let tx = 0; tx < this.w; tx++) {
+        if (this.tiles[ty * this.w + tx] !== TILE.WALL) continue;
+        const below = ty + 1 < this.h ? this.tiles[(ty + 1) * this.w + tx] : TILE.WALL;
+        if (below === TILE.WALL || below === TILE.CRATE) continue;
+        if (++sinceLast < 8 || torchRng.next() < 0.25) continue;
+        sinceLast = 0;
+        this.torches.push({
+          x: tx * CONFIG.WORLD.TILE + CONFIG.WORLD.TILE / 2,
+          y: (ty + 1) * CONFIG.WORLD.TILE - 2,
+          phase: torchRng.next() * Math.PI * 2,
+        });
       }
     }
 

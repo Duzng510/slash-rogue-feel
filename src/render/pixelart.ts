@@ -4,6 +4,9 @@ const P = CONFIG.PALETTE;
 
 export type Sprite = { c: HTMLCanvasElement; w: number; h: number; ax: number; ay: number };
 
+/** a baked multi-frame clip; the renderer picks a frame from sim ticks (60Hz) */
+export type SpriteSet = { frames: Sprite[]; mirrored: Sprite[]; tickDur: number };
+
 function bake(w: number, h: number, ax: number, ay: number, draw: (g: CanvasRenderingContext2D) => void): Sprite {
   const c = document.createElement("canvas");
   c.width = w;
@@ -424,10 +427,10 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 0, T - 2, T, 2, P.VOID);
   });
 
-  bakeBiomeTiles(S, T, "dungeon", "#121419", "#2b3242", "#1b1f28");
-  bakeBiomeTiles(S, T, "caverns", "#101822", "#1f3548", "#16304a");
-  bakeBiomeTiles(S, T, "forge", "#1a0e08", "#3a1a10", "#2a1410");
-  bakeBiomeTiles(S, T, "void", "#0a0512", "#1e0f2e", "#180a28");
+  bakeBiomeTiles(S, T, "dungeon", "#191d26", "#39445a", "#232834");
+  bakeBiomeTiles(S, T, "caverns", "#16222e", "#2a4862", "#1e3f61");
+  bakeBiomeTiles(S, T, "forge", "#25150c", "#4d2316", "#391c15");
+  bakeBiomeTiles(S, T, "void", "#110a1c", "#2a163d", "#221033");
 
   S.crate = bake(T, T, 0, 0, (g) => {
     rect(g, 0, 2, T, T - 2, P.WALL);
@@ -542,6 +545,21 @@ export function buildSprites(): Record<string, Sprite> {
     rect(g, 8, 11, 2, 2, "#ffffff"); // crack tip
   });
 
+  // --- Wall torch, 2 flicker frames (anchor: bottom-centre) ---
+  const torchPaint = (g: CanvasRenderingContext2D, lean: number): void => {
+    // iron sconce
+    rect(g, 1, 6, 3, 2, "#4a3b2a");
+    rect(g, 2, 5, 1, 2, "#2a2018");
+    // wooden handle
+    rect(g, 2, 3, 1, 3, "#6f4e37");
+    // flame: tall teardrop that sways with `lean`
+    rect(g, 2 + lean, 0, 2, 3, "#ff963f");
+    rect(g, 2 + lean, 1, 2, 2, "#ffc35a");
+    rect(g, 2 + lean, 1, 1, 1, "#ffe66b");
+  };
+  S.torch = bake(5, 8, 2, 7, (g) => torchPaint(g, 0));
+  S.torch_flicker = bake(5, 8, 2, 7, (g) => torchPaint(g, -1));
+
   return S;
 }
 
@@ -559,4 +577,65 @@ export function facingOffsets(dir: number): { x: number; y: number } {
   ];
   const v = table[step];
   return { x: v[0], y: v[1] };
+}
+
+/** mirror a sprite horizontally, keeping the feet anchor centred */
+export function flipH(src: Sprite): Sprite {
+  const c = document.createElement("canvas");
+  c.width = src.w;
+  c.height = src.h;
+  const g = c.getContext("2d");
+  if (g !== null) {
+    g.translate(src.w, 0);
+    g.scale(-1, 1);
+    g.drawImage(src.c, 0, 0);
+  }
+  return { c, w: src.w, h: src.h, ax: src.w - src.ax, ay: src.ay };
+}
+
+/** re-bake a sprite with its bottom 3 rows (feet) shifted sideways: a leg shuffle */
+function footShift(base: Sprite, dx: number): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    g.drawImage(base.c, 0, 0, base.w, base.h - 3, 0, 0, base.w, base.h - 3);
+    g.drawImage(base.c, 0, base.h - 3, base.w, 3, dx, base.h - 3, base.w, 3);
+  });
+}
+
+/** idle-breath: the whole body bobs down 1px, feet stay planted */
+function bobDown(base: Sprite): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    g.drawImage(base.c, 0, 1);
+  });
+}
+
+/**
+ * Multi-frame clips derived from the baked base sprites: idle-breath (2 frames / 40 ticks)
+ * and a 4-step walk (6 ticks) for the three heroes, a 3-step walk (8 ticks) for enemies.
+ * Each set also carries mirrored frames for the right-facing direction.
+ */
+export function buildAnimSets(): Record<string, SpriteSet> {
+  const S = buildSprites();
+  const out: Record<string, SpriteSet> = {};
+  const set = (key: string, frames: Sprite[], tickDur: number): void => {
+    out[key] = { frames, mirrored: frames.map(flipH), tickDur };
+  };
+
+  for (const key of ["player_swordsman", "player_mage", "player_tank"]) {
+    const base = S[key];
+    if (!base) continue;
+    set(`${key}_idle`, [copyOfSprite(base), bobDown(base)], 40);
+    set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1), copyOfSprite(base)], 6);
+  }
+  for (const kind of ["chaser", "charger", "splitter", "small", "boss", "ranged", "teleporter", "healer", "exploder", "shielder", "sniper", "jumper", "warden", "golem", "king"] as const) {
+    const key = enemyDef(kind).SPRITE_KEY;
+    const base = S[key];
+    if (base) set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1)], 8);
+  }
+  return out;
+}
+
+function copyOfSprite(base: Sprite): Sprite {
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    g.drawImage(base.c, 0, 0);
+  });
 }

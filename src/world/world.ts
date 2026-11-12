@@ -22,7 +22,7 @@ import { Room, TEMPLATES, TILE, type SpawnMark } from "../world/rooms.ts";
 import { SpatialGrid } from "./grid.ts";
 import { applyAscension, normalizeAscensionLevel, type AscensionLevel } from "../systems/ascension.ts";
 import { biomeForRoom, type Biome } from "../systems/biomes.ts";
-import type { Intent, Projectile, Sim, Unit } from "../sim/types.ts";
+import type { Decal, Intent, Projectile, Sim, Unit } from "../sim/types.ts";
 
 export type ShopOffer = {
   kind: "artifact" | "heal" | "maxhp" | "curse";
@@ -78,6 +78,7 @@ export class World implements Sim {
   curseOffer: { artifacts: Artifact[]; curses: Curse[] } | null = null;
   curseTab = false;
   shopOffers: ShopOffer[] | null = null;
+  decals: Decal[] = [];
   fireTrails: FireTrail[] = [];
   projectiles: Projectile[] = [];
   private rewardedRooms = new Set<number>();
@@ -179,6 +180,7 @@ export class World implements Sim {
     this.room = new Room(TEMPLATES[this.roomIndex], this.roomIndex);
     resetEnemyIds();
     this.enemies = [];
+    this.decals = [];
     this.fireTrails = [];
     this.projectiles = [];
     this.artifactChoices = [];

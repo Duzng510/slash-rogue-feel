@@ -5,11 +5,40 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.17.0";
+export const APP_VERSION = "v0.20.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.20.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Đuốc tường:</b> mỗi phòng rải đuốc trên mặt tường (~mỗi 8 tile), lửa 2 khung nhấp nháy và punch vùng sáng rung ±15%.",
+      "<b>Sương biome:</b> Hang Băng sương xanh trắng, Lò Rèn sương cam, Hư Không sương tím — trôi chậm, nướng 160×90 phóng to giữ nét pixel.",
+      "<b>Thời tiết:</b> tuyết rơi ngang ở hang, tro bay lên + than hồng ở lò rèn, tinh thể trôi + sao lấp lánh ở hư không.",
+      "<b>Nền ngoài map dịu:</b> vùng ngoài tường không còn đen thui — theo tông biome, ambient vignette mờ đi để quái cả phòng luôn đọc được.",
+    ],
+  },
+  {
+    version: "v0.19.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Map sáng hơn:</b> sàn/tường các biome được nâng tông, lớp tối giám sát và ambient vignette giảm; thêm thanh trượt Brightness (0.5–2x).",
+      "<b>Sprite động:</b> nhân vật có nhịp thở khi đứng yên (2 khung) và chu kỳ chân khi đi (4 khung); quái đi 3 khung.",
+      "<b>Squash & stretch:</b> nhát chém phồng dọc rồi xẹp, dash kéo giãn thân theo trục.",
+      "<b>Sprite theo hướng:</b> nhân vật và quái lật ngược khi nhìn sang phải, kết hợp dịch pixel theo 8 hướng có sẵn.",
+    ],
+  },
+  {
+    version: "v0.18.0",
+    date: "2026-11-12",
+    items: [
+      "<b>Kill-cam impact:</b> hạ quái giờ zoom 1.04x 2 tick, flash đỏ 1 khung và giảm bão hòa 1 khung — cú đánh kết liễu đọc rõ hơn.",
+      "<b>Vệt chém đa lớp:</b> cung chém thêm 2 lớp trailing mờ và viền lõi trắng 1px bên trong; khi nhát chém kết thúc để lại một vệt cắt dài tan dần.",
+      "<b>Vết máu trên sàn:</b> mỗi cú đánh đọng vết máu, cú kết liễu bắn toả rộng hơn; tối đa 64 vết mỗi phòng, qua phòng mới sẽ sạch.",
+    ],
+  },
   {
     version: "v0.17.0",
     date: "2026-11-12",

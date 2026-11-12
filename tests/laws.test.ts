@@ -1278,6 +1278,21 @@ heading("Characters (H2 build choice)");
   ok("status damage does not feed it", m.player.comboHits === 1);
 }
 {
+  const m = sandbox();
+  const foe = makeEnemy(m.player.x + 12, m.player.y, "chaser");
+  withEnemy(m, foe);
+  const melee = createSwing(m, { side: "player", combo: 1, dir: 0, ox: m.player.x, oy: m.player.y, reach: CONFIG.ATTACK.REACH, deg: 90, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  hitFeedback(m, foe, melee, foe.x, foe.y, false, false);
+  ok("every landed hit paints the floor", m.decals.length === 1 && m.decals[0].kind === "blood" && m.decals[0].spots.length === 4);
+  const kill = createSwing(m, { side: "player", combo: 1, dir: 0, ox: m.player.x, oy: m.player.y, reach: CONFIG.ATTACK.REACH, deg: 90, dmg: 99, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  const before = m.decals.length;
+  hitFeedback(m, foe, kill, foe.x, foe.y, true, false);
+  ok("a kill splashes a bigger decal and fires the impact punch", m.decals.length === before + 1 && m.decals[before].spots.length === 7 && m.queue.size > 0);
+  const swarmed = createSwing(m, { side: "player", combo: 1, dir: 0, ox: m.player.x, oy: m.player.y, reach: CONFIG.ATTACK.REACH, deg: 90, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } });
+  for (let i = 0; i < 300; i++) hitFeedback(m, foe, swarmed, foe.x + (i % 7), foe.y, false, false);
+  ok("decals stay capped for the whole room", m.decals.length === CONFIG.FEEL.DECAL_CAP);
+}
+{
   const g = sandbox();
   g.pickCharacter("mage");
   g.pickWeapon("katana");

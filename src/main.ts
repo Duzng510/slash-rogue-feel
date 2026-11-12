@@ -330,6 +330,7 @@ const SLIDERS: { id: string; label: string; key: keyof typeof CONFIG.SLIDERS; fm
   { id: "s-timescale", label: "v-timescale", key: "timescale", fmt: (v) => v.toFixed(2) },
   { id: "s-hitstop", label: "v-hitstop", key: "hitStopScale", fmt: (v) => `${v}` },
   { id: "s-dmgnum", label: "v-dmgnum", key: "dmgNumbers", fmt: (v) => (v > 0 ? "on" : "off") },
+  { id: "s-bright", label: "v-bright", key: "brightness", fmt: (v) => v.toFixed(2) },
 ];
 
 function syncSliderLabels(): void {

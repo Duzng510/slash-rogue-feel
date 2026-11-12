@@ -45,6 +45,11 @@ body.rot90 #app {
   transform-origin: top left;
 }
 
+/* Center the virtual-stick knob by default; TouchInput overrides transform while dragging. */
+#knob {
+  transform: translate(-50%, -50%);
+}
+
 /* Visibility states driven by body classes */
 body.starting.touch #touch,
 body.starting #keys,
