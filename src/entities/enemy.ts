@@ -268,7 +268,7 @@ export class Enemy implements Unit {
   }
 
   private detonate(src: Sim): void {
-    src.queue.push({ t: "slashArc", x: this.x, y: this.y, dir: 0, reach: 50, deg: 360, combo: 2, ticks: 12 });
+    src.queue.push({ t: "slashArc", x: this.x, y: this.y, dir: 0, reach: 50, deg: 360, combo: 2, ticks: 12, contact: 0.5 });
     sfx(src.queue, "aftershock_boom", 1, 0.7);
     artifactText(src.queue, this.x, this.y - 12, "BỘC HỎA", "#ff7a3c");
     const blast = instantSwing(src, { side: "player", dir: 0, ox: this.x, oy: this.y, dmg: 3 });

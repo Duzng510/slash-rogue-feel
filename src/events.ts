@@ -26,7 +26,7 @@ export type VisualEvent =
   | { t: "sfx"; name: SfxName; gain: number; pitch: number }
   | { t: "flash"; ent: number; ticks: number }
   | { t: "hurtVignette"; strength: number }
-  | { t: "slashArc"; x: number; y: number; dir: number; reach: number; deg: number; combo: number; ticks: number }
+  | { t: "slashArc"; x: number; y: number; dir: number; reach: number; deg: number; combo: number; ticks: number; contact: number }
   | { t: "dmgNumber"; x: number; y: number; value: number; style?: "normal" | "crit" | "heal" | "element"; color?: string; damageType?: "physical" | "burn" | "shock" | "freeze" | "poison" | "bleed" }
   | { t: "roomBanner"; text: string }
   | { t: "roomTransition"; x: number; y: number }

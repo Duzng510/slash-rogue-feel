@@ -1090,3 +1090,45 @@ function scatter(base: Sprite, seed: number, amount: number, alpha: number): Spr
     g.globalAlpha = 1;
   });
 }
+
+/** pixelfx slash recipe as ramp-indexed keyframes rather than baked sheets: geometry stays
+ *  procedural so any reach/deg/dir draws without resampling pixels. The fourth phase
+ *  (dotted residue) lives on the lingering slice, after the arc's life ends. */
+export type SlashPhase = "windup" | "snap" | "followthrough";
+
+export type SlashFrame = { phase: SlashPhase; intensity: number; ramp: number; width: number };
+
+const SLASH_RAMP_CYAN: readonly string[] = [P.SLASH_CYAN_DEEP, P.SLASH_CYAN, P.SLASH, P.SLASH_EDGE];
+const SLASH_RAMP_GOLD: readonly string[] = [P.SLASH_ORANGE_DEEP, P.SLASH_GOLD, P.SLASH, P.SLASH_EDGE];
+
+export function slashRamp(combo: number): readonly string[] {
+  return combo === 2 ? SLASH_RAMP_GOLD : SLASH_RAMP_CYAN;
+}
+
+/** `p` = elapsed fraction of the swing life, `contact` = startup / (startup + active).
+ *  Boundaries are half-open so the phases tile [0,1] and intensity stays continuous:
+ *  wind-up climbs to WINDUP_PEAK, the snap peaks at 1 on contact and falls back to that
+ *  same peak, then the follow-through decays to zero. */
+export function slashFrame(p: number, contact: number): SlashFrame {
+  const fx = CONFIG.FX_SLASH;
+  const x = Math.min(1, Math.max(0, p));
+  const c = Math.min(1, Math.max(0, contact));
+  const lo = Math.max(0, c - fx.SNAP_HALF);
+  const hi = Math.min(1, c + fx.SNAP_HALF);
+  if (x <= lo) {
+    const t = lo <= 0 ? 1 : x / lo;
+    return { phase: "windup", intensity: fx.WINDUP_PEAK * t, ramp: t < 0.5 ? 0 : 1, width: fx.WINDUP_WIDTH };
+  }
+  if (x < hi) {
+    const d = Math.abs(x - c) / Math.max(1e-6, fx.SNAP_HALF);
+    return { phase: "snap", intensity: 1 - (1 - fx.WINDUP_PEAK) * d, ramp: SLASH_RAMP_CYAN.length - 1, width: fx.SNAP_WIDTH };
+  }
+  const t = hi >= 1 ? 0 : (x - hi) / (1 - hi);
+  return { phase: "followthrough", intensity: fx.WINDUP_PEAK * (1 - t), ramp: t < 0.5 ? 2 : 1, width: fx.FOLLOW_WIDTH };
+}
+
+/** offsets along the cut, centred on 0, spaced at least `gap` apart — a dotted residue, not a stroke */
+export function residueDotPositions(len: number, gap: number): number[] {
+  const n = Math.max(2, Math.floor(len / Math.max(1, gap)));
+  return Array.from({ length: n }, (_, i) => -len / 2 + (len * i) / (n - 1));
+}

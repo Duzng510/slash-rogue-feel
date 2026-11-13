@@ -5,11 +5,20 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.42.1";
+export const APP_VERSION = "v0.43.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.43.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Slash recipe:</b> chém lại theo envelope 4 pha — windup gom sáng, snap bùng đúng khung chạm, follow-through tắt dần; màu chạy theo ramp keyframes khóa trong palette, residue để lại chấm đứt quãng thay vì vệt đặc.",
+      "<b>Khung chạm:</b> snap neo vào contact = startup/(startup+active) nên vẫn đúng khung khi curse slow_hand kéo dài startup; reach/deg giữ nguyên tập đóng 8 cặp.",
+      "<b>CONFIG.FX_SLASH + laws:</b> gom hằng số recipe về một mối, kèm law chống trôi (snap đúng contact, không gì sáng hơn snap, windup tăng/follow giảm đơn điệu, màu trong palette, residue chấm cách quãng).",
+    ],
+  },
   {
     version: "v0.42.1",
     date: "2026-11-13",

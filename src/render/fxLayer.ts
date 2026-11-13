@@ -4,10 +4,11 @@
 // the effect bookkeeping lives in one place instead of scattered across the Renderer class.
 import { CONFIG } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
+import { slashFrame, slashRamp, residueDotPositions } from "./pixelart.ts";
 
 const P = CONFIG.PALETTE;
 
-type Arc = { x: number; y: number; dir: number; reach: number; deg: number; combo: number; left: number; total: number };
+type Arc = { x: number; y: number; dir: number; reach: number; deg: number; combo: number; left: number; total: number; contact: number };
 type Slice = { x: number; y: number; dir: number; len: number; left: number; total: number };
 type Beam = { x: number; y: number; dir: number; len: number; left: number; total: number };
 type DamageType = "physical" | "burn" | "shock" | "freeze" | "poison" | "bleed";
@@ -51,7 +52,7 @@ export class FxLayer {
   consume(events: VisualEvent[]): void {
     for (const e of events) {
       if (e.t === "slice") this.slices.push({ x: e.x, y: e.y, dir: e.dir, len: e.len, left: 6, total: 6 });
-      else if (e.t === "slashArc") this.arcs.push({ x: e.x, y: e.y, dir: e.dir, reach: e.reach, deg: e.deg, combo: e.combo, left: e.ticks, total: e.ticks });
+      else if (e.t === "slashArc") this.arcs.push({ x: e.x, y: e.y, dir: e.dir, reach: e.reach, deg: e.deg, combo: e.combo, left: e.ticks, total: e.ticks, contact: e.contact });
       else if (e.t === "beam") this.beams.push({ x: e.x, y: e.y, dir: e.dir, len: e.len, left: 20, total: 20 });
       else if (e.t === "artifactText") {
         if (this.texts.length >= CONFIG.RENDER.TEXT_CAP) this.texts.shift();
@@ -97,39 +98,45 @@ export class FxLayer {
 
   drawArcs(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     const rd = CONFIG.READABILITY;
+    const fx = CONFIG.FX_SLASH;
     g.globalCompositeOperation = "lighter";
     for (const a of this.arcs) {
-      const t = Math.max(0, a.left / Math.max(1, a.total));
+      const p = 1 - Math.max(0, a.left / Math.max(1, a.total));
+      const f = slashFrame(p, a.contact);
+      const ramp = slashRamp(a.combo);
+      const hot = ramp[f.ramp]!;
       const cx = Math.round(a.x - ox);
       const cy = Math.round(a.y - oy);
-      const r = a.reach * (0.75 + 0.25 * t);
+      const gather = f.phase === "windup" ? 0.6 + 0.4 * (f.intensity / fx.WINDUP_PEAK) : 1;
+      const r = a.reach * (0.75 + 0.25 * (1 - p)) * gather;
       const half = ((a.deg * Math.PI) / 180) * 0.5;
 
-      const isCombo2 = a.combo === 2;
-      const baseColor = isCombo2 ? P.SLASH_GOLD : P.SLASH_CYAN;
-      const deepColor = isCombo2 ? P.SLASH_ORANGE_DEEP : P.SLASH_CYAN_DEEP;
+      const baseColor = ramp[1]!;
+      const deepColor = ramp[0]!;
+      const lit = rd.SLASH_ALPHA * f.intensity;
+      const echo = f.phase === "windup" ? 0 : 1;
 
       // --- thrust weapons (spear, dagger): a piercing line, not an arc ---
       if (a.deg <= 50) {
         const x2 = cx + Math.cos(a.dir) * r;
         const y2 = cy + Math.sin(a.dir) * r;
-        g.globalAlpha = rd.SLASH_ALPHA * (0.4 + 0.6 * t);
+        g.globalAlpha = lit;
         g.strokeStyle = baseColor;
-        g.lineWidth = glowOnly ? 5 : 3;
+        g.lineWidth = glowOnly ? 5 : f.width;
         g.beginPath();
         g.moveTo(cx, cy);
         g.lineTo(x2, y2);
         g.stroke();
         if (!glowOnly) {
-          g.globalAlpha = rd.SLASH_ALPHA * t * 0.9;
-          g.strokeStyle = P.SLASH_EDGE;
+          g.globalAlpha = lit * 0.9;
+          g.strokeStyle = hot;
           g.lineWidth = 1;
           g.beginPath();
           g.moveTo(cx, cy);
           g.lineTo(x2, y2);
           g.stroke();
           // sharp tip spark
-          g.fillStyle = P.SLASH_EDGE;
+          g.fillStyle = hot;
           g.fillRect(x2 - 1, y2 - 1, 2, 2);
         }
         continue;
@@ -137,11 +144,11 @@ export class FxLayer {
 
       // --- sweep weapons (greatsword, whip combo 2): thick body + heavy follow-through ---
       if (a.deg >= 150) {
-        g.globalAlpha = rd.SLASH_ALPHA * (0.35 + 0.65 * t);
+        g.globalAlpha = lit;
         const grad = g.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
         grad.addColorStop(0, deepColor);
         grad.addColorStop(0.7, baseColor);
-        grad.addColorStop(1, P.SLASH_EDGE);
+        grad.addColorStop(1, hot);
         g.fillStyle = grad;
         wedge(g, cx, cy, a.dir, r, a.deg, 0.4);
         g.fill();
@@ -149,22 +156,22 @@ export class FxLayer {
         // four trailing wedges instead of two — reads as a heavy follow-through
         g.fillStyle = baseColor;
         for (let k = 1; k <= 4; k++) {
-          g.globalAlpha = rd.SLASH_ALPHA * t * (0.32 - 0.06 * k);
+          g.globalAlpha = lit * echo * (0.32 - 0.06 * k);
           wedge(g, cx, cy, a.dir - 0.06 * k, r * (0.98 - 0.02 * k), a.deg * (0.9 - 0.04 * k), 0.5);
           g.fill();
         }
 
         if (glowOnly) continue;
 
-        g.globalAlpha = rd.SLASH_ALPHA * (0.65 + 0.35 * t);
-        g.strokeStyle = P.SLASH_EDGE;
-        g.lineWidth = 1.5;
+        g.globalAlpha = lit;
+        g.strokeStyle = hot;
+        g.lineWidth = f.width * 0.5;
         g.beginPath();
         g.arc(cx, cy, r, a.dir - half, a.dir + half);
         g.stroke();
 
-        g.globalAlpha = rd.SLASH_ALPHA * t * 0.85;
-        g.strokeStyle = P.SLASH_EDGE;
+        g.globalAlpha = lit * 0.85;
+        g.strokeStyle = hot;
         g.lineWidth = 1;
         g.beginPath();
         g.arc(cx, cy, r * 0.88, a.dir - half * 0.9, a.dir + half * 0.9);
@@ -172,7 +179,7 @@ export class FxLayer {
 
         const tipX = cx + Math.cos(a.dir + half) * r;
         const tipY = cy + Math.sin(a.dir + half) * r;
-        g.fillStyle = P.SLASH_EDGE;
+        g.fillStyle = hot;
         g.fillRect(tipX - 1, tipY - 1, 2, 2);
         continue;
       }
@@ -180,37 +187,37 @@ export class FxLayer {
       // --- strike weapons (katana, whip combo 1): the standard arc ---
 
       // Layer 1: Body glow gradient
-      g.globalAlpha = rd.SLASH_ALPHA * (0.35 + 0.65 * t);
+      g.globalAlpha = lit;
       const grad = g.createRadialGradient(cx, cy, r * 0.35, cx, cy, r);
       grad.addColorStop(0, deepColor);
       grad.addColorStop(0.7, baseColor);
-      grad.addColorStop(1, P.SLASH_EDGE);
+      grad.addColorStop(1, hot);
       g.fillStyle = grad;
       wedge(g, cx, cy, a.dir, r, a.deg, 0.45);
       g.fill();
 
       // Trailing echoes: two fainter wedges lagging behind the sweep
       g.fillStyle = baseColor;
-      g.globalAlpha = rd.SLASH_ALPHA * t * 0.3;
+      g.globalAlpha = lit * echo * 0.3;
       wedge(g, cx, cy, a.dir - 0.08, r * 0.98, a.deg * 0.9, 0.5);
       g.fill();
-      g.globalAlpha = rd.SLASH_ALPHA * t * 0.15;
+      g.globalAlpha = lit * echo * 0.15;
       wedge(g, cx, cy, a.dir - 0.16, r * 0.95, a.deg * 0.8, 0.5);
       g.fill();
 
       if (glowOnly) continue;
 
       // Layer 2: Razor edge rim (sharp outer perimeter)
-      g.globalAlpha = rd.SLASH_ALPHA * (0.6 + 0.4 * t);
-      g.strokeStyle = P.SLASH_EDGE;
-      g.lineWidth = 1.25;
+      g.globalAlpha = lit;
+      g.strokeStyle = hot;
+      g.lineWidth = f.width * 0.42;
       g.beginPath();
       g.arc(cx, cy, r, a.dir - half, a.dir + half);
       g.stroke();
 
       // Inner core rim: a 1px white edge hugging the inside of the arc
-      g.globalAlpha = rd.SLASH_ALPHA * t * 0.9;
-      g.strokeStyle = P.SLASH_EDGE;
+      g.globalAlpha = lit * 0.9;
+      g.strokeStyle = hot;
       g.lineWidth = 1;
       g.beginPath();
       g.arc(cx, cy, r * 0.9, a.dir - half * 0.92, a.dir + half * 0.92);
@@ -219,7 +226,7 @@ export class FxLayer {
       // Layer 3: Razor cutting tip spark
       const tipX = cx + Math.cos(a.dir + half) * r;
       const tipY = cy + Math.sin(a.dir + half) * r;
-      g.fillStyle = P.SLASH_EDGE;
+      g.fillStyle = hot;
       g.fillRect(tipX - 1, tipY - 1, 2, 2);
     }
     g.globalAlpha = 1;
@@ -228,37 +235,22 @@ export class FxLayer {
 
   drawSlices(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     if (this.slices.length === 0) return;
+    const fx = CONFIG.FX_SLASH;
     g.globalCompositeOperation = "lighter";
     for (const s of this.slices) {
       const prog = s.left / s.total;
       const cx = Math.round(s.x - ox);
       const cy = Math.round(s.y - oy);
       const angle = s.dir + Math.PI * 0.5; // perpendicular slice cut line
-      const half = s.len * 0.5;
-      const x0 = cx - Math.cos(angle) * half;
-      const y0 = cy - Math.sin(angle) * half;
-      const x1 = cx + Math.cos(angle) * half;
-      const y1 = cy + Math.sin(angle) * half;
-
-      // Glow border
-      g.globalAlpha = prog * 0.8;
-      g.strokeStyle = P.SLASH_CYAN;
-      g.lineWidth = glowOnly ? 3 : 2;
-      g.beginPath();
-      g.moveTo(x0, y0);
-      g.lineTo(x1, y1);
-      g.stroke();
-
-      if (glowOnly) continue;
-
-      // Sharp white core
-      g.globalAlpha = prog;
-      g.strokeStyle = P.SLASH_EDGE;
-      g.lineWidth = 1;
-      g.beginPath();
-      g.moveTo(x0, y0);
-      g.lineTo(x1, y1);
-      g.stroke();
+      const ux = Math.cos(angle);
+      const uy = Math.sin(angle);
+      const size = glowOnly ? fx.RESIDUE_DOT_SIZE + 2 : fx.RESIDUE_DOT_SIZE;
+      // dotted residue: the cut breaks into embers instead of hanging as a solid stroke
+      g.fillStyle = glowOnly ? P.SLASH_CYAN : P.SLASH_EDGE;
+      g.globalAlpha = prog * (glowOnly ? 0.8 : 1);
+      for (const d of residueDotPositions(s.len, fx.RESIDUE_DOT_GAP)) {
+        g.fillRect(Math.round(cx + ux * d), Math.round(cy + uy * d), size, size);
+      }
     }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";

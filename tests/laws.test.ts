@@ -22,6 +22,7 @@ import { stalled } from "../src/ui/diag.ts";
 import { GameLoop } from "../src/loop.ts";
 import type { Intent } from "../src/sim/types.ts";
 import { biomeForRoom } from "../src/systems/biomes.ts";
+import { slashFrame, slashRamp, residueDotPositions } from "../src/render/pixelart.ts";
 import { applyAscension } from "../src/systems/ascension.ts";
 import { APP_VERSION, CHANGELOG } from "../src/ui/changelog.ts";
 
@@ -1156,6 +1157,54 @@ heading("One scene path: 2D composite into the GL post chain");
   for (const call of ["this.drawTiles(g, ox, oy)", "this.drawShadows(g, ox, oy)", "this.drawSortedWorld(g, ox, oy)", "this.drawProjectiles(g, ox, oy, false)"]) {
     ok(`the 2D layer still draws: ${call}`, renderer.includes(call), "a scene layer went missing with the batch path");
   }
+}
+
+heading("Slash recipe: wind-up, contact snap, follow-through, dotted residue");
+{
+  const fx = CONFIG.FX_SLASH;
+  const sample = (from: number, to: number, n: number): number[] =>
+    Array.from({ length: n }, (_, i) => from + ((to - from) * i) / (n - 1));
+  const nonDecreasing = (xs: number[]): boolean => xs.every((v, i) => i === 0 || v >= xs[i - 1]! - 1e-9);
+  const nonIncreasing = (xs: number[]): boolean => xs.every((v, i) => i === 0 || v <= xs[i - 1]! + 1e-9);
+
+  // katana combo 1 is startup 4 / active 3; slow_hand stretches startup to 12. The snap must
+  // follow the normalized contact fraction, never an absolute frame index.
+  for (const contact of [4 / 7, 12 / 16]) {
+    const peak = slashFrame(contact, contact);
+    ok(`the snap lands on the contact frame (c=${contact.toFixed(3)})`, peak.phase === "snap" && peak.intensity === 1, JSON.stringify(peak));
+    const sweep = sample(0, 1, 101).map((p) => slashFrame(p, contact).intensity);
+    ok(`nothing outshines the snap (c=${contact.toFixed(3)})`, Math.max(...sweep) <= 1, `max ${Math.max(...sweep)}`);
+  }
+
+  const contact = 4 / 7;
+  const lo = contact - fx.SNAP_HALF;
+  const hi = contact + fx.SNAP_HALF;
+  // sample the phase interiors: a point landing 1 ULP past the boundary belongs to the next phase
+  const wind = sample(0, lo * 0.999, 24);
+  const windFrames = wind.map((p) => slashFrame(p, contact));
+  ok("the wind-up gathers before contact", windFrames.every((f) => f.phase === "windup"));
+  ok("the wind-up rises monotonically", nonDecreasing(windFrames.map((f) => f.intensity)));
+  ok("the wind-up never outshines the snap", Math.max(...windFrames.map((f) => f.intensity)) <= fx.WINDUP_PEAK && fx.WINDUP_PEAK < 1, `peak ${fx.WINDUP_PEAK}`);
+
+  const follow = sample(hi + (1 - hi) * 0.001, 1, 24);
+  const followFrames = follow.map((p) => slashFrame(p, contact));
+  ok("the follow-through comes after contact", followFrames.every((f) => f.phase === "followthrough"));
+  ok("the follow-through decays monotonically", nonIncreasing(followFrames.map((f) => f.intensity)));
+
+  const palette = new Set(Object.values(CONFIG.PALETTE).filter((v): v is string => typeof v === "string"));
+  for (const combo of [1, 2]) {
+    const ramp = slashRamp(combo);
+    ok(`combo ${combo} ramp is palette-locked`, ramp.every((c) => palette.has(c)), ramp.join(","));
+    ok(`combo ${combo} snap uses the hot end of the ramp`, slashFrame(contact, contact).ramp === ramp.length - 1, `ramp ${slashFrame(contact, contact).ramp}`);
+  }
+
+  const dots = residueDotPositions(26, fx.RESIDUE_DOT_GAP);
+  ok("the residue is dotted, not a solid line", dots.length >= 2 && dots.length < 26, `${dots.length} dots over 26px`);
+  ok("residue dots keep their spacing", dots.every((d, i) => i === 0 || d - dots[i - 1]! >= fx.RESIDUE_DOT_GAP), dots.join(","));
+
+  const src = readFileSync("src/render/fxLayer.ts", "utf8");
+  ok("FxLayer drives arcs from the envelope", src.includes("slashFrame("), "the envelope is defined but never consumed");
+  ok("FxLayer draws the residue as dots", src.includes("residueDotPositions("), "the residue is still a solid stroke");
 }
 
 heading("The player is never absent while alive");

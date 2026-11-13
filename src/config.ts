@@ -704,6 +704,18 @@ export const CONFIG = {
     ripple: 0.15,
   },
 
+  /** pixelfx slash recipe: wind-up -> snap on the contact frame -> follow-through -> dotted residue.
+   *  Phase boundaries are fractions of the swing life, so a stretched startup still snaps on contact. */
+  FX_SLASH: {
+    SNAP_HALF: 0.08,
+    WINDUP_PEAK: 0.45,
+    WINDUP_WIDTH: 1,
+    SNAP_WIDTH: 3,
+    FOLLOW_WIDTH: 2,
+    RESIDUE_DOT_GAP: 3,
+    RESIDUE_DOT_SIZE: 1,
+  },
+
   LAWS: {
     /** test-harness limits and authored-balance assertions; runtime systems do not read these. */
     MIN_TELEGRAPH_S: 0.3,

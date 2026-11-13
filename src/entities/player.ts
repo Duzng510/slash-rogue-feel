@@ -301,9 +301,10 @@ export class Player implements Unit {
       deg: init.deg,
       combo,
       ticks: fd.startup + fd.active,
+      contact: fd.startup / (fd.startup + fd.active),
     });
     if (combo === 2 && src.artifacts.has("twin_blades")) {
-      src.queue.push({ t: "slashArc", x: init.ox, y: init.oy, dir: normAngle(aim.dir + Math.PI), reach: init.reach, deg: init.deg, combo, ticks: fd.startup + fd.active });
+      src.queue.push({ t: "slashArc", x: init.ox, y: init.oy, dir: normAngle(aim.dir + Math.PI), reach: init.reach, deg: init.deg, combo, ticks: fd.startup + fd.active, contact: fd.startup / (fd.startup + fd.active) });
     }
   }
 

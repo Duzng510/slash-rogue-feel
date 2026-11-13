@@ -174,14 +174,14 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
           const zap = { ...sw, dmg: 1, knockback: 0, status: undefined, seen: new Set<number>() };
           const zapped = best.onHit(zap, best.x, best.y, src);
           hitFeedback(src, best, zap, best.x, best.y, zapped, false);
-          src.queue.push({ t: "slashArc", x: best.x, y: best.y, dir: 0, reach: 15, deg: 360, combo: 2, ticks: 8 });
+          src.queue.push({ t: "slashArc", x: best.x, y: best.y, dir: 0, reach: 15, deg: 360, combo: 2, ticks: 8, contact: 0.5 });
           sfx(src.queue, "shock_hit", 0.6, 1.5);
           artifactText(src.queue, best.x, best.y - 12, "LIÊN LÔI", "#ffe66b");
         }
       }
     }
     if (blast !== null) {
-      src.queue.push({ t: "slashArc", x: blast.x, y: blast.y, dir: 0, reach: 40, deg: 360, combo: 2, ticks: 12 });
+      src.queue.push({ t: "slashArc", x: blast.x, y: blast.y, dir: 0, reach: 40, deg: 360, combo: 2, ticks: 12, contact: 0.5 });
       sfx(src.queue, "aftershock_boom", 1, 0.8);
       artifactText(src.queue, blast.x, blast.y - 12, "DƯ CHẤN", "#ff963f");
       const shock = { ...sw, dmg: 1, knockback: 0, status: undefined, seen: new Set<number>() };
