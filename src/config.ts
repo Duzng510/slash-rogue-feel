@@ -484,8 +484,9 @@ export const CONFIG = {
 
   WORLD: {
     TILE: 16,
-    INTERNAL_W: 320,
-    INTERNAL_H: 180,
+    INTERNAL_W: 480,
+    INTERNAL_H: 270,
+    PIXEL_SCALE: 1.5,
     MIN_SCALE: 2,
   },
 
@@ -682,6 +683,17 @@ export const CONFIG = {
     MASTER: 0.35,
   },
 
+  /** dynamic light map (GL only): per-biome ambient floor + radial emitters, scaled by SLIDERS.lighting */
+  LIGHTING: {
+    MAX: 32,
+    AMBIENT: { town: 0.8, dungeon: 0.2, caverns: 0.45, forge: 0.45, void: 0.2 } as Record<string, number>,
+    AMBIENT_DEFAULT: 0.5,
+    TORCH: { r: 60, intensity: 0.9, color: [1, 0.78, 0.47] },
+    PLAYER: { r: 70, intensity: 0.7, color: [0.78, 0.86, 1] },
+    FIRE: { r: 40, intensity: 0.8, color: [1, 0.55, 0.25] },
+    BURN: { r: 30, intensity: 0.6, color: [1, 0.59, 0.25] },
+  },
+
   SLIDERS: {
     shake: 0.8,
     volume: 0.35,
@@ -693,6 +705,7 @@ export const CONFIG = {
     bloom: 0.55,
     crt: 0.25,
     ripple: 0.15,
+    lighting: 1,
   },
 
   /** pixelfx slash recipe: wind-up -> snap on the contact frame -> follow-through -> dotted residue.
@@ -716,6 +729,10 @@ export const CONFIG = {
     MAX_PROJECTILES: 160,
     FUZZ_BUDGET: 240,
     FUZZ_TRIALS: 80,
+    /** composite scenes with no Canvas-only effects must skip CPU overlay uploads */
+    SKIP_EMPTY_OVERLAY: true,
+    /** headroom cap: per-frame tile quads pushed into the GPU batch must stay under this (screen is ~2100 cells) */
+    MAX_TILE_BATCH: 4000,
   },
 
   PALETTE,

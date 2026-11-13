@@ -12,6 +12,7 @@ const SLIDERS: { id: string; label: string; key: keyof typeof CONFIG.SLIDERS; fm
   { id: "s-bloom", label: "v-bloom", key: "bloom", fmt: (v) => v.toFixed(2) },
   { id: "s-crt", label: "v-crt", key: "crt", fmt: (v) => v.toFixed(2) },
   { id: "s-ripple", label: "v-ripple", key: "ripple", fmt: (v) => v.toFixed(2) },
+  { id: "s-lighting", label: "v-lighting", key: "lighting", fmt: (v) => v.toFixed(2) },
 ];
 
 export function syncSliderLabels(): void {

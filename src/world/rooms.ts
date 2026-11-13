@@ -503,8 +503,8 @@ export class Room {
   }
 
   clampCamera(cx: number, cy: number): { x: number; y: number } {
-    const viewW = CONFIG.WORLD.INTERNAL_W * 0.5;
-    const viewH = CONFIG.WORLD.INTERNAL_H * 0.5;
+    const viewW = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE * 0.5;
+    const viewH = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE * 0.5;
     const x = this.widthPx <= viewW * 2 ? this.widthPx / 2 : clamp(cx, viewW, this.widthPx - viewW);
     const y = this.heightPx <= viewH * 2 ? this.heightPx / 2 : clamp(cy, viewH, this.heightPx - viewH);
     return { x, y };

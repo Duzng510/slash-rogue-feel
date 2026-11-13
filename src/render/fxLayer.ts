@@ -5,8 +5,16 @@
 import { CONFIG } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
 import { slashFrame, slashRamp, residueDotPositions } from "./pixelart.ts";
+import type { SpriteBatch } from "./gl/batch.ts";
 
 const P = CONFIG.PALETTE;
+
+function hexTint(hex: string, alpha: number): [number, number, number, number] {
+  const match = /^#([\da-f]{6})$/i.exec(hex);
+  if (!match) throw new Error(`expected a hex color for WebGL FX batching, got "${hex}"`);
+  const value = Number.parseInt(match[1]!, 16);
+  return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255, alpha];
+}
 
 type Arc = { x: number; y: number; dir: number; reach: number; deg: number; combo: number; left: number; total: number; contact: number };
 type Slice = { x: number; y: number; dir: number; len: number; left: number; total: number };
@@ -47,6 +55,9 @@ export class FxLayer {
   }
   get arcCount(): number {
     return this.arcs.length;
+  }
+  get hasCanvasOverlay(): boolean {
+    return this.texts.length > 0;
   }
 
   consume(events: VisualEvent[]): void {
@@ -231,6 +242,144 @@ export class FxLayer {
     }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
+  }
+
+  drawArcsBatch(batch: SpriteBatch, ox: number, oy: number, pixelScale: number): void {
+    const rd = CONFIG.READABILITY;
+    const fx = CONFIG.FX_SLASH;
+    const line = (x1: number, y1: number, x2: number, y2: number, width: number, hex: string, alpha: number): void => {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy);
+      batch.drawSolidRect(
+        Math.round(((x1 + x2) * 0.5 - length * 0.5) * pixelScale),
+        Math.round(((y1 + y2) * 0.5 - width * 0.5) * pixelScale),
+        Math.max(1, Math.round(length * pixelScale)),
+        Math.max(1, Math.round(width * pixelScale)),
+        hexTint(hex, alpha),
+        true,
+        Math.atan2(dy, dx),
+      );
+    };
+    const ring = (
+      cx: number, cy: number, dir: number, reach: number, deg: number,
+      innerRatio: number, hex: string, alpha: number, thick?: number,
+    ): void => {
+      const half = deg * Math.PI / 360;
+      const steps = Math.max(8, Math.ceil(deg / 6));
+      const step = (half * 2) / steps;
+      const inner = thick === undefined ? reach * innerRatio : Math.max(0, reach - thick);
+      const radius = (reach + inner) * 0.5;
+      const height = Math.max(1, reach - inner);
+      const width = Math.max(1, radius * step * 1.3);
+      for (let i = 0; i < steps; i++) {
+        const a = dir - half + (i + 0.5) * step;
+        const x = cx + Math.cos(a) * radius;
+        const y = cy + Math.sin(a) * radius;
+        batch.drawSolidRect(
+          Math.round((x - width * 0.5) * pixelScale),
+          Math.round((y - height * 0.5) * pixelScale),
+          Math.max(1, Math.round(width * pixelScale)),
+          Math.max(1, Math.round(height * pixelScale)),
+          hexTint(hex, alpha),
+          true,
+          a + Math.PI / 2,
+        );
+      }
+    };
+
+    for (const a of this.arcs) {
+      const p = 1 - Math.max(0, a.left / Math.max(1, a.total));
+      const f = slashFrame(p, a.contact);
+      const ramp = slashRamp(a.combo);
+      const hot = ramp[f.ramp]!;
+      const cx = Math.round(a.x - ox);
+      const cy = Math.round(a.y - oy);
+      const gather = f.phase === "windup" ? 0.6 + 0.4 * (f.intensity / fx.WINDUP_PEAK) : 1;
+      const reach = a.reach * (0.75 + 0.25 * (1 - p)) * gather;
+      const lit = rd.SLASH_ALPHA * f.intensity;
+      const echo = f.phase === "windup" ? 0 : 1;
+      if (a.deg <= 50) {
+        const x2 = cx + Math.cos(a.dir) * reach;
+        const y2 = cy + Math.sin(a.dir) * reach;
+        line(cx, cy, x2, y2, f.width, ramp[1]!, lit);
+        line(cx, cy, x2, y2, 1, hot, lit * 0.9);
+        batch.drawSolidRect(Math.round((x2 - 1) * pixelScale), Math.round((y2 - 1) * pixelScale),
+          Math.max(1, Math.round(2 * pixelScale)),           Math.max(1, Math.round(2 * pixelScale)), hexTint(hot, lit), true);
+        continue;
+      }
+
+      const base = ramp[1]!;
+      const deep = ramp[0]!;
+      const innerRatio = a.deg >= 150 ? 0.4 : 0.45;
+      ring(cx, cy, a.dir, reach, a.deg, innerRatio, deep, lit);
+      ring(cx, cy, a.dir, reach * 0.97, a.deg * 0.96, innerRatio, base, lit * 0.75);
+      if (a.deg >= 150) {
+        for (let k = 1; k <= 4; k++) {
+          ring(cx, cy, a.dir - 0.06 * k, reach * (0.98 - 0.02 * k), a.deg * (0.9 - 0.04 * k),
+            0.5, base, lit * echo * (0.32 - 0.06 * k));
+        }
+      } else {
+        ring(cx, cy, a.dir - 0.08, reach * 0.98, a.deg * 0.9, 0.5, base, lit * echo * 0.3);
+        ring(cx, cy, a.dir - 0.16, reach * 0.95, a.deg * 0.8, 0.5, base, lit * echo * 0.15);
+      }
+      ring(cx, cy, a.dir, reach, a.deg, 0, hot, lit, Math.max(1, f.width * 0.42));
+      ring(cx, cy, a.dir, reach * 0.9, a.deg * 0.92, 0, hot, lit * 0.9, 1);
+      const half = a.deg * Math.PI / 360;
+      const tipX = cx + Math.cos(a.dir + half) * reach;
+      const tipY = cy + Math.sin(a.dir + half) * reach;
+      batch.drawSolidRect(Math.round((tipX - 1) * pixelScale), Math.round((tipY - 1) * pixelScale),
+        Math.max(1, Math.round(2 * pixelScale)),         Math.max(1, Math.round(2 * pixelScale)), hexTint(hot, lit), true);
+    }
+  }
+
+  drawSlicesBatch(batch: SpriteBatch, ox: number, oy: number, pixelScale: number): void {
+    const fx = CONFIG.FX_SLASH;
+    for (const slice of this.slices) {
+      const progress = slice.left / slice.total;
+      const angle = slice.dir + Math.PI * 0.5;
+      const ux = Math.cos(angle);
+      const uy = Math.sin(angle);
+      for (const d of residueDotPositions(slice.len, fx.RESIDUE_DOT_GAP)) {
+        const x = Math.round(slice.x + ux * d - ox);
+        const y = Math.round(slice.y + uy * d - oy);
+        const size = fx.RESIDUE_DOT_SIZE;
+        batch.drawSolidRect(
+          Math.round(x * pixelScale),
+          Math.round(y * pixelScale),
+          Math.max(1, Math.round(size * pixelScale)),
+          Math.max(1, Math.round(size * pixelScale)),
+          hexTint(P.SLASH_EDGE, progress),
+          true,
+        );
+      }
+    }
+  }
+
+  drawBeamsBatch(batch: SpriteBatch, ox: number, oy: number, pixelScale: number): void {
+    for (const beam of this.beams) {
+      const x1 = Math.round(beam.x - ox);
+      const y1 = Math.round(beam.y - oy);
+      const x2 = Math.round(beam.x + Math.cos(beam.dir) * beam.len - ox);
+      const y2 = Math.round(beam.y + Math.sin(beam.dir) * beam.len - oy);
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy);
+      const alpha = Math.max(0, beam.left / beam.total);
+      const draw = (width: number, hex: string): void => {
+        batch.drawSolidRect(
+          Math.round(((x1 + x2) * 0.5 - length * 0.5) * pixelScale),
+          Math.round(((y1 + y2) * 0.5 - width * 0.5) * pixelScale),
+          Math.max(1, Math.round(length * pixelScale)),
+          Math.max(1, Math.round(width * pixelScale)),
+          hexTint(hex, alpha),
+          true,
+          Math.atan2(dy, dx),
+        );
+      };
+      draw(4, P.VOID);
+      draw(2, P.PROJ);
+    }
   }
 
   drawSlices(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {

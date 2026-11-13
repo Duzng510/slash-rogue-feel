@@ -5,11 +5,35 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.43.0";
+export const APP_VERSION = "v0.47.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.47.0",
+    date: "2026-11-14",
+    items: [
+      "<b>WebGL world batch (giai đoạn 2):</b> batch GPU xử lý tiles, parallax, foreground, shadows, actors, NPC/props, projectiles, sprite particles, telegraphs và FX slash/beam trên mọi biome; distortion forge/caverns/void chuyển sang post shader.",
+      "<b>Upload overlay:</b> bỏ upload sceneCanvas trong đường mặc định; chỉ upload overlay Canvas 2D khi có nội dung, và xóa texture bằng GPU khi overlay chuyển về rỗng. SpriteBatch tự tăng capacity khi cảnh vượt 1.024 instance.",
+    ],
+  },
+  {
+    version: "v0.46.0",
+    date: "2026-11-13",
+    items: [
+      "<b>GL tiles-batch (giai đoạn 1):</b> sàn nhà dungeon/thành phố vẽ bằng SpriteBatch GPU vào sceneRT, phần còn lại (quái, FX, chữ) upload một lần làm overTex rồi composite; grade sinh học và kill-cam saturate chuyển vào POST_FS. Bỏ ~274 lệnh drawImage mỗi khung.",
+      "<b>Lối thoát:</b> thêm <code>?glbatch=0</code> để quay về đường presentScene cũ cho mọi biome; <code>?renderer=2d</code> vẫn nguyên vẹn. Các biome méo hình (forge/caverns/void) tạm giữ presentScene tới giai đoạn 3.",
+    ],
+  },
+  {
+    version: "v0.44.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Độ phân giải:</b> nâng render nội bộ lên 480×270 với pixel scale 1.5×, giữ nguyên khung nhìn logic và TILE 16.",
+      "<b>Camera, UI và sprite atlas:</b> đồng bộ tọa độ, hit-test và đóng gói sprite độ phân giải cao để giữ nguyên bố cục ở cả 2D lẫn WebGL.",
+    ],
+  },
   {
     version: "v0.43.0",
     date: "2026-11-13",
@@ -319,7 +343,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: "v0.0.0",
     date: "2026-11-10",
     items: [
-      "<b>Nền tảng:</b> vòng lặp fixed-timestep 60Hz, canvas pixel 320×180, combat chém + auto-aim.",
+      "<b>Nền tảng:</b> vòng lặp fixed-timestep 60Hz, viewport logic 320×180 render ở 480×270, combat chém + auto-aim.",
       "<b>Khung game:</b> archetype quái, boss arena, chế độ landscape cho mobile.",
     ],
   },

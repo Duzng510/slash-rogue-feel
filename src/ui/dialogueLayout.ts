@@ -1,5 +1,6 @@
 export type DialogueOptionBounds = { x: number; y: number; width: number; height: number };
 
+// Modal bounds stay in base logical coordinates; the UI render scale fits them to the internal viewport.
 export function dialogueOptionBounds(index: number): DialogueOptionBounds {
   return {
     x: index % 2 === 0 ? 36 : 164,
