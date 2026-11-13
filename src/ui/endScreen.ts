@@ -1,9 +1,9 @@
 import { CONFIG } from "../config.ts";
 import { TEMPLATES } from "../world/rooms.ts";
-import { isRotated } from "./immersive.ts";
 import { ARTIFACT_COLORS, type ArtifactId } from "../systems/artifacts.ts";
-import { emptyStats, formatRunTime, type RunStats, type EndMode, type EndAction } from "../systems/runStats.ts";
+import { emptyStats, formatRunTime, type RunStats, type EndMode } from "../systems/runStats.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
+import type { Clickable, ModalKey } from "./dialogueLayout.ts";
 
 const LW = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE;
 const LH = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE;
@@ -20,14 +20,12 @@ function inRect(b: Box, x: number, y: number): boolean {
 }
 
 /** full-screen result overlay drawn in the base logical space shared by the other modals */
-export class EndScreen {
+export class EndScreen implements Clickable {
   private shown = false;
   private mode: EndMode = "dead";
   private stats: RunStats = emptyStats();
   private artifacts: ArtifactId[] = [];
   private unlocked: AchievementId[] = [];
-
-  constructor(private readonly canvas: HTMLCanvasElement) {}
 
   open(mode: EndMode, stats: RunStats, artifacts: ArtifactId[], unlocked: AchievementId[]): void {
     this.shown = true;
@@ -52,20 +50,11 @@ export class EndScreen {
     return { restart: { x: BTN_X, y: 124, w: BTN_W, h: BTN_H }, cont: null };
   }
 
-  /** client px -> the logical tap target, mirroring the artifact modal's axis handling */
-  handlePointer(clientX: number, clientY: number, scale: number): EndAction | null {
+  hitTest(x: number, y: number): ModalKey | null {
     if (!this.shown) return null;
-    const r = this.canvas.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0 || scale <= 0) return null;
-    const lw = LW;
-    const lh = LH;
-    const u = (clientX - r.left) / r.width;
-    const v = (clientY - r.top) / r.height;
-    const lx = isRotated() ? v * lw : u * lw;
-    const ly = isRotated() ? (1 - u) * lh : v * lh;
     const boxes = this.layout();
-    if (inRect(boxes.restart, lx, ly)) return "restart";
-    if (boxes.cont !== null && inRect(boxes.cont, lx, ly)) return "continue";
+    if (inRect(boxes.restart, x, y)) return "restart";
+    if (boxes.cont !== null && inRect(boxes.cont, x, y)) return "continue";
     return null;
   }
 

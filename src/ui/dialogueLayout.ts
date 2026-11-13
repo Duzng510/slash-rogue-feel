@@ -1,4 +1,10 @@
 export type DialogueOptionBounds = { x: number; y: number; width: number; height: number };
+export type ModalKind = "p" | "w" | "a" | "c" | "s" | "t" | "q" | "e" | "d";
+export type ModalKey = `${ModalKind}:${string}` | "restart" | "continue";
+
+export interface Clickable {
+  hitTest(x: number, y: number): ModalKey | null;
+}
 
 // Modal bounds stay in base logical coordinates; the UI render scale fits them to the internal viewport.
 export function dialogueOptionBounds(index: number): DialogueOptionBounds {

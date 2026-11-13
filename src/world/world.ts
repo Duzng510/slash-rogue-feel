@@ -19,8 +19,10 @@ import { CHARACTERS, CHARACTER_LIST, type CharacterId } from "../systems/charact
 import { WEAPON_LIST, type WeaponId } from "../systems/weapons.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
 import { Npc } from "../entities/npc.ts";
-import { Room, TOWN_TEMPLATE, TEMPLATES, TILE, type SpawnMark } from "../world/rooms.ts";
+import { Room, TOWN_TEMPLATE, TEMPLATES, TILE } from "../world/rooms.ts";
 import { SpatialGrid } from "./grid.ts";
+import { selectWaveSpawns } from "./spawning.ts";
+import { progressWorld } from "./progress.ts";
 import { applyAscension, normalizeAscensionLevel, type AscensionLevel } from "../systems/ascension.ts";
 import { BIOMES, biomeForRoom, type Biome } from "../systems/biomes.ts";
 import {
@@ -33,7 +35,7 @@ import {
   type Dialogue,
   type DialogueAction,
 } from "../systems/dialogue.ts";
-import type { Decal, Intent, Projectile, Sim, Unit } from "../sim/types.ts";
+import type { DamageCarrier, Decal, Intent, Projectile, Sim, Unit } from "../sim/types.ts";
 
 export type ShopOffer = {
   kind: "artifact" | "heal" | "maxhp" | "curse";
@@ -47,7 +49,7 @@ export type RoomChoiceOffer = {
   choices: { id: string; label: string; detail: string; disabled?: boolean }[];
 };
 
-type EventKind = "well" | "altar";
+export type EventKind = "well" | "altar";
 
 export type TownProp = { x: number; y: number; sprite: string };
 
@@ -72,6 +74,7 @@ export class World implements Sim {
   townProps: TownProp[] = [];
   nearbyNpc: Npc | null = null;
   room!: Room;
+  /** Seeded sim stream: combat rolls, wave/spawn choices, and ordinary particle bursts. */
   rng = makeRng(CONFIG.SEED);
   hitStopTicks = 0;
   roomIndex = 0;
@@ -112,20 +115,21 @@ export class World implements Sim {
   decals: Decal[] = [];
   fireTrails: FireTrail[] = [];
   projectiles: Projectile[] = [];
-  private rewardedRooms = new Set<number>();
+  rewardedRooms = new Set<number>();
   private gateCooldown = 0;
   private townBellCd = 0;
-  private artifactRng = makeRng(CONFIG.SEED);
+  /** Reward RNG is isolated so shop/artifact choices cannot perturb combat outcomes. */
+  artifactRng = makeRng(CONFIG.SEED);
   private swingSeq = 1;
   private lastKills = 0;
   private lastRooms = 0;
   private lastArtifacts = 0;
   private lastTaken = 0;
   private bossIntroPending = false;
-  private restUsed = false;
-  private eventKind: EventKind | null = null;
-  private challengeWave = 0;
-  private challengeBreakTicks = -1;
+  restUsed = false;
+  eventKind: EventKind | null = null;
+  challengeWave = 0;
+  challengeBreakTicks = -1;
 
   constructor(seed: number = CONFIG.SEED, achievements: Achievements = emptyAchievements()) {
     this.rng = makeRng(seed);
@@ -138,7 +142,7 @@ export class World implements Sim {
     this.characterChoices = [...CHARACTER_LIST];
   }
 
-  private spawnChallengeWave(): void {
+  spawnChallengeWave(): void {
     const pool = this.currentBiome.enemyPool.filter((kind) => !isScripted(kind));
     const safePool = pool.length > 0 ? pool : ["chaser" as EnemyKind];
     const centerX = this.room.widthPx / 2;
@@ -189,49 +193,13 @@ export class World implements Sim {
     return this.swingSeq++;
   }
 
+  hitUnit(target: Unit, carrier: DamageCarrier, cx: number, cy: number): boolean {
+    return target.onHit(carrier, cx, cy, this);
+  }
+
   spawnEnemy(x: number, y: number, kind: EnemyKind = "chaser", elite = false): void {
     if (this.aliveEnemies() >= CONFIG.ENEMY.MAX_ALIVE) return;
     this.enemies.push(makeEnemy(x, y, kind, elite));
-  }
-
-  /** filter room markers by biome, then select a deterministic count from the eligible pool */
-  private waveSpawns(index: number): SpawnMark[] {
-    if (this.room.kind === "rest" || this.room.kind === "event" || this.room.kind === "shop" ||
-      this.room.kind === "treasure" || this.room.kind === "shrine") return [];
-    if (this.room.kind === "elite") {
-      return [{ x: this.room.widthPx / 2, y: this.room.heightPx / 2, kind: this.currentBiome.enemyPool[0] ?? "chaser" }];
-    }
-    if (this.room.kind === "challenge") {
-      return this.room.spawns.slice(0, 3).map((spawn) => ({
-        ...spawn,
-        kind: this.currentBiome.enemyPool.includes(spawn.kind) ? spawn.kind : this.currentBiome.enemyPool[0] ?? "chaser",
-      }));
-    }
-    const fallback = this.currentBiome.enemyPool[0] ?? "chaser";
-  // Bosses and scripted mini-bosses are authored encounters, not ordinary biome-pool spawns.
-  const markers = this.room.spawns.map((spawn) => {
-  return {
-  ...spawn,
-  kind: isScripted(spawn.kind) || this.currentBiome.enemyPool.includes(spawn.kind) ? spawn.kind : fallback,
-  };
-  });
-    const bosses = markers.filter((spawn) => isScripted(spawn.kind));
-    const pool = markers.filter((spawn) => !isScripted(spawn.kind));
-    shuffle(pool, this.rng.next);
-    const want = CONFIG.ROOMS.WAVES[index] ?? pool.length;
-    const baseCount = Math.min(pool.length, Math.max(0, want - bosses.length));
-    const selected = pool.slice(0, baseCount);
-    const extra = CONFIG.ASCENSION.extraEnemiesPerWave;
-    for (let i = 0; i < extra && pool.length > 0; i++) {
-      const spawn = pool[i % pool.length]!;
-      const angle = (i + 1) * 2.399963229728653;
-      selected.push({
-        ...spawn,
-        x: spawn.x + Math.cos(angle) * 10,
-        y: spawn.y + Math.sin(angle) * 10,
-      });
-    }
-    return [...bosses, ...selected];
   }
 
   loadRoom(index: number, keepSweep = true): void {
@@ -262,7 +230,7 @@ export class World implements Sim {
     this.challengeBreakTicks = -1;
     this.runStats.roomKills = 0;
     this.hitStopTicks = 0;
-    for (const s of this.waveSpawns(this.roomIndex)) {
+    for (const s of selectWaveSpawns(this.room, this.currentBiome, this.roomIndex, this.rng)) {
       const elite = this.room.kind === "elite" ||
         this.room.kind !== "challenge" && !isScripted(s.kind) && this.rng.next() < 0.15;
       this.spawnEnemy(s.x, s.y, s.kind, elite);
@@ -567,7 +535,7 @@ export class World implements Sim {
     }
   }
 
-  private availableArtifacts(): Artifact[] {
+  availableArtifacts(): Artifact[] {
     return ARTIFACTS.filter((artifact) => {
       if (this.artifacts.has(artifact.id)) return false;
       const gate = ARTIFACT_UNLOCKS[artifact.id];
@@ -575,7 +543,7 @@ export class World implements Sim {
     });
   }
 
-  private availableCurses(): Curse[] {
+  availableCurses(): Curse[] {
     return CURSES.filter((curse) => !this.curses.has(curse.id) &&
       (CURSE_UNLOCKS[curse.id] === null || this.achievements.earned.has(CURSE_UNLOCKS[curse.id]!)));
   }
@@ -615,7 +583,7 @@ export class World implements Sim {
     this.closeDialogue();
   }
 
-  private buildShopOffers(): ShopOffer[] {
+  buildShopOffers(): ShopOffer[] {
     const pool: ShopOffer[] = [
       { kind: "heal", price: CONFIG.SHOP.HEAL },
       { kind: "maxhp", price: CONFIG.SHOP.MAXHP },
@@ -637,7 +605,7 @@ export class World implements Sim {
   }
 
   /** bank this run's earnings into the persisted lifetime total, then check the rich achievement */
-  private endRun(): void {
+  endRun(): void {
     this.runStats.finalHp = this.player.hp;
     this.achievements.totalGold += this.runStats.totalGoldEarned;
     if (this.victory) {
@@ -687,7 +655,7 @@ export class World implements Sim {
   }
 
   /** mark ids earned (dedup) and queue a toast per new one; the composition root persists */
-  private awardAchievements(ids: AchievementId[]): void {
+  awardAchievements(ids: AchievementId[]): void {
     for (const id of ids) {
       if (this.achievements.earned.has(id)) continue;
       this.achievements.earned.add(id);
@@ -697,7 +665,7 @@ export class World implements Sim {
   }
 
   /** record this run as the personal best when it clears more rooms, or ties and is faster */
-  private saveBestRun(): void {
+  saveBestRun(): void {
     const s = this.runStats;
     const candidate: BestRun = {
       time: s.ticksElapsed,
@@ -848,7 +816,7 @@ export class World implements Sim {
     resolveFire(this);
     resolveProjectiles(this);
     this.resolveTraps();
-    this.progress(input);
+    progressWorld(this);
     this.detectAchievements();
   }
 
@@ -884,154 +852,6 @@ export class World implements Sim {
     if (s.artifactsTaken !== this.lastArtifacts) {
       this.lastArtifacts = s.artifactsTaken;
       this.awardAchievements(checkAchievements(s, "artifact"));
-    }
-  }
-
-  private progress(_input: Intent): void {
-    if (this.player.dead) {
-      this.playerDeadTicks++;
-      if (this.pendingEnd === null && this.playerDeadTicks >= CONFIG.ROOMS.END_DELAY) {
-        this.endRun();
-        this.pendingEnd = "dead";
-      }
-      return;
-    }
-
-    if (this.room.kind === "rest") {
-      this.room.openDoors();
-      const centerX = this.room.widthPx / 2;
-      const centerY = this.room.heightPx / 2;
-      if (!this.restUsed && this.roomChoices === null && Math.hypot(this.player.x - centerX, this.player.y - centerY) <= CONFIG.ROOMS.CAMPFIRE_RADIUS) {
-        this.roomChoices = {
-          title: "LỬA TRẠI",
-          subtitle: "Chọn một cách chuẩn bị cho chặng tiếp theo",
-          choices: [
-            { id: "rest", label: "NGHỈ", detail: "+2 HP" },
-            { id: "forge", label: "RÈN", detail: this.player.weaponDamageBonus < CONFIG.ROOMS.FORGE_CAP ? `+1 sát thương (${this.player.weaponDamageBonus}/${CONFIG.ROOMS.FORGE_CAP})` : `Đã đạt tối đa +${CONFIG.ROOMS.FORGE_CAP}`, disabled: this.player.weaponDamageBonus >= CONFIG.ROOMS.FORGE_CAP },
-          ],
-        };
-      }
-    } else if (this.room.kind === "event") {
-      if (!this.rewardedRooms.has(this.roomIndex) && this.roomChoices === null && this.curseOffer === null && this.artifactChoices.length === 0) {
-        this.eventKind = this.artifactRng.next() < 0.5 ? "well" : "altar";
-        const artifacts = this.availableArtifacts();
-        const curses = this.availableCurses();
-        if (this.eventKind === "well") {
-          this.roomChoices = {
-            title: "CÁI GIẾNG CỔ",
-            subtitle: "Tiếng vọng dưới đáy giếng hứa hẹn một món quà",
-            choices: [
-              { id: "drink", label: "UỐNG", detail: "50% +2 HP · 50% -1 HP" },
-              { id: "gold", label: `NÉM ${CONFIG.ROOMS.WELL_COST} VÀNG`, detail: "Nhận 1 cổ vật ngẫu nhiên", disabled: this.runStats.gold < CONFIG.ROOMS.WELL_COST || artifacts.length === 0 },
-              { id: "leave", label: "BỎ ĐI", detail: "Rời khỏi giếng" },
-            ],
-          };
-        } else {
-          this.roomChoices = {
-            title: "BÀN THỜ MÁU",
-            subtitle: "Một lời khấn đổi lấy sức mạnh",
-            choices: [
-              { id: "sacrifice", label: `HIẾN ${CONFIG.ROOMS.SACRIFICE_HP} HP`, detail: "+1 HP tối đa", disabled: this.player.hp <= CONFIG.ROOMS.SACRIFICE_HP },
-              { id: "prayer", label: "CẦU NGUYỆN", detail: "+2 cổ vật, nhận 1 nguyền rủa", disabled: curses.length === 0 || this.curses.size >= CONFIG.CURSES.MAX_CURSES || artifacts.length < 2 },
-              { id: "leave", label: "BỎ ĐI", detail: "Rời khỏi bàn thờ" },
-            ],
-          };
-        }
-      }
-    } else if (this.room.kind === "shrine") {
-      if (!this.rewardedRooms.has(this.roomIndex) && this.curseOffer === null && this.artifactChoices.length === 0) {
-        const rare = (["glasscannon", "phantom_dash"] as const)
-          .map((id) => ARTIFACTS.find((artifact) => artifact.id === id)!)
-          .filter((artifact) => !this.artifacts.has(artifact.id));
-        const curses = this.availableCurses();
-        if (rare.length > 0 && curses.length > 0 && this.curses.size < CONFIG.CURSES.MAX_CURSES) {
-          shuffle(rare, this.artifactRng.next);
-          shuffle(curses, this.artifactRng.next);
-          this.artifactChoices = [rare[0]!];
-          this.curseOffer = { artifacts: this.artifactChoices.slice(), curses: [curses[0]!] };
-          this.curseTab = true;
-        } else {
-          this.rewardedRooms.add(this.roomIndex);
-          this.room.openDoors();
-        }
-      }
-    } else if (this.room.kind === "challenge" && this.aliveEnemies() === 0 && !this.room.doorOpen) {
-      if (this.challengeWave < CONFIG.ROOMS.CHALLENGE_WAVES) {
-        if (this.challengeBreakTicks < 0) {
-          this.challengeBreakTicks = CONFIG.ROOMS.CHALLENGE_BREAK_TICKS;
-          this.banner(`ĐỢT ${this.challengeWave}/${CONFIG.ROOMS.CHALLENGE_WAVES} HOÀN THÀNH`);
-        } else if (--this.challengeBreakTicks <= 0) {
-          this.challengeWave++;
-          this.challengeBreakTicks = -1;
-          this.spawnChallengeWave();
-        }
-        return;
-      } else if (!this.rewardedRooms.has(this.roomIndex)) {
-        this.artifactChoices = (["glasscannon", "phantom_dash"] as const)
-          .filter((id) => !this.artifacts.has(id))
-          .map((id) => ARTIFACTS.find((artifact) => artifact.id === id)!);
-        if (this.artifactChoices.length > 0) return;
-        this.rewardedRooms.add(this.roomIndex);
-      }
-      if (this.challengeWave >= CONFIG.ROOMS.CHALLENGE_WAVES && !this.rewardedRooms.has(this.roomIndex)) return;
-      if (this.challengeWave >= CONFIG.ROOMS.CHALLENGE_WAVES && this.artifactChoices.length > 0) return;
-      this.room.openDoors();
-      sfx(this.queue, "door");
-      this.banner("THỬ THÁCH HOÀN TẤT — cửa mở");
-    } else if (this.room.kind === "shop") {
-      if (!this.room.doorOpen) {
-        this.room.openDoors();
-        sfx(this.queue, "door");
-      }
-      if (!this.rewardedRooms.has(this.roomIndex)) {
-        this.rewardedRooms.add(this.roomIndex);
-        this.shopOffers = this.buildShopOffers();
-      }
-    } else if (this.aliveEnemies() === 0 && !this.room.doorOpen) {
-      if (!this.rewardedRooms.has(this.roomIndex)) {
-        const pool = this.availableArtifacts();
-        shuffle(pool, this.artifactRng.next);
-        const choiceCount = this.room.kind === "treasure" || this.room.kind === "elite" ? 3 : CONFIG.ASCENSION.artifactChoices;
-        this.artifactChoices = pool.slice(0, choiceCount);
-        const treasureCurses = this.room.kind === "treasure";
-        const cursePool = treasureCurses
-          ? this.availableCurses()
-          : this.runStats.roomsCleared > 0 && this.runStats.roomsCleared % CONFIG.CURSES.OFFER_EVERY === 0
-            ? this.availableCurses()
-            : [];
-        if (cursePool.length > 0 && this.curses.size < CONFIG.CURSES.MAX_CURSES &&
-          (treasureCurses || pool.length >= 5)) {
-          shuffle(cursePool, this.artifactRng.next);
-          const bundle = treasureCurses ? this.artifactChoices.slice(0, 2) : pool.slice(3, 5);
-          if (bundle.length === 2) this.curseOffer = { artifacts: bundle, curses: cursePool.slice(0, treasureCurses ? 1 : 2) };
-        }
-        if (this.artifactChoices.length > 0) return;
-      }
-      this.room.openDoors();
-      sfx(this.queue, "door");
-      this.banner(this.roomIndex === this.roomTotal - 1 ? "Sạch quái — hết prototype" : "Sạch quái — cửa mở");
-    }
-
-    if (this.room.exitsAt(this.player.x, this.player.y)) {
-      const last = this.roomIndex === this.roomTotal - 1;
-      this.runStats.roomsCleared++;
-      sfx(this.queue, "door", 0.8, 1.2);
-      if (last) {
-        this.victory = true;
-        this.endRun();
-        this.awardAchievements(checkAchievements(this.runStats, "win"));
-        if (this.ascensionLevel >= 1) this.awardAchievements(["ascension_1"]);
-        if (this.ascensionLevel >= 4) this.awardAchievements(["ascension_4"]);
-        if (this.ascensionLevel >= 8) this.awardAchievements(["ascension_8"]);
-        if (this.ascensionLevel === this.achievements.ascensionMax && this.achievements.ascensionMax < 8) {
-          this.achievements.ascensionMax = (this.achievements.ascensionMax + 1) as AscensionLevel;
-        }
-        this.saveBestRun();
-        this.pendingEnd = "won";
-        this.banner("Thắng!");
-        return;
-      }
-      this.loadRoom(this.roomIndex + 1);
     }
   }
 

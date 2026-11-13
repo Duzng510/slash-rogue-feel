@@ -38,6 +38,18 @@ export type Swing = {
   kind?: string;
 };
 
+export type DamageCarrier = {
+  side: Side;
+  dir: number;
+  dmg: number;
+  knockback: number;
+  kind?: string;
+  combo?: number;
+  reach?: number;
+  status?: Swing["status"];
+  dealt?: number;
+};
+
 /** a travelling shot: its own entity, blocked by terrain, dodged by i-frames */
 export type Projectile = {
   x: number;
@@ -70,7 +82,7 @@ export interface Unit {
   hurtRect(): Rect;
   canBeHit(): boolean;
   /** returns true when this hit was lethal */
-  onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean;
+  onHit(sw: DamageCarrier, cx: number, cy: number, src: Sim): boolean;
   /** per-unit pitch for the kill/hit sfx; enemies take it from their archetype */
   killPitch?: number;
 }
@@ -127,3 +139,30 @@ export type Sim = {
   pendingEnd: EndMode | null;
   achievements: Achievements;
 };
+
+/** Combat systems need only this state; hitUnit bridges into entity methods that require Sim. */
+export type CombatSim = Pick<
+  Sim,
+  | "artifacts"
+  | "curses"
+  | "fireTrails"
+  | "decals"
+  | "projectiles"
+  | "units"
+  | "enemies"
+  | "player"
+  | "room"
+  | "queue"
+  | "particles"
+  | "rng"
+  | "hitStopTicks"
+  | "nextSwingId"
+  | "runStats"
+> & {
+  hitUnit(target: Unit, carrier: DamageCarrier, cx: number, cy: number): boolean;
+};
+
+export type CombatFeedbackSim = Pick<
+  Sim,
+  "artifacts" | "decals" | "player" | "queue" | "particles" | "rng" | "runStats" | "hitStopTicks"
+>;

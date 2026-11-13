@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { CONFIG, ENEMY_KINDS, enemyDef, isScripted } from "../src/config.ts";
+import { CONFIG, ENEMY_KINDS, Settings, enemyDef, isScripted } from "../src/config.ts";
 import type { EnemyKind } from "../src/config.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
@@ -13,7 +13,7 @@ import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS, CURSES } from "../src/sys
 import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
 import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
-import { PLAYER_STATE } from "../src/entities/player.ts";
+import { Player, PLAYER_STATE } from "../src/entities/player.ts";
 import { requestHitStop } from "../src/systems/feelSim.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
 import { makeRng } from "../src/mathx.ts";
@@ -329,7 +329,26 @@ heading("Enemy state machine");
   }
   ok("the enemy telegraphs before it attacks", sawTelegraph);
   ok("the enemy leaves a punish window after attacking", sawPunish);
-  ok("illegal transitions throw", (() => { try { e.setState(ENEMY_STATE.DEAD); e.setState(ENEMY_STATE.CHASE); return false; } catch { return true; } })());
+  const warn = console.warn;
+  let transitionWarnings = 0;
+  console.warn = () => { transitionWarnings++; };
+  const stateBeforeInvalidTransition = e.state;
+  const player = new Player();
+  try {
+    e.setState(ENEMY_STATE.DEAD);
+    e.setState(ENEMY_STATE.CHASE);
+    player.setState(PLAYER_STATE.DEAD);
+    player.setState(PLAYER_STATE.IDLE);
+  } finally {
+    console.warn = warn;
+  }
+  ok(
+    "illegal enemy and player transitions are logged and ignored",
+    stateBeforeInvalidTransition !== ENEMY_STATE.DEAD &&
+      e.state === ENEMY_STATE.DEAD &&
+      player.state === PLAYER_STATE.DEAD &&
+      transitionWarnings === 2
+  );
   ok("dead -> chase is not a legal edge", !canGoEnemy(ENEMY_STATE.DEAD, ENEMY_STATE.CHASE));
 
   const w2 = sandbox();
@@ -1127,6 +1146,27 @@ heading("The visual clock is driven only from frame()");
     for (let i = open; i < src.length; i++) {
       if (src[i] === "{") depth++;
       else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+    }
+
+    heading("Settings");
+    {
+      const before = Settings.timescale;
+      let ticks = 0;
+      const loop = new GameLoop(() => ticks++, () => {});
+      let outOfRangeRejected = false;
+      try {
+        Settings.timescale = 0.5;
+        loop.advance(CONFIG.TIME.TICK * 2);
+        ok("the Settings timescale setter controls fixed-step advancement", ticks === 1);
+        try {
+          Settings.timescale = 2;
+        } catch (error) {
+          outOfRangeRejected = error instanceof RangeError;
+        }
+        ok("timescale rejects values outside the supported slider range", outOfRangeRejected);
+      } finally {
+        Settings.timescale = before;
+      }
     }
     return "";
   };

@@ -5,11 +5,20 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.48.0";
+export const APP_VERSION = "v0.49.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.49.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Kiến trúc:</b> tách chọn wave, hit-test modal và các helper HUD; composition root dispatch pointer qua giao diện Clickable.",
+      "<b>Combat:</b> damage carrier có kiểu riêng, combat system dùng hợp đồng Sim hẹp hơn, và transition sai được log rồi bỏ qua thay vì crash.",
+      "<b>Settings & RNG:</b> timescale đi qua Settings; ghi rõ các luồng ngẫu nhiên gameplay, phần thưởng và hiệu ứng độc lập.",
+    ],
+  },
   {
     version: "v0.48.0",
     date: "2026-11-14",

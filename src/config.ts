@@ -706,7 +706,6 @@ export const CONFIG = {
     shake: 0.8,
     volume: 0.35,
     particles: 1,
-    timescale: 1,
     hitStopScale: 1,
     dmgNumbers: 1,
     brightness: 1,
@@ -744,4 +743,17 @@ export const CONFIG = {
   },
 
   PALETTE,
+};
+
+let timescale = 1;
+
+export const Settings = {
+  get timescale(): number {
+    return timescale;
+  },
+  set timescale(value: number) {
+    if (!Number.isFinite(value)) throw new RangeError("timescale must be finite");
+    if (value < 0.25 || value > 1.5) throw new RangeError("timescale must be between 0.25 and 1.5");
+    timescale = value;
+  },
 };

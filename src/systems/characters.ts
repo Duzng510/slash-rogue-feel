@@ -1,8 +1,8 @@
 import { blocked } from "../world/collision.ts";
 import { dist } from "../mathx.ts";
 import { artifactText, sfx, shake } from "../events.ts";
-import { hitFeedback } from "./combat.ts";
-import type { Sim, Swing } from "../sim/types.ts";
+import { hitFeedback, makeDamageCarrier } from "./combat.ts";
+import type { Sim } from "../sim/types.ts";
 
 export type CharacterId = "swordsman" | "mage" | "tank";
 
@@ -79,17 +79,14 @@ function aimDir(src: Sim, mx: number, my: number): number {
 
 /** one enemy around the player takes the area hit of a skill */
 function blastAt(src: Sim, dmg: number, x: number, y: number, radius: number, knockback: number): void {
-  const blast = {
+  const blast = makeDamageCarrier({
     side: "player",
     combo: 0,
     dir: 0,
-    ox: x,
-    oy: y,
     reach: 0,
-    deg: 0,
     dmg,
     knockback,
-  } as unknown as Swing;
+  });
   for (const e of src.enemies.slice()) {
     if (e.dead || !e.canBeHit()) continue;
     if (dist(e.x, e.y, x, y) > radius) continue;

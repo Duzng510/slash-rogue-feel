@@ -6,7 +6,7 @@ import type { Sim } from "../sim/types.ts";
  * sfx, damage numbers -- leaves the tick as a VisualEvent, so tick() stays free of DOM/audio.
  */
 
-export function requestHitStop(src: Sim, ticks: number): void {
+export function requestHitStop(src: Pick<Sim, "hitStopTicks">, ticks: number): void {
   const scaled = Math.round(ticks * CONFIG.SLIDERS.hitStopScale);
   /** max, never summed: five kills in one tick must not freeze the sim for 25 ticks */
   if (scaled > src.hitStopTicks) src.hitStopTicks = scaled;

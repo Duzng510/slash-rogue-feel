@@ -1,10 +1,10 @@
 import { CONFIG } from "../config.ts";
 import { rectsOverlap } from "../mathx.ts";
-import { hitFeedback } from "./combat.ts";
-import type { Projectile, Sim, Swing } from "../sim/types.ts";
+import { hitFeedback, makeDamageCarrier } from "./combat.ts";
+import type { CombatSim, Projectile } from "../sim/types.ts";
 
 /** advance every shot: terrain stops it, a body hit lands through the player's i-frames, range expires it */
-export function resolveProjectiles(src: Sim): void {
+export function resolveProjectiles(src: CombatSim): void {
   const dt = CONFIG.TIME.TICK;
   const pl = src.player;
   const hb = pl.hurtRect();
@@ -24,30 +24,27 @@ export function resolveProjectiles(src: Sim): void {
       continue;
     }
     if (p.owner === "player") {
-      const sw = {
+      const sw = makeDamageCarrier({
         side: "player",
         combo: 0,
         dir: Math.atan2(p.vy, p.vx),
-        ox: p.x,
-        oy: p.y,
         reach: 0,
-        deg: 0,
         dmg: p.dmg,
         knockback: 20,
         status: p.status,
-      } as unknown as Swing;
+      });
       const foe = src.enemies.find(e => !e.dead && e.canBeHit() && rectsOverlap({ x: p.x - 1.5, y: p.y - 1.5, w: 3, h: 3 }, e.hurtRect()));
       if (foe === undefined) {
         if (p.ticksLeft > 0) keep.push(p);
         continue;
       }
-      const killed = foe.onHit(sw, foe.x, foe.y, src);
+      const killed = src.hitUnit(foe, sw, foe.x, foe.y);
       hitFeedback(src, foe, sw, foe.x, foe.y, killed, false);
       continue;
     }
     if (pl.canBeHit() && rectsOverlap({ x: p.x - 1.5, y: p.y - 1.5, w: 3, h: 3 }, hb)) {
-      const sw = { side: "enemy", kind: p.sourceKind, dmg: p.dmg, dir: Math.atan2(p.vy, p.vx) } as unknown as Swing;
-      pl.onHit(sw, p.x, p.y, src);
+      const sw = makeDamageCarrier({ side: "enemy", kind: p.sourceKind, dmg: p.dmg, dir: Math.atan2(p.vy, p.vx) });
+      src.hitUnit(pl, sw, p.x, p.y);
       continue;
     }
     if (p.ticksLeft > 0) keep.push(p);

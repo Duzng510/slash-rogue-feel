@@ -5,26 +5,15 @@ import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
 import { CHARACTERS, COMBO_HITS } from "../systems/characters.ts";
 import { WEAPONS } from "../systems/weapons.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
-import { dialogueOptionAt, dialogueOptionBounds, roomChoiceAt, roomChoiceBounds } from "./dialogueLayout.ts";
+import { dialogueOptionBounds, roomChoiceBounds } from "./dialogueLayout.ts";
+import type { Clickable, ModalKey } from "./dialogueLayout.ts";
+import { hitTestHudModal } from "./hud/modal.ts";
+import { wrapCardLines } from "./hud/cards.ts";
+import { drawHpBar } from "./hud/hpBar.ts";
 
 const P = CONFIG.PALETTE;
 
-/** greedy word wrap to the card width, in canvas measure units */
-function wrapLines(o: CanvasRenderingContext2D, text: string, max: number): string[] {
-  const lines: string[] = [];
-  let line = "";
-  for (const word of text.split(/\s+/)) {
-    const next = line ? `${line} ${word}` : word;
-    if (line && o.measureText(next).width > max) {
-      lines.push(line);
-      line = word;
-    } else line = next;
-  }
-  lines.push(line);
-  return lines;
-}
-
-export class Hud {
+export class Hud implements Clickable {
   private toastText = "";
   private toastUntil = 0;
 
@@ -96,66 +85,8 @@ export class Hud {
     o.textAlign = "left";
   }
 
-  modalAt(x: number, y: number): string | null {
-    const w = this.world;
-    if (w.dialogue !== null) {
-      const node = w.dialogue.source.nodes[w.dialogue.nodeId];
-      if (!node) return null;
-      const option = dialogueOptionAt(x, y, node.options.length);
-      return option === null ? null : `d:${option}`;
-    }
-    if (w.roomChoices !== null) {
-      const i = roomChoiceAt(x, y, w.roomChoices.choices.length);
-      if (i === null) return null;
-      const choice = w.roomChoices.choices[i];
-      return choice !== undefined && !choice.disabled ? `e:${i}` : null;
-    }
-    if (this.world.characterChoices.length > 0) {
-      if (this.world.achievements.ascensionMax > 0 && y >= 164 && y <= 180) {
-        if (x >= 104 && x <= 132) return "q:-";
-        if (x >= 188 && x <= 216) return "q:+";
-        return null;
-      }
-      if (y < 34 || y >= 164) return null;
-      let i = -1;
-      if (x >= 12 && x <= 104) i = 0;
-      else if (x >= 114 && x <= 206) i = 1;
-      else if (x >= 216 && x <= 308) i = 2;
-      const id = i < 0 ? undefined : w.characterChoices[i];
-      return id === undefined ? null : `p:${id}`;
-    }
-    if (w.shopOffers !== null) {
-      if (y >= 166 && y <= 178 && x >= 16 && x <= 304) return "s:leave";
-      // 3 vertical columns for shop: left 12, width 92, gap 10 (col 0: 12-104, col 1: 114-206, col 2: 216-308), y: 38 - 158
-      if (y < 38 || y > 158) return null;
-      let i = -1;
-      if (x >= 12 && x <= 104) i = 0;
-      else if (x >= 114 && x <= 206) i = 1;
-      else if (x >= 216 && x <= 308) i = 2;
-      if (i < 0 || i >= w.shopOffers.length) return null;
-      return `s:${i}`;
-    }
-    if (w.curseOffer !== null && w.room.kind !== "shrine" && y >= 20 && y <= 32) {
-      if (x >= 16 && x < 160) return "t:normal";
-      if (x >= 160 && x <= 304) return "t:curse";
-      return null;
-    }
-    // 3 vertical columns for artifacts / curses
-    const topY = w.curseOffer !== null ? 36 : 38;
-    const botY = w.curseOffer !== null ? 142 : 166;
-    if (y < topY || y > botY) return null;
-    let i = -1;
-    if (x >= 12 && x <= 104) i = 0;
-    else if (x >= 114 && x <= 206) i = 1;
-    else if (x >= 216 && x <= 308) i = 2;
-    if (i < 0) return null;
-
-    if (w.curseTab && w.curseOffer !== null) {
-      const curse = i < 2 ? w.curseOffer.curses[i] : undefined;
-      return curse ? `c:${curse.id}` : null;
-    }
-    const artifact = w.artifactChoices[i];
-    return artifact && !w.artifacts.has(artifact.id) ? `a:${artifact.id}` : null;
+  hitTest(x: number, y: number): ModalKey | null {
+    return hitTestHudModal(this.world, x, y);
   }
 
   /** the run-start build choice: impressive character selection stage with pedestals, animated preview models and glowing runes */
@@ -322,7 +253,7 @@ export class Hud {
       o.fillText(`[E] ${c.skillName}`, cardX + 6, cardY + 74);
       o.font = "6.5px sans-serif";
       o.fillStyle = "#c5d3e8";
-      wrapLines(o, c.skillDesc, cardW - 12).forEach((t, j) => {
+      wrapCardLines(o, c.skillDesc, cardW - 12).forEach((t, j) => {
         o.fillText(t, cardX + 6, cardY + 82 + j * 8, cardW - 12);
       });
 
@@ -332,7 +263,7 @@ export class Hud {
       o.fillText(`Nội tại: ${c.passiveName}`, cardX + 6, cardY + 99);
       o.font = "6.5px sans-serif";
       o.fillStyle = "#9db0cc";
-      wrapLines(o, c.passiveDesc, cardW - 12).forEach((t, j) => {
+      wrapCardLines(o, c.passiveDesc, cardW - 12).forEach((t, j) => {
         o.fillText(t, cardX + 6, cardY + 108 + j * 7, cardW - 12);
       });
     });
@@ -379,7 +310,7 @@ export class Hud {
     o.fillStyle = "#9db0cc";
     o.font = "7px sans-serif";
     const shown = node.text.slice(0, Math.floor(dialogue.charIndex));
-    const lines = wrapLines(o, shown, 210);
+    const lines = wrapCardLines(o, shown, 210);
     lines.slice(0, 4).forEach((line, index) => o.fillText(line, 36, 54 + index * 10));
     if (dialogue.charIndex < node.text.length) {
       const lastLine = lines[lines.length - 1] ?? "";
@@ -611,7 +542,7 @@ export class Hud {
       o.fillText(`[${i + 1}] ${choice.label}`, b.x + 46, b.y + 16, 82);
       o.fillStyle = "#b8c2d4";
       o.font = "7px sans-serif";
-      const lines = wrapLines(o, choice.detail, 78);
+      const lines = wrapCardLines(o, choice.detail, 78);
       lines.slice(0, 4).forEach((line, lineIndex) => o.fillText(line, b.x + 46, b.y + 34 + lineIndex * 9, 80));
       o.globalAlpha = 1;
     });
@@ -649,43 +580,11 @@ export class Hud {
 
   draw(o: CanvasRenderingContext2D, scale: number): void {
     const w = this.world;
-    const full = this.sprites.heart_full;
-    const empty = this.sprites.heart_empty;
-    const step = 9;
-
-    // 1. Dãy tim máu (HP): Hỗ trợ cuộn/gập hàng khi maxHp lớn (D10)
-    const maxPerRow = 10;
-    const clampedStep = w.player.maxHp > maxPerRow ? 8 : step;
-    for (let i = 0; i < w.player.maxHp; i++) {
-      const col = i % maxPerRow;
-      const row = Math.floor(i / maxPerRow);
-      const x = Math.round((6 + col * clampedStep) * scale);
-      const y = Math.round((6 + row * 8) * scale);
-      const width = full.w * scale;
-      const height = full.h * scale;
-      const fill = Math.max(0, Math.min(1, w.player.hp - i));
-      o.drawImage(empty.c, x, y, empty.w * scale, empty.h * scale);
-      if (fill >= 1 && i === 0 && w.player.hp <= 1) {
-        const pulse = 1 + 0.05 * Math.sin(w.tickCount * 0.18);
-        o.save();
-        o.translate(x + width / 2, y + height / 2);
-        o.scale(pulse, pulse);
-        o.drawImage(full.c, -width / 2, -height / 2, width, height);
-        o.restore();
-      } else if (fill >= 1) o.drawImage(full.c, x, y, width, height);
-      else if (fill >= 0.5) {
-        o.save();
-        o.beginPath();
-        o.rect(x, y, Math.ceil(width / 2), height);
-        o.clip();
-        o.drawImage(full.c, x, y, width, height);
-        o.restore();
-      }
-    }
+    // 1. Heart row / rows stay pixel-aligned even when max HP grows.
+    const heartsWidth = drawHpBar(o, scale, w.player, w.tickCount, this.sprites);
 
     // 2. Thông tin nhân vật và vũ khí (Tách sang bên phải với khoảng cách thoáng tối thiểu 72px)
     const cdef = CHARACTERS[w.player.character];
-    const heartsWidth = Math.min(maxPerRow, w.player.maxHp) * clampedStep;
     const badgeX = Math.max(72, 10 + heartsWidth + 8);
 
     // Huy hiệu & Tên nhân vật (Hàng 1: y = 5)

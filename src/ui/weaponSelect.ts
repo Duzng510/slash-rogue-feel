@@ -1,8 +1,9 @@
 import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
 import { WEAPONS, WEAPON_LIST, type WeaponId } from "../systems/weapons.ts";
+import type { Clickable, ModalKey } from "./dialogueLayout.ts";
 
-export class WeaponSelect {
+export class WeaponSelect implements Clickable {
   private hovered: WeaponId | null = null;
 
   constructor(
@@ -22,7 +23,7 @@ export class WeaponSelect {
     this.world.weaponChoices = null;
   }
 
-  handlePointer(x: number, y: number): WeaponId | null {
+  hitTest(x: number, y: number): ModalKey | null {
     if (!this.isOpen()) return null;
     const rx = 20;
     const rowW = 280;
@@ -34,14 +35,16 @@ export class WeaponSelect {
     for (let i = 0; i < list.length; i++) {
       const ry = startY + i * (rowH + rowGap);
       if (x >= rx && x <= rx + rowW && y >= ry && y <= ry + rowH) {
-        return list[i];
+        return `w:${list[i]}`;
       }
     }
     return null;
   }
 
   updateHover(x: number, y: number): void {
-    this.hovered = this.handlePointer(x, y);
+    const key = this.hitTest(x, y);
+    const id = key?.slice(2);
+    this.hovered = id === undefined ? null : WEAPON_LIST.find((weapon) => weapon === id) ?? null;
   }
 
   draw(o: CanvasRenderingContext2D, scale: number): void {

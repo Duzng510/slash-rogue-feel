@@ -1,13 +1,13 @@
 import { CONFIG } from "../config.ts";
 import { angleLerp, clamp, dist, normAngle } from "../mathx.ts";
 import { artifactText, shake, sfx } from "../events.ts";
-import { createSwing, hitFeedback, instantSwing, playerSwingInit, stepSwing } from "../systems/combat.ts";
+import { createSwing, hitFeedback, instantSwing, makeDamageCarrier, playerSwingInit, stepSwing } from "../systems/combat.ts";
 import { CHARACTERS, COMBO_HITS, COMBO_WINDOW, executeSkill, type CharacterId } from "../systems/characters.ts";
 import { WEAPONS, type WeaponId } from "../systems/weapons.ts";
 import { resolveAttackDir } from "../systems/aim.ts";
 import { knockback } from "../systems/feelSim.ts";
 import { moveBody, blocked } from "../world/collision.ts";
-import type { Intent, Side, Sim, Swing, Unit } from "../sim/types.ts";
+import type { DamageCarrier, Intent, Side, Sim, Swing, Unit } from "../sim/types.ts";
 import type { Rect } from "../mathx.ts";
 
 export const PLAYER_STATE = {
@@ -111,7 +111,8 @@ export class Player implements Unit {
 
   setState(next: PlayerState): void {
     if (!canGoPlayer(this.state, next)) {
-      throw new Error(`illegal player transition ${this.state} -> ${next}`);
+      console.warn(`ignored illegal player transition ${this.state} -> ${next}`);
+      return;
     }
     this.state = next;
   }
@@ -126,7 +127,7 @@ export class Player implements Unit {
     return !this.dead && this.iframeTicks <= 0 && this.dashIframeTicks <= 0;
   }
 
-  onHit(sw: Swing, cx: number, cy: number, src: Sim): boolean {
+  onHit(sw: DamageCarrier, cx: number, cy: number, src: Sim): boolean {
     const p = CONFIG.PLAYER;
     if (this.character === "tank" && this.skillActiveTicks > 0) {
       artifactText(src.queue, this.x, this.y - 14, "PHẢN ĐÒN", "#8ab4ff");
@@ -137,7 +138,7 @@ export class Player implements Unit {
         const pushDir = Math.hypot(e.x - this.x, e.y - this.y) > 0.1
           ? Math.atan2(e.y - this.y, e.x - this.x)
           : sw.dir + Math.PI;
-        const back = { side: "player", combo: 0, dir: pushDir, ox: this.x, oy: this.y, reach: 0, deg: 0, dmg: 2, knockback: 30 } as unknown as Swing;
+        const back = makeDamageCarrier({ side: "player", combo: 0, dir: pushDir, dmg: 2, knockback: 30 });
         const killed = e.onHit(back, e.x, e.y, src);
         hitFeedback(src, e, back, e.x, e.y, killed, false);
       }

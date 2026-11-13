@@ -2,13 +2,13 @@ import { CONFIG, enemyDef } from "../config.ts";
 import type { EnemyDef, EnemyKind } from "../config.ts";
 import { angleLerp, dist, normAngle } from "../mathx.ts";
 import { artifactText, dmgNumber, sfx, shake } from "../events.ts";
-import { createSwing, hitFeedback, instantSwing, stepSwing } from "../systems/combat.ts";
+import { createSwing, hitFeedback, instantSwing, makeDamageCarrier, stepSwing } from "../systems/combat.ts";
 import { knockback, pulse } from "../systems/feelSim.ts";
 import { WEAPONS } from "../systems/weapons.ts";
 import { moveBody } from "../world/collision.ts";
 import type { SpatialGrid } from "../world/grid.ts";
 import type { Rect } from "../mathx.ts";
-import type { Side, Sim, Swing, Unit } from "../sim/types.ts";
+import type { DamageCarrier, Side, Sim, Swing, Unit } from "../sim/types.ts";
 
 export const ENEMY_STATE = {
   IDLE: "idle",
@@ -131,7 +131,10 @@ export class Enemy implements Unit {
   }
 
   setState(next: EnemyState): void {
-    if (!canGoEnemy(this.state, next)) throw new Error(`illegal enemy transition ${this.state} -> ${next}`);
+    if (!canGoEnemy(this.state, next)) {
+      console.warn(`ignored illegal enemy transition ${this.state} -> ${next}`);
+      return;
+    }
     if (next !== this.state) {
       this.state = next;
       this.ticksInState = 0;
@@ -180,7 +183,7 @@ export class Enemy implements Unit {
     return Math.abs(normAngle(Math.atan2(dy, dx) - this.telegraphDir)) <= e.ATTACK_ARC_DEG * Math.PI / 360;
   }
 
-  onHit(sw: Swing, _cx: number, _cy: number, src: Sim): boolean {
+  onHit(sw: DamageCarrier, _cx: number, _cy: number, src: Sim): boolean {
     const e = this.def;
     if (this.dead) return false;
     if (this.kind === "king" && this.kingInvulnTicks > 0) {
@@ -217,7 +220,7 @@ export class Enemy implements Unit {
       sfx(src.queue, "kill", 0.6, 1.4);
     }
     if (!this.dead && sw.status) this.applyStatus(sw.status, src);
-    if (!this.dead && playerHit && sw.reach > 0 && src.artifacts.has("bleed")) this.applyStatus("bleed", src);
+    if (!this.dead && playerHit && (sw.reach ?? 0) > 0 && src.artifacts.has("bleed")) this.applyStatus("bleed", src);
     if (this.dead) return true;
     this.swing = null;
     this.hurtTicks = e.HURT_TICKS;
@@ -289,7 +292,7 @@ export class Enemy implements Unit {
 
   applyStatus(status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed", src: Sim): void {
     if (this.dead || this.state === ENEMY_STATE.VANISH) return;
-    if (status === "burn" && this.wetTicks > 0 || status === "wet" && this.burnTicks > 0) {
+    if ((status === "burn" && this.wetTicks > 0) || (status === "wet" && this.burnTicks > 0)) {
       this.burnTicks = this.wetTicks = this.burnPulse = 0;
       src.runStats.comboSeen = true;
       this.takeDamage(2, src);
@@ -600,7 +603,7 @@ export class Enemy implements Unit {
     if (e.EXPLODE_RADIUS > 0) {
       const dir = Math.atan2(src.player.y - this.y, src.player.x - this.x);
       if (!src.player.dead && dist(this.x, this.y, src.player.x, src.player.y) <= e.EXPLODE_RADIUS) {
-        src.player.onHit({ side: "enemy", kind: this.kind, dmg: e.EXPLODE_DMG * this.dmgScale, dir } as unknown as Swing, this.x, this.y, src);
+        src.player.onHit(makeDamageCarrier({ side: "enemy", kind: this.kind, dmg: e.EXPLODE_DMG * this.dmgScale, dir }), this.x, this.y, src);
       }
       src.particles.burstSpark(this.x, this.y - 5, 12, src.rng);
       shake(src.queue, this.x, this.y, dir, 1.2);
@@ -747,7 +750,7 @@ export class Enemy implements Unit {
     const along = px * cos + py * sin;
     const perp = Math.abs(-px * sin + py * cos);
     if (src.player.canBeHit() && along >= 0 && along <= len && perp <= 4) {
-      src.player.onHit({ side: "enemy", kind: this.kind, dmg: 3 * this.dmgScale, dir } as unknown as Swing, src.player.x, src.player.y, src);
+      src.player.onHit(makeDamageCarrier({ side: "enemy", kind: this.kind, dmg: 3 * this.dmgScale, dir }), src.player.x, src.player.y, src);
     }
     src.queue.push({ t: "beam", x: ox, y: oy, dir, len });
     shake(src.queue, ox, oy, dir, 0.8);
@@ -818,7 +821,7 @@ export class Enemy implements Unit {
     }
   }
 
-  blink(): boolean {
+  shouldBlink(): boolean {
     const e = this.def;
     if (this.state !== ENEMY_STATE.TELEGRAPH) return false;
     const elapsed = this.telegraphTotal - this.telegraphTicksLeft;

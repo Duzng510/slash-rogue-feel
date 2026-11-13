@@ -6,7 +6,7 @@ import { requestHitStop } from "./feelSim.ts";
 import { CHARACTERS } from "./characters.ts";
 import { WEAPONS } from "./weapons.ts";
 import type { Rect } from "../mathx.ts";
-import type { Decal, Side, Sim, Swing, Unit } from "../sim/types.ts";
+import type { CombatFeedbackSim, CombatSim, DamageCarrier, Decal, Side, Sim, Swing, Unit } from "../sim/types.ts";
 import type { Enemy } from "../entities/enemy.ts";
 import type { SpatialGrid } from "../world/grid.ts";
 
@@ -25,7 +25,25 @@ export type SwingInit = {
   status?: Swing["status"];
 };
 
-export function createSwing(src: Sim, init: SwingInit): Swing {
+export type DamageCarrierInit = Pick<DamageCarrier, "side" | "dir" | "dmg"> &
+  Partial<Omit<DamageCarrier, "side" | "dir" | "dmg" | "knockback" | "dealt">> & {
+    knockback?: number;
+  };
+
+export function makeDamageCarrier(init: DamageCarrierInit): DamageCarrier {
+  return {
+    side: init.side,
+    dir: init.dir,
+    dmg: init.dmg,
+    knockback: init.knockback ?? 0,
+    ...(init.kind !== undefined ? { kind: init.kind } : {}),
+    ...(init.combo !== undefined ? { combo: init.combo } : {}),
+    ...(init.reach !== undefined ? { reach: init.reach } : {}),
+    ...(init.status !== undefined ? { status: init.status } : {}),
+  };
+}
+
+export function createSwing(src: Pick<Sim, "nextSwingId">, init: SwingInit): Swing {
   return {
     id: src.nextSwingId(),
     side: init.side,
@@ -47,7 +65,7 @@ export function createSwing(src: Sim, init: SwingInit): Swing {
 }
 
 /** a zero-geometry swing used purely as a damage carrier (traps, thorns, aftershock, blast) */
-export function instantSwing(src: Sim, o: { side: Side; dir: number; ox: number; oy: number; dmg: number; combo?: number; knockback?: number; status?: Swing["status"]; kind?: string }): Swing {
+export function instantSwing(src: Pick<Sim, "nextSwingId">, o: { side: Side; dir: number; ox: number; oy: number; dmg: number; combo?: number; knockback?: number; status?: Swing["status"]; kind?: string }): Swing {
   return createSwing(src, {
     side: o.side,
     kind: o.kind,
@@ -64,7 +82,7 @@ export function instantSwing(src: Sim, o: { side: Side; dir: number; ox: number;
   });
 }
 
-export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit {
+export function playerSwingInit(src: Pick<Sim, "player" | "artifacts" | "curses">, combo: number, dir: number): SwingInit {
   const w = WEAPONS[src.player.weapon];
   const cb = w.combos[Math.min(w.combos.length, combo) - 1];
   const berserk = src.artifacts.has("berserker") ? 1 + Math.min(0.5, (src.player.maxHp - src.player.hp) * 0.1) : 1;
@@ -118,7 +136,7 @@ export function hitboxOf(sw: Swing): Rect | null {
   return { x: sw.ox - r, y: sw.oy - r, w: r * 2, h: r * 2 };
 }
 
-export function resolveHits(src: Sim, grid: SpatialGrid): void {
+export function resolveHits(src: CombatSim, grid: SpatialGrid): void {
   for (const attacker of src.units) {
     const sw = attacker.swing;
     if (sw === null || sw.phase !== "active") continue;
@@ -148,12 +166,12 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
       sw.seen.add(target.id);
       const exec = sw.side === "player" && target.side === "enemy" && src.artifacts.has("executioner") &&
         (target as Enemy).hp < (target as Enemy).maxHp * 0.2;
-      const killed = target.onHit(sw, cx, cy, src);
+      const killed = src.hitUnit(target, sw, cx, cy);
       hitFeedback(src, target, sw, cx, cy, killed, !exec);
       if (target.side === "player" && src.artifacts.has("thorns") && !attacker.dead) {
         const dir = Math.atan2(attacker.y - target.y, attacker.x - target.x);
         const thornsSwing = instantSwing(src, { side: "player", dir, ox: target.x, oy: target.y, dmg: 1, knockback: 30 });
-        attacker.onHit(thornsSwing, attacker.x, attacker.y, src);
+        src.hitUnit(attacker, thornsSwing, attacker.x, attacker.y);
         src.queue.push({ t: "artifactText", x: attacker.x, y: attacker.y - 14, text: "GAI", color: "#c8ff8a" });
         sfx(src.queue, "slash_hit", 0.5, 1.4);
       }
@@ -171,8 +189,8 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
           if (d < bestD) { bestD = d; best = other; }
         }
         if (best !== null) {
-          const zap = { ...sw, dmg: 1, knockback: 0, status: undefined, seen: new Set<number>() };
-          const zapped = best.onHit(zap, best.x, best.y, src);
+          const zap = makeDamageCarrier({ side: sw.side, dir: sw.dir, dmg: 1, reach: sw.reach });
+          const zapped = src.hitUnit(best, zap, best.x, best.y);
           hitFeedback(src, best, zap, best.x, best.y, zapped, false);
           src.queue.push({ t: "slashArc", x: best.x, y: best.y, dir: 0, reach: 15, deg: 360, combo: 2, ticks: 8, contact: 0.5 });
           sfx(src.queue, "shock_hit", 0.6, 1.5);
@@ -184,19 +202,19 @@ export function resolveHits(src: Sim, grid: SpatialGrid): void {
       src.queue.push({ t: "slashArc", x: blast.x, y: blast.y, dir: 0, reach: 40, deg: 360, combo: 2, ticks: 12, contact: 0.5 });
       sfx(src.queue, "aftershock_boom", 1, 0.8);
       artifactText(src.queue, blast.x, blast.y - 12, "DƯ CHẤN", "#ff963f");
-      const shock = { ...sw, dmg: 1, knockback: 0, status: undefined, seen: new Set<number>() };
+      const shock = makeDamageCarrier({ side: sw.side, dir: sw.dir, dmg: 1, reach: sw.reach });
       for (const enemy of src.enemies.slice()) {
         const hb = enemy.hurtRect();
         const cx = hb.x + hb.w / 2, cy = hb.y + hb.h / 2;
         if (enemy.dead || Math.hypot(cx - blast.x, cy - blast.y) > 40) continue;
-        const killed = enemy.onHit(shock, cx, cy, src);
+        const killed = src.hitUnit(enemy, shock, cx, cy);
         hitFeedback(src, enemy, shock, cx, cy, killed, false);
       }
     }
   }
 }
 
-export function resolveFire(src: Sim): void {
+export function resolveFire(src: CombatSim): void {
   for (const trail of src.fireTrails) {
     for (const point of trail.points) point.ticks--;
     trail.points = trail.points.filter(p => p.ticks > 0);
@@ -206,7 +224,7 @@ export function resolveFire(src: Sim): void {
       if (!trail.points.some(p => rectsOverlap({ x: p.x - 6, y: p.y - 6, w: 12, h: 12 }, hb))) continue;
       trail.seen.add(enemy.id);
       const fire = instantSwing(src, { side: "player", status: "burn", combo: 1, dir: 0, ox: enemy.x, oy: enemy.y, dmg: 1 });
-      const killed = enemy.onHit(fire, enemy.x, enemy.y, src);
+      const killed = src.hitUnit(enemy, fire, enemy.x, enemy.y);
       hitFeedback(src, enemy, fire, enemy.x, enemy.y, killed, false);
     }
   }
@@ -217,7 +235,7 @@ export function resolveFire(src: Sim): void {
  * A permanent floor stain, hashed from the hit position instead of the sim rng so
  * landing hits never perturbs the seeded determinism oracle. Oldest decal recycles.
  */
-function addDecal(src: Sim, x: number, y: number, killed: boolean): void {
+function addDecal(src: Pick<Sim, "decals">, x: number, y: number, killed: boolean): void {
   if (src.decals.length >= CONFIG.FEEL.DECAL_CAP) src.decals.shift();
   let h = ((Math.round(x) * 73856093) ^ (Math.round(y) * 19349663) ^ (Math.round(x + y) * 83492791)) >>> 0;
   const next = (): number => {
@@ -243,14 +261,14 @@ const ELEMENT_FX: Record<NonNullable<Swing["status"]>, { color: string; burst?: 
   bleed: { color: CONFIG.PALETTE.ELEMENT.bleed },
 };
 
-export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
+export function hitFeedback(src: CombatFeedbackSim, target: Unit, sw: DamageCarrier, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
     // onHit caches the post-modifier number; fall back to base for callers that skip onHit
     const dealt = sw.dealt ?? sw.dmg;
     if (sw.side === "player") src.runStats.damageDealt += dealt;
     /** only a landed melee swing feeds the swordsman's combo counter */
-    if (sw.side === "player" && sw.reach > 0) src.player.registerHit();
+    if (sw.side === "player" && (sw.reach ?? 0) > 0) src.player.registerHit();
     const dir = sw.dir;
     src.queue.push({ t: "flash", ent: target.id, ticks: CONFIG.PLAYER.FLASH_TICKS });
     if (sw.side === "player") {

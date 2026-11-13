@@ -1816,7 +1816,7 @@ export class Renderer {
         this.queueSprite(flipX ? baseSprite : sp, drawX, drawY, drawW, drawH, colorTuple(tint, 0.55 * fade), 0, 0, false, flipX);
       }
       if (en.isElite) this.queueSprite(flipX ? baseSprite : sp, drawX, drawY, drawW, drawH, colorTuple("#ffd166", 0.22 * fade), 0, 0, false, flipX);
-      if (en.blink()) this.queueSprite(flipX ? baseSprite : sp, drawX, drawY, drawW, drawH, [1, 1, 1, 0.5], 0, 1, false, flipX);
+      if (en.shouldBlink()) this.queueSprite(flipX ? baseSprite : sp, drawX, drawY, drawW, drawH, [1, 1, 1, 0.5], 0, 1, false, flipX);
 
       const active = [en.burnTicks, en.wetTicks, en.shockTicks, en.poisonTicks, en.freezeTicks, en.bleedTicks];
       const icons = ["00100/01101/11111/11111/01110", "00100/00100/01110/11111/01110", "00111/01110/11111/00110/01100", "00100/01110/11111/01110/00100", "10101/01110/11111/01110/10101", "00100/01110/11111/11111/01110"];
@@ -1921,7 +1921,7 @@ export class Renderer {
       iconX += 7;
     }
 
-    if (en.blink()) {
+    if (en.shouldBlink()) {
       g.globalAlpha = 0.5;
       g.drawImage(white, x, y, w, h);
       g.globalAlpha = 1;

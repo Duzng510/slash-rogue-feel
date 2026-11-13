@@ -1,4 +1,4 @@
-import { CONFIG } from "../config.ts";
+import { CONFIG, Settings } from "../config.ts";
 import { hitboxOf } from "../systems/combat.ts";
 import { ENEMY_STATE } from "../entities/enemy.ts";
 import type { World } from "../world/world.ts";
@@ -60,7 +60,7 @@ export class DebugHud {
       o.font = `${Math.max(10, Math.round(5.5 * scale))}px ui-monospace, monospace`;
       o.textBaseline = "top";
       const lines = [
-        `fps ${this.fps}  tick ${world.tickCount}  ts ${CONFIG.SLIDERS.timescale.toFixed(2)}`,
+        `fps ${this.fps}  tick ${world.tickCount}  ts ${Settings.timescale.toFixed(2)}`,
         `parts ${world.particles.alive}/${world.particles.cap}  alive ${world.aliveEnemies()}  stop ${world.hitStopTicks}`,
         `you ${pl.state}${pl.swing !== null ? `/${pl.swing.phase}:${pl.swing.ticksLeft}` : ""} c${pl.combo} ifr${pl.iframeTicks}`,
       ];

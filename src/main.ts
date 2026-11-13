@@ -1,4 +1,4 @@
-import { CONFIG } from "./config.ts";
+import { CONFIG, Settings } from "./config.ts";
 import { dist } from "./mathx.ts";
 import { GameLoop } from "./loop.ts";
 import { World } from "./world/world.ts";
@@ -26,6 +26,7 @@ import type { Achievements } from "./systems/unlocks.ts";
 import { initChangelog } from "./ui/changelogModal.ts";
 import { installHarness } from "./harness.ts";
 import { initSliders, syncSliderLabels } from "./ui/sliders.ts";
+import type { Clickable, ModalKey, ModalKind } from "./ui/dialogueLayout.ts";
 
 const qs = new URLSearchParams(location.search);
 const autoplay = qs.get("autoplay") === "1";
@@ -73,7 +74,7 @@ const renderer = new Renderer(game, overlay, world, cam, sprites);
 renderer.resize();
 const hud = new Hud(world, sprites);
 const weaponSelect = new WeaponSelect(world, sprites);
-const endScreen = new EndScreen(overlay);
+const endScreen = new EndScreen();
 const debug = new DebugHud();
 const sfx = new Sfx();
 const intent = new IntentSource();
@@ -100,7 +101,7 @@ function applyHotkey(k: Hotkey): void {
       flags.hitStop = !flags.hitStop;
       break;
     case "slowmo":
-      CONFIG.SLIDERS.timescale = CONFIG.SLIDERS.timescale > 0.5 ? 0.35 : 1;
+      Settings.timescale = Settings.timescale > 0.5 ? 0.35 : 1;
       break;
     case "spawn":
       world.addEnemies(4);
@@ -174,7 +175,7 @@ function chooseArtifact(id: ArtifactId): boolean {
   syncArtifactModal();
   return chosen;
 }
-function modalFromClient(x: number, y: number): string | null {
+function hitTestFromClient(clickables: readonly Clickable[], x: number, y: number): ModalKey | null {
   const r = overlay.getBoundingClientRect();
   if (r.width <= 0 || r.height <= 0) return null;
   const u = (x - r.left) / r.width;
@@ -183,13 +184,13 @@ function modalFromClient(x: number, y: number): string | null {
   const logicalH = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE;
   const cx = isRotated() ? v * logicalW : u * logicalW;
   const cy = isRotated() ? (1 - u) * logicalH : v * logicalH;
-  if (world.weaponChoices !== null) {
-    const wid = weaponSelect.handlePointer(cx, cy);
-    if (wid !== null) return `w:${wid}`;
+  for (const clickable of clickables) {
+    const key = clickable.hitTest(cx, cy);
+    if (key !== null) return key;
   }
-  return hud.modalAt(cx, cy);
+  return null;
 }
-function applyModal(key: string, from: ModalKey): void {
+function applyModal(key: string, from: ModalKind): void {
   if (from === "q") {
     if (key === "q:-") world.setAscensionLevel(world.ascensionLevel - 1);
     else if (key === "q:+") world.setAscensionLevel(world.ascensionLevel + 1);
@@ -243,14 +244,17 @@ function applyModal(key: string, from: ModalKey): void {
   } else chooseArtifact(key.slice(2) as ArtifactId);
 }
 /** which modal a pointer press landed in; the key after the prefix tells which id was hit */
-type ModalKey = "p" | "w" | "a" | "c" | "s" | "t" | "q" | "e" | "d";
-function modalKind(key: string | null): ModalKey | null {
+function modalKind(key: ModalKey | null): ModalKind | null {
   if (key === null) return null;
-  return key[0] as ModalKey;
+  return key[0] as ModalKind;
 }
-const modalPointers = new Map<number, ModalKey | null>();
+const modalPointers = new Map<number, ModalKind | null>();
 const endPointers = new Map<number, EndAction | null>();
-const endActionFromClient = (x: number, y: number): EndAction | null => endScreen.handlePointer(x, y, renderer.scale);
+const endActionFromClient = (x: number, y: number): EndAction | null => {
+  const key = hitTestFromClient([endScreen], x, y);
+  return key === "restart" || key === "continue" ? key : null;
+};
+const modalClickables: readonly Clickable[] = [weaponSelect, hud];
 let suppressModalClick = false;
 window.addEventListener("pointerdown", (e) => {
   const end = endScreen.isOpen();
@@ -264,7 +268,7 @@ window.addEventListener("pointerdown", (e) => {
     return;
   }
   syncArtifactModal();
-  modalPointers.set(e.pointerId, e.button === 0 ? modalKind(modalFromClient(e.clientX, e.clientY)) : null);
+  modalPointers.set(e.pointerId, e.button === 0 ? modalKind(hitTestFromClient(modalClickables, e.clientX, e.clientY)) : null);
 }, { capture: true });
 for (const type of ["pointerup", "pointercancel"] as const) {
   window.addEventListener(type, (e) => {
@@ -281,7 +285,7 @@ for (const type of ["pointerup", "pointercancel"] as const) {
         if (slowmoRestoreTimer !== null) {
           clearTimeout(slowmoRestoreTimer);
           slowmoRestoreTimer = null;
-          CONFIG.SLIDERS.timescale = originalTimescale;
+          Settings.timescale = originalTimescale;
         }
         if (act === "restart") world.restart();
         else world.continueAfterWin();
@@ -290,7 +294,7 @@ for (const type of ["pointerup", "pointercancel"] as const) {
     }
     const kind = modalPointers.get(e.pointerId);
     modalPointers.delete(e.pointerId);
-    const key = type === "pointerup" ? modalFromClient(e.clientX, e.clientY) : null;
+    const key = type === "pointerup" ? hitTestFromClient(modalClickables, e.clientX, e.clientY) : null;
     if (key !== null && kind !== null && kind === modalKind(key)) applyModal(key, kind);
   }, { capture: true });
 }
@@ -450,15 +454,15 @@ function frame(dtReal: number): void {
 
   // Slowmo 0.3x trong 0.3s khi người chơi vừa hy sinh
   if (world.player.dead && world.player.deadTicks === 1 && slowmoRestoreTimer === null) {
-    originalTimescale = CONFIG.SLIDERS.timescale;
-    CONFIG.SLIDERS.timescale = 0.3;
+    originalTimescale = Settings.timescale;
+    Settings.timescale = 0.3;
     slowmoRestoreTimer = window.setTimeout(() => {
-      CONFIG.SLIDERS.timescale = originalTimescale;
+      Settings.timescale = originalTimescale;
       slowmoRestoreTimer = null;
     }, 300);
   }
 
-  const dtSim = dtReal * CONFIG.SLIDERS.timescale;
+  const dtSim = dtReal * Settings.timescale;
   world.particles.update(dtSim);
   const aim = intent.aim ?? { x: world.player.x, y: world.player.y };
   cam.follow(world.player.x, world.player.y - 6, aim.x, aim.y, world.room, dtSim);

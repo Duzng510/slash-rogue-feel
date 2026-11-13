@@ -1,4 +1,4 @@
-import { CONFIG } from "./config.ts";
+import { CONFIG, Settings } from "./config.ts";
 
 export type FrameFn = (dtReal: number) => void;
 
@@ -25,7 +25,7 @@ export class GameLoop {
   /** advance by real seconds; returns how many sim ticks ran */
   advance(dtReal: number): number {
     const step = CONFIG.TIME.TICK;
-    this.acc += dtReal * CONFIG.SLIDERS.timescale;
+    this.acc += dtReal * Settings.timescale;
     let n = 0;
     while (this.acc >= step && n < this.maxSubSteps) {
       this.sim();
