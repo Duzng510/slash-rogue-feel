@@ -2,7 +2,7 @@ import type { Atlas, AtlasRect } from "./sprites.ts";
 
 // Raw WebGL2 instanced sprite batch. One interleaved per-instance buffer; two draw
 // ranges (alpha list, additive list) flushed in separate draw calls so blending can
-// differ. All coordinates are in the 320x180 internal space the OGL scene RT uses.
+// differ. Coordinates are in the logical viewport (internal dimensions / pixel scale).
 
 const FLOATS = 14;
 const STRIDE = FLOATS * 4;

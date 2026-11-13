@@ -8,7 +8,7 @@ import type { Sprite, SpriteSet } from "../pixelart.ts";
 // (canvas sizing / WebGL2 acquisition); every shader is raw GLSL ES 3.00 and every draw
 // is issued directly, so state stays fully under our control.
 //
-// The scene arrives as a 320x180 texture (today a fully-composited 2D canvas uploaded via
+// The scene arrives at CONFIG.WORLD.INTERNAL_W × CONFIG.WORLD.INTERNAL_H pixels (today a fully-composited 2D canvas uploaded via
 // presentScene; later the batched atlas world-draw renders straight into the scene FBO).
 // The post chain runs on top of it: threshold -> separable gaussian bloom -> CRT barrel
 // warp + scanlines + chromatic aberration + heat-haze/ripple displacement + dithered
@@ -22,6 +22,10 @@ export type PresentParams = {
   crt: number;
   ripple: number;
   time: number;
+  lights: Float32Array;
+  cols: Float32Array;
+  lightCount: number;
+  ambient: number;
 };
 
 const FULLSCREEN_VS = `#version 300 es
@@ -39,11 +43,12 @@ const BRIGHT_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uScene;
+uniform sampler2D uLight;
 uniform float uThreshold;
 uniform float uKnee;
 out vec4 fragColor;
 void main() {
-  vec3 c = texture(uScene, vUv).rgb;
+  vec3 c = texture(uScene, vUv).rgb * texture(uLight, vUv).rgb;
   float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
   float emit = smoothstep(uThreshold, uThreshold + uKnee, lum);
   fragColor = vec4(c * emit, 1.0);
@@ -66,12 +71,35 @@ void main() {
   fragColor = vec4(sum, 1.0);
 }`;
 
+// light map: ambient floor + sum of radial emitters (xy=pos px, z=radius, w=intensity), internal res
+const LIGHT_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform vec2 uRes;
+uniform int uCount;
+uniform float uAmbient;
+uniform vec4 uLights[32];
+uniform vec3 uCols[32];
+out vec4 fragColor;
+void main() {
+  vec2 p = vUv * uRes;
+  vec3 light = vec3(uAmbient);
+  for (int i = 0; i < 32; i++) {
+    if (i >= uCount) break;
+    vec4 L = uLights[i];
+    float f = clamp(1.0 - distance(p, L.xy) / L.z, 0.0, 1.0);
+    light += uCols[i] * (L.w * f * f);
+  }
+  fragColor = vec4(light, 1.0);
+}`;
+
 const POST_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uScene;  // clean scene (tiles + entities + baked lighting), NEAREST
 uniform sampler2D uBloom;  // blurred emit mask, half res, LINEAR
 uniform sampler2D uFx;     // additive overlay (transparent-black when unused)
+uniform sampler2D uLight;  // light map, internal res, NEAREST
 uniform vec2 uRes;         // internal size in px
 uniform float uTime;
 uniform float uBloomAmt;
@@ -132,6 +160,7 @@ void main() {
   color.r = texture(uScene, uv + dir * ab).r;
   color.g = texture(uScene, uv).g;
   color.b = texture(uScene, uv - dir * ab).b;
+  color *= texture(uLight, uv).rgb;              // darkness falls on the scene, not on emissive glow
 
   color += texture(uBloom, uv).rgb * uBloomAmt;   // additive glow
   color += texture(uFx, uv).rgb;                   // additive FX overlay
@@ -177,6 +206,8 @@ export class GLPipeline {
   private readonly sceneRT: RT;
   private readonly bloomA: RT;
   private readonly bloomB: RT;
+  private readonly lightRT: RT;
+  private readonly light: WebGLProgram;
   private readonly bright: WebGLProgram;
   private readonly blur: WebGLProgram;
   private readonly post: WebGLProgram;
@@ -201,7 +232,9 @@ export class GLPipeline {
     const bh = Math.max(1, Math.floor(ih / 2));
     this.bloomA = this.makeRT(bw, bh, gl.LINEAR);
     this.bloomB = this.makeRT(bw, bh, gl.LINEAR);
+    this.lightRT = this.makeRT(iw, ih, gl.NEAREST);
 
+    this.light = makeProgram(gl, FULLSCREEN_VS, LIGHT_FS);
     this.bright = makeProgram(gl, FULLSCREEN_VS, BRIGHT_FS);
     this.blur = makeProgram(gl, FULLSCREEN_VS, BLUR_FS);
     this.post = makeProgram(gl, FULLSCREEN_VS, POST_FS);
@@ -296,11 +329,23 @@ export class GLPipeline {
     const C = CONFIG.CRT;
     const H = CONFIG.HAZE;
 
-    // bright/emit pass: scene -> bloomA (half res)
+    // light map pass: ambient + emitters, before bloom so dark regions cannot emit
+    this.beginPass(this.lightRT, this.light);
+    gl.uniform2f(gl.getUniformLocation(this.light, "uRes"), this.iw, this.ih);
+    gl.uniform1i(gl.getUniformLocation(this.light, "uCount"), params.lightCount);
+    gl.uniform1f(gl.getUniformLocation(this.light, "uAmbient"), params.ambient);
+    gl.uniform4fv(gl.getUniformLocation(this.light, "uLights"), params.lights);
+    gl.uniform3fv(gl.getUniformLocation(this.light, "uCols"), params.cols);
+    this.endPass();
+
+    // bright/emit pass: lit scene -> bloomA (half res)
     this.beginPass(this.bloomA, this.bright);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
     gl.uniform1i(gl.getUniformLocation(this.bright, "uScene"), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.lightRT.tex);
+    gl.uniform1i(gl.getUniformLocation(this.bright, "uLight"), 1);
     gl.uniform1f(gl.getUniformLocation(this.bright, "uThreshold"), B.THRESHOLD);
     gl.uniform1f(gl.getUniformLocation(this.bright, "uKnee"), B.KNEE);
     this.endPass();
@@ -337,6 +382,9 @@ export class GLPipeline {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.fxTex);
     gl.uniform1i(gl.getUniformLocation(this.post, "uFx"), 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.lightRT.tex);
+    gl.uniform1i(gl.getUniformLocation(this.post, "uLight"), 3);
     gl.uniform2f(gl.getUniformLocation(this.post, "uRes"), this.iw, this.ih);
     gl.uniform1f(gl.getUniformLocation(this.post, "uTime"), params.time);
     gl.uniform1f(gl.getUniformLocation(this.post, "uBloomAmt"), params.bloom * B.INTENSITY);

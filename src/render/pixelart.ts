@@ -2,6 +2,7 @@ import { CONFIG, enemyDef } from "../config.ts";
 import { ARTIFACT_COLORS, ARTIFACTS } from "../systems/artifacts.ts";
 
 const P = CONFIG.PALETTE;
+const PIXEL_SCALE = CONFIG.WORLD.PIXEL_SCALE;
 
 export type Sprite = { c: HTMLCanvasElement; w: number; h: number; ax: number; ay: number };
 
@@ -10,10 +11,13 @@ export type SpriteSet = { frames: Sprite[]; mirrored: Sprite[]; tickDur: number 
 
 function bake(w: number, h: number, ax: number, ay: number, draw: (g: CanvasRenderingContext2D) => void): Sprite {
   const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
+  c.width = Math.round(w * PIXEL_SCALE);
+  c.height = Math.round(h * PIXEL_SCALE);
   const g = c.getContext("2d");
-  if (g !== null) draw(g);
+  if (g !== null) {
+    g.scale(PIXEL_SCALE, PIXEL_SCALE);
+    draw(g);
+  }
   return { c, w, h, ax, ay };
 }
 
@@ -687,12 +691,115 @@ function buildTileSprites(S: Record<string, Sprite>, T: number): void {
 }
 
 function buildParallaxSprites(S: Record<string, Sprite>): void {
-  // --- distant parallax backdrops, baked at 640×360 and scrolled at 0.4x camera speed ---
-  const bakeParallax = (id: string, paint: (g: CanvasRenderingContext2D) => void): void => {
-    S[`parallax_${id}`] = bake(640, 360, 0, 0, paint);
+  const bakeParallax = (
+    id: string,
+    layer: "far" | "mid" | "near",
+    paint: (g: CanvasRenderingContext2D) => void,
+    sourceScale = 1,
+  ): void => {
+    S[`parallax_${id}_${layer}`] = bake(320, 180, 0, 0, (g) => {
+      g.scale(sourceScale, sourceScale);
+      paint(g);
+    });
   };
-  bakeParallax("dungeon", (g) => {
-    rect(g, 0, 0, 640, 360, "#0b0e14");
+  const bakeForeground = (id: string, paint: (g: CanvasRenderingContext2D) => void): void => {
+    S[`foreground_${id}`] = bake(320, 180, 0, 0, paint);
+  };
+  const vine = (g: CanvasRenderingContext2D, x: number, y: number, length: number, color: string): void => {
+    for (let i = 0; i < length; i++) {
+      const vx = x + Math.floor(Math.sin(i * 0.65) * 2);
+      rect(g, vx, y + i * 2, 1, 3, color);
+      if (i % 3 === 1) rect(g, vx + (i % 2 === 0 ? 2 : -2), y + i * 2, 2, 1, color);
+    }
+  };
+  bakeParallax("dungeon", "far", (g) => {
+    rect(g, 0, 0, 320, 180, "#0b0e14");
+    g.globalAlpha = 0.34;
+    for (let i = 0; i < 6; i++) {
+      const x = 14 + i * 60;
+      const top = 60 + (i % 2) * 16;
+      rect(g, x, top, 24, 180 - top, "#111722");
+      rect(g, x - 5, top - 8, 34, 8, "#111722");
+    }
+    g.globalAlpha = 1;
+  });
+  bakeParallax("caverns", "far", (g) => {
+    rect(g, 0, 0, 320, 180, "#0a1016");
+    g.globalAlpha = 0.38;
+    for (let i = 0; i < 15; i++) {
+      const x = 8 + i * 23;
+      const h = 24 + (i * 17) % 35;
+      for (let y = 0; y < h; y += 3) {
+        const half = Math.max(1, 4 - Math.floor(y / h * 4));
+        rect(g, x - half, y, half * 2, 3, "#14202a");
+      }
+    }
+    g.globalAlpha = 1;
+  });
+  bakeParallax("forge", "far", (g) => {
+    rect(g, 0, 0, 320, 180, "#140a06");
+    for (let i = 0; i < 3; i++) {
+      const x = 42 + i * 112;
+      const glow = g.createRadialGradient(x, 100, 2, x, 100, 70);
+      glow.addColorStop(0, "rgba(255, 91, 34, 0.24)");
+      glow.addColorStop(1, "rgba(255, 91, 34, 0)");
+      g.fillStyle = glow;
+      g.fillRect(x - 70, 30, 140, 140);
+    }
+    g.globalAlpha = 0.42;
+    for (let i = 0; i < 4; i++) rect(g, i * 92 - 10, 48 + (i % 2) * 20, 42, 132, "#21120c");
+    g.globalAlpha = 1;
+  });
+  bakeParallax("void", "far", (g) => {
+    rect(g, 0, 0, 320, 180, "#0a0512");
+    for (let i = 0; i < 5; i++) {
+      const x = 28 + (i * 67) % 280;
+      const y = 22 + (i * 43) % 140;
+      const r = 28 + (i * 9) % 24;
+      const grad = g.createRadialGradient(x, y, 0, x, y, r);
+      grad.addColorStop(0, "rgba(120, 60, 190, 0.23)");
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      g.fillStyle = grad;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+  });
+  bakeParallax("dungeon", "near", (g) => {
+    g.globalAlpha = 0.62;
+    rect(g, 0, 112, 16, 68, "#111722");
+    rect(g, 0, 104, 24, 8, "#171e2a");
+    rect(g, 296, 126, 24, 54, "#111722");
+    rect(g, 290, 118, 30, 8, "#171e2a");
+    g.globalAlpha = 1;
+  });
+  bakeParallax("caverns", "near", (g) => {
+    g.globalAlpha = 0.58;
+    for (const x of [26, 132, 248]) {
+      const h = x === 132 ? 32 : 22;
+      for (let y = 0; y < h; y += 2) {
+        const half = Math.max(1, 7 - Math.floor(y / h * 7));
+        rect(g, x - half, y, half * 2, 2, "#101c25");
+      }
+    }
+    g.globalAlpha = 1;
+  });
+  bakeParallax("forge", "near", (g) => {
+    g.globalAlpha = 0.68;
+    rect(g, 0, 98, 18, 82, "#180d09");
+    rect(g, 0, 91, 25, 7, "#2a1710");
+    rect(g, 302, 112, 18, 68, "#180d09");
+    rect(g, 296, 105, 24, 7, "#2a1710");
+    g.globalAlpha = 1;
+  });
+  bakeParallax("void", "near", (g) => {
+    g.globalAlpha = 0.64;
+    for (const [x, y, h] of [[22, 124, 56], [282, 110, 70], [248, 146, 34]]) {
+      rect(g, x, y, 3, h, "#1a1025");
+      rect(g, x - 3, y + h - 8, 9, 8, "#241333");
+    }
+    g.globalAlpha = 1;
+  });
+
+  bakeParallax("dungeon", "mid", (g) => {
     // distant arches + pillars
     g.globalAlpha = 0.5;
     for (let i = 0; i < 7; i++) {
@@ -704,9 +811,8 @@ function buildParallaxSprites(S: Record<string, Sprite>): void {
     g.globalAlpha = 0.3;
     for (let i = 0; i < 5; i++) rect(g, 70 + i * 130, 64 + (i % 3) * 20, 8, 296, "#171c27");
     g.globalAlpha = 1;
-  });
-  bakeParallax("caverns", (g) => {
-    rect(g, 0, 0, 640, 360, "#0a1016");
+  }, 0.5);
+  bakeParallax("caverns", "mid", (g) => {
     // two rows of hanging stalactites
     for (let row = 0; row < 2; row++) {
       g.globalAlpha = row === 0 ? 0.55 : 0.3;
@@ -723,9 +829,8 @@ function buildParallaxSprites(S: Record<string, Sprite>): void {
     g.globalAlpha = 0.2;
     for (let i = 0; i < 6; i++) rect(g, 40 + i * 104, 250 + (i % 2) * 18, 52, 110, "#0e1822");
     g.globalAlpha = 1;
-  });
-  bakeParallax("forge", (g) => {
-    rect(g, 0, 0, 640, 360, "#140a06");
+  }, 0.5);
+  bakeParallax("forge", "mid", (g) => {
     // far furnace mouths glowing behind the haze
     for (let i = 0; i < 4; i++) {
       const x = 40 + i * 156;
@@ -743,21 +848,8 @@ function buildParallaxSprites(S: Record<string, Sprite>): void {
     g.globalAlpha = 0.4;
     for (let i = 0; i < 6; i++) rect(g, 20 + i * 104, 120 + (i % 2) * 14, 64, 6, "#1c0e08");
     g.globalAlpha = 1;
-  });
-  bakeParallax("void", (g) => {
-    rect(g, 0, 0, 640, 360, "#0a0512");
-    // nebula wisps
-    for (let i = 0; i < 6; i++) {
-      const x = 60 + ((i * 217) % 560);
-      const y = 60 + ((i * 131) % 240);
-      const r = 70 + ((i * 53) % 60);
-      const grad = g.createRadialGradient(x, y, 0, x, y, r);
-      grad.addColorStop(0, "rgba(120, 60, 190, 0.28)");
-      grad.addColorStop(0.6, "rgba(80, 40, 140, 0.12)");
-      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
-      g.fillStyle = grad;
-      g.fillRect(x - r, y - r, r * 2, r * 2);
-    }
+  }, 0.5);
+  bakeParallax("void", "mid", (g) => {
     // floating shard silhouettes
     g.globalAlpha = 0.5;
     for (let i = 0; i < 10; i++) {
@@ -766,6 +858,49 @@ function buildParallaxSprites(S: Record<string, Sprite>): void {
       const s = 4 + ((i * 13) % 10);
       rect(g, x, y, 1, s + 6, "#2a163d");
       rect(g, x - 1, y + s, 3, 4, "#221033");
+    }
+    g.globalAlpha = 1;
+  }, 0.5);
+
+  bakeForeground("dungeon", (g) => {
+    g.globalAlpha = 0.88;
+    rect(g, 198, 164, 74, 7, "#151b25");
+    rect(g, 204, 160, 62, 4, "#202735");
+    rect(g, 210, 162, 5, 2, "#394254");
+    rect(g, 250, 164, 3, 5, "#10151e");
+    vine(g, 18, 0, 12, "#18211f");
+    vine(g, 300, 4, 9, "#18211f");
+    g.globalAlpha = 1;
+  });
+  bakeForeground("caverns", (g) => {
+    g.globalAlpha = 0.86;
+    for (const x of [8, 48, 101, 178, 232, 284]) {
+      rect(g, x, 172, 14, 8, "#13241d");
+      for (let i = 0; i < 5; i++) {
+        const gx = x + i * 3;
+        const gh = 4 + (i * 3) % 7;
+        rect(g, gx, 172 - gh, 1, gh, i % 2 === 0 ? "#244232" : "#1d382b");
+      }
+    }
+    vine(g, 8, 0, 15, "#1b3029");
+    vine(g, 313, 0, 12, "#1b3029");
+    g.globalAlpha = 1;
+  });
+  bakeForeground("forge", (g) => {
+    g.globalAlpha = 0.9;
+    rect(g, 14, 148, 14, 32, "#180d09");
+    rect(g, 9, 143, 23, 6, "#2b1710");
+    rect(g, 278, 156, 18, 24, "#180d09");
+    rect(g, 273, 151, 28, 5, "#2b1710");
+    rect(g, 30, 174, 56, 6, "#25130d");
+    rect(g, 86, 176, 14, 4, "#3b1b10");
+    g.globalAlpha = 1;
+  });
+  bakeForeground("void", (g) => {
+    g.globalAlpha = 0.9;
+    for (const [x, y, w, h] of [[16, 154, 5, 26], [22, 165, 12, 15], [285, 148, 4, 32], [276, 162, 9, 18], [118, 173, 34, 7]]) {
+      rect(g, x, y, w, h, "#1b1027");
+      rect(g, x + Math.floor(w / 2), y - 3, 1, 4, "#34204a");
     }
     g.globalAlpha = 1;
   });
@@ -942,11 +1077,11 @@ export function facingOffsets(dir: number): { x: number; y: number } {
 /** mirror a sprite horizontally, keeping the feet anchor centred */
 export function flipH(src: Sprite): Sprite {
   const c = document.createElement("canvas");
-  c.width = src.w;
-  c.height = src.h;
+  c.width = src.c.width;
+  c.height = src.c.height;
   const g = c.getContext("2d");
   if (g !== null) {
-    g.translate(src.w, 0);
+    g.translate(src.c.width, 0);
     g.scale(-1, 1);
     g.drawImage(src.c, 0, 0);
   }
@@ -956,15 +1091,15 @@ export function flipH(src: Sprite): Sprite {
 /** re-bake a sprite with its bottom 3 rows (feet) shifted sideways: a leg shuffle */
 function footShift(base: Sprite, dx: number): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    g.drawImage(base.c, 0, 0, base.w, base.h - 3, 0, 0, base.w, base.h - 3);
-    g.drawImage(base.c, 0, base.h - 3, base.w, 3, dx, base.h - 3, base.w, 3);
+    g.drawImage(base.c, 0, 0, base.w * PIXEL_SCALE, (base.h - 3) * PIXEL_SCALE, 0, 0, base.w, base.h - 3);
+    g.drawImage(base.c, 0, (base.h - 3) * PIXEL_SCALE, base.w * PIXEL_SCALE, 3 * PIXEL_SCALE, dx, base.h - 3, base.w, 3);
   });
 }
 
 /** idle-breath: the whole body bobs down 1px, feet stay planted */
 function bobDown(base: Sprite): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    g.drawImage(base.c, 0, 1);
+    g.drawImage(base.c, 0, 1, base.w, base.h);
   });
 }
 
@@ -1016,21 +1151,21 @@ export function buildAnimSets(): Record<string, SpriteSet> {
 
 function copyOfSprite(base: Sprite): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    g.drawImage(base.c, 0, 0);
+    g.drawImage(base.c, 0, 0, base.w, base.h);
   });
 }
 
 /** body shifted sideways: a windup lean-back / lunge lean-in (feet stay at ay) */
 function shiftX(base: Sprite, dx: number): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    g.drawImage(base.c, dx, 0);
+    g.drawImage(base.c, dx, 0, base.w, base.h);
   });
 }
 
 /** re-bake the sprite as a solid white silhouette (hurt flash frame) */
 function whiteOf(base: Sprite): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    g.drawImage(base.c, 0, 0);
+    g.drawImage(base.c, 0, 0, base.w, base.h);
     g.globalCompositeOperation = "source-in";
     g.fillStyle = "#ffffff";
     g.fillRect(0, 0, base.w, base.h);
@@ -1047,13 +1182,13 @@ function pixelHash(x: number, y: number, seed: number): number {
 /** materialize frame: a fraction of the body's pixels are present, dithered */
 function materialize(base: Sprite, seed: number, keep: number): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    const img = g.getImageData(0, 0, base.w, base.h);
-    const src = bake(base.w, base.h, 0, 0, (gg) => gg.drawImage(base.c, 0, 0));
-    const data = src.c.getContext("2d")?.getImageData(0, 0, base.w, base.h).data;
+    const img = g.getImageData(0, 0, base.c.width, base.c.height);
+    const src = bake(base.w, base.h, 0, 0, (gg) => gg.drawImage(base.c, 0, 0, base.w, base.h));
+    const data = src.c.getContext("2d")?.getImageData(0, 0, base.c.width, base.c.height).data;
     if (!data) return;
-    for (let y = 0; y < base.h; y++) {
-      for (let x = 0; x < base.w; x++) {
-        const i = (y * base.w + x) * 4;
+    for (let y = 0; y < base.c.height; y++) {
+      for (let x = 0; x < base.c.width; x++) {
+        const i = (y * base.c.width + x) * 4;
         if (data[i + 3] === 0) continue;
         if (pixelHash(x, y, seed) > keep) continue;
         img.data[i] = data[i];
@@ -1069,18 +1204,19 @@ function materialize(base: Sprite, seed: number, keep: number): Sprite {
 /** crumble frame: pixels scatter outward from the body centre and fade */
 function scatter(base: Sprite, seed: number, amount: number, alpha: number): Sprite {
   return bake(base.w, base.h, base.ax, base.ay, (g) => {
-    const src = bake(base.w, base.h, 0, 0, (gg) => gg.drawImage(base.c, 0, 0));
-    const data = src.c.getContext("2d")?.getImageData(0, 0, base.w, base.h).data;
+    const src = bake(base.w, base.h, 0, 0, (gg) => gg.drawImage(base.c, 0, 0, base.w, base.h));
+    const data = src.c.getContext("2d")?.getImageData(0, 0, base.c.width, base.c.height).data;
     if (!data) return;
-    const cx = base.w / 2;
-    for (let y = 0; y < base.h; y++) {
-      for (let x = 0; x < base.w; x++) {
-        const i = (y * base.w + x) * 4;
+    const cx = base.c.width / 2;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    for (let y = 0; y < base.c.height; y++) {
+      for (let x = 0; x < base.c.width; x++) {
+        const i = (y * base.c.width + x) * 4;
         if (data[i + 3] === 0) continue;
         const h1 = pixelHash(x, y, seed);
         const h2 = pixelHash(x, y, seed + 13);
-        const dx = Math.round((h1 - 0.5) * 8 * amount + Math.sign(x + 0.5 - cx) * amount * 1.5);
-        const dy = Math.round((h2 - 0.5) * 4 * amount - amount);
+        const dx = Math.round(((h1 - 0.5) * 8 * amount + Math.sign(x + 0.5 - cx) * amount * 1.5) * PIXEL_SCALE);
+        const dy = Math.round(((h2 - 0.5) * 4 * amount - amount) * PIXEL_SCALE);
         g.globalAlpha = alpha * (0.4 + 0.6 * pixelHash(x, y, seed + 7));
         g.fillStyle = `rgb(${data[i]},${data[i + 1]},${data[i + 2]})`;
         g.fillRect(x + dx, y + dy, 1, 1);

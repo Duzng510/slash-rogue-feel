@@ -17,6 +17,9 @@ import { GLPipeline } from "./gl/pipeline.ts";
 import { FxLayer, wedge } from "./fxLayer.ts";
 
 const P = CONFIG.PALETTE;
+const PIXEL_SCALE = CONFIG.WORLD.PIXEL_SCALE;
+const VIEW_W = CONFIG.WORLD.INTERNAL_W / PIXEL_SCALE;
+const VIEW_H = CONFIG.WORLD.INTERNAL_H / PIXEL_SCALE;
 
 type VerletPoint = { x: number; y: number; px: number; py: number };
 const WEAPON_GRIPS: Record<WeaponId, { x: number; y: number; scale: number }> = {
@@ -73,7 +76,7 @@ export class Renderer {
   private bossCineY = 0;
   /** kill-cam punch: zoom + desaturate while > 0, red full-screen flash on the first frame */
   private impactTicks = 0;
-  /** drifting fog: baked at 160×90 then upscaled 2x pixelated */
+  /** drifting fog: baked at half logical viewport resolution, then upscaled pixelated */
   private fogPhase = 0;
   private fogCanvas: HTMLCanvasElement;
   private fogG: CanvasRenderingContext2D;
@@ -142,6 +145,7 @@ export class Renderer {
       this.sceneCanvas.height = ih;
     }
     this.g = ctx2d(this.glMode ? (this.sceneCanvas as HTMLCanvasElement) : game);
+    this.g.scale(PIXEL_SCALE, PIXEL_SCALE);
     this.o = ctx2d(overlay);
     this.g.imageSmoothingEnabled = false;
     this.o.imageSmoothingEnabled = false;
@@ -150,6 +154,7 @@ export class Renderer {
       canvas.width = iw;
       canvas.height = ih;
       const context = ctx2d(canvas);
+      context.scale(PIXEL_SCALE, PIXEL_SCALE);
       context.imageSmoothingEnabled = false;
 
       const half = document.createElement("canvas");
@@ -182,8 +187,8 @@ export class Renderer {
     const weatherCount = CONFIG.RENDER.WEATHER_COUNT;
     for (let i = 0; i < weatherCount; i++) {
       this.weather.push({
-        x: Math.random() * iw,
-        y: Math.random() * ih,
+        x: Math.random() * VIEW_W,
+        y: Math.random() * VIEW_H,
         v: 0.4 + Math.random() * 0.8,
         phase: Math.random() * Math.PI * 2,
       });
@@ -240,14 +245,12 @@ export class Renderer {
   }
 
   resize(): void {
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
     const axes = fitAxes(window.innerWidth, window.innerHeight, isRotated());
-    const fit = Math.min(axes.w / iw, axes.h / ih);
+    const fit = Math.min(axes.w / VIEW_W, axes.h / VIEW_H);
     const floor = Math.floor(fit);
     this.scale = Math.max(CONFIG.WORLD.MIN_SCALE, Number.isFinite(floor) && floor > 0 ? floor : CONFIG.WORLD.MIN_SCALE);
-    const w = iw * this.scale;
-    const h = ih * this.scale;
+    const w = VIEW_W * this.scale;
+    const h = VIEW_H * this.scale;
     for (const c of [this.game, this.overlay]) {
       c.style.width = `${w}px`;
       c.style.height = `${h}px`;
@@ -261,8 +264,8 @@ export class Renderer {
   aimFromClient(clientX: number, clientY: number): { x: number; y: number } | null {
     const r = this.game.getBoundingClientRect();
     if (r.width <= 0) return null;
-    const sx = ((clientX - r.left) / r.width) * CONFIG.WORLD.INTERNAL_W;
-    const sy = ((clientY - r.top) / r.height) * CONFIG.WORLD.INTERNAL_H;
+    const sx = ((clientX - r.left) / r.width) * VIEW_W;
+    const sy = ((clientY - r.top) / r.height) * VIEW_H;
     return { x: sx + this.origin.x, y: sy + this.origin.y };
   }
 
@@ -328,12 +331,12 @@ export class Renderer {
     const oy = this.origin.y;
 
     g.fillStyle = this.world.currentBiome.palette.outside;
-    g.fillRect(0, 0, CONFIG.WORLD.INTERNAL_W, CONFIG.WORLD.INTERNAL_H);
+    g.fillRect(0, 0, VIEW_W, VIEW_H);
     this.drawParallax(g);
 
     // Apply the kill-cam to the complete canvas scene before GL post-processing.
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     const impactFlash = this.impactTicks === CONFIG.FEEL.IMPACT_TICKS;
     g.save();
     if (this.impactTicks > 0) {
@@ -361,6 +364,7 @@ export class Renderer {
     this.drawTelegraphs(g, ox, oy);
     this.drawShadows(g, ox, oy);
     this.drawSortedWorld(g, ox, oy);
+    this.drawForeground(g, ox, oy);
 
     // --- Glow Bloom Pass (canvas 2D only; in GL mode the bloom post chain replaces it) ---
     if (this.glow !== null) {
@@ -418,9 +422,12 @@ export class Renderer {
 
     this.drawTransition(g);
     this.drawVignette(g, flags, false); // D7: Cho phép render viền đỏ hurt vignette và boss intro flash cả ở GL
-    this.applyBiomeDistortion(g, iw, ih);
+    this.applyBiomeDistortion(g);
 
     if (this.gl && this.sceneCanvas) {
+      const { lights, cols, count } = this.gatherLights(ox, oy);
+      const lit = CONFIG.SLIDERS.lighting;
+      const base = CONFIG.LIGHTING.AMBIENT[w.currentBiome.id] ?? CONFIG.LIGHTING.AMBIENT_DEFAULT;
       const params = {
         hurt: this.vignette,
         vignette: 0,
@@ -429,6 +436,10 @@ export class Renderer {
         crt: CONFIG.SLIDERS.crt,
         ripple: CONFIG.SLIDERS.ripple,
         time: this.visualTime,
+        lights,
+        cols,
+        lightCount: count,
+        ambient: 1 + (base - 1) * lit,
       };
       this.gl.presentScene(this.sceneCanvas, params);
     }
@@ -454,23 +465,27 @@ export class Renderer {
     g.restore();
   }
 
-  private applyBiomeDistortion(g: CanvasRenderingContext2D, iw: number, ih: number): void {
+  private applyBiomeDistortion(g: CanvasRenderingContext2D): void {
     const biome = this.world.currentBiome.id;
     if (biome === "dungeon" || biome === "town") return;
+    const iw = this.g.canvas.width;
+    const ih = this.g.canvas.height;
     this.frameG.clearRect(0, 0, iw, ih);
     // Snapshot the scene we just drew into `g`'s canvas. In GL mode `g` is the offscreen
     // sceneCanvas and `this.game` is the composited GL output — reading this.game here would
     // feed the post-processed frame back as the scene, discarding the world and compounding
     // bloom each frame (black ghost on software GL, blown-out white on real GPUs).
     this.frameG.drawImage(this.g.canvas, 0, 0);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, iw, ih);
 
     if (biome === "forge") {
       g.fillStyle = this.world.currentBiome.palette.outside;
       g.fillRect(0, 0, iw, ih);
-      for (let y = 0; y < ih; y += 2) {
-        const h = Math.min(2, ih - y);
-        const offset = Math.round(Math.sin(y * 0.3 + this.visualTime * 2.2) * 1.5);
+      for (let y = 0; y < ih; y += Math.round(2 * PIXEL_SCALE)) {
+        const h = Math.min(Math.round(2 * PIXEL_SCALE), ih - y);
+        const offset = Math.round(Math.sin((y / PIXEL_SCALE) * 0.3 + this.visualTime * 2.2) * 1.5 * PIXEL_SCALE);
         if (offset > 0) {
           g.drawImage(this.frameCanvas, 0, y, iw - offset, h, offset, y, iw - offset, h);
           g.drawImage(this.frameCanvas, 0, y, 1, h, 0, y, offset, h);
@@ -480,12 +495,13 @@ export class Renderer {
           g.drawImage(this.frameCanvas, iw - 1, y, 1, h, iw - shift, y, shift, h);
         } else g.drawImage(this.frameCanvas, 0, y, iw, h, 0, y, iw, h);
       }
+      g.restore();
       return;
     }
 
     g.drawImage(this.frameCanvas, 0, 0);
     if (biome === "caverns") {
-      const edge = 4;
+      const edge = Math.round(4 * PIXEL_SCALE);
       g.save();
       g.globalAlpha = 0.3;
       for (const [x, y, dx, dy, w, h] of [
@@ -501,6 +517,7 @@ export class Renderer {
         g.drawImage(this.frameCanvas, dx, dy);
         g.restore();
       }
+      g.restore();
       g.restore();
       return;
     }
@@ -520,8 +537,9 @@ export class Renderer {
     g.save();
     g.globalCompositeOperation = "lighter";
     g.globalAlpha = 0.2;
-    g.drawImage(this.redCanvas, -1, 0);
-    g.drawImage(this.blueCanvas, 1, 0);
+    g.drawImage(this.redCanvas, -PIXEL_SCALE, 0);
+    g.drawImage(this.blueCanvas, PIXEL_SCALE, 0);
+    g.restore();
     g.restore();
   }
 
@@ -530,8 +548,8 @@ export class Renderer {
     if (this.transTicks <= 0) return;
     const total = CONFIG.FEEL.ROOM_TRANSITION_TICKS;
     const p = 1 - this.transTicks / total;
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     const cx = Math.round(Math.max(10, Math.min(iw - 10, this.transX - this.origin.x)));
     const cy = Math.round(Math.max(10, Math.min(ih - 10, this.transY - this.origin.y)));
     // close over the first half, open through the second
@@ -553,7 +571,7 @@ export class Renderer {
     for (const d of decals) {
       const x = Math.round(d.x - ox);
       const y = Math.round(d.y - oy);
-      if (x < -8 || y < -8 || x > CONFIG.WORLD.INTERNAL_W + 8 || y > CONFIG.WORLD.INTERNAL_H + 8) continue;
+      if (x < -8 || y < -8 || x > VIEW_W + 8 || y > VIEW_H + 8) continue;
       // floor stains only — walls and crates stay clean
       const tile = room.at(Math.floor(d.x / T), Math.floor(d.y / T));
       if (tile !== TILE.FLOOR && tile !== TILE.ACCENT) continue;
@@ -608,20 +626,40 @@ export class Renderer {
     }
   }
 
-  /** distant biome backdrop, scrolled at 0.4x camera speed; drawn behind everything */
+  /** Three transparent depth planes, each with a distinct camera parallax rate. */
   private drawParallax(g: CanvasRenderingContext2D): void {
-    const bg = this.sprites[`parallax_${this.world.currentBiome.id}`];
-    if (bg === undefined) return;
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
-    const px = Math.round(-this.origin.x * 0.4) % iw;
-    const py = Math.round(-this.origin.y * 0.4) % ih;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
+    const biome = this.world.currentBiome.id;
+    for (const [layer, speed] of [["far", 0.15], ["mid", 0.4], ["near", 0.7]] as const) {
+      const bg = this.sprites[`parallax_${biome}_${layer}`];
+      if (bg === undefined) continue;
+      const px = Math.round(-this.origin.x * speed) % iw;
+      const py = Math.round(-this.origin.y * speed) % ih;
+      g.save();
+      g.imageSmoothingEnabled = true;
+      if (layer === "far") g.filter = "blur(0.5px)";
+      for (let kx = -1; kx <= 1; kx++) {
+        for (let ky = -1; ky <= 1; ky++) {
+          g.drawImage(bg.c, px + kx * iw, py + ky * ih, iw, ih);
+        }
+      }
+      g.restore();
+    }
+  }
+
+  /** sparse edge details pass in front of y-sorted actors */
+  private drawForeground(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    const fg = this.sprites[`foreground_${this.world.currentBiome.id}`];
+    if (fg === undefined) return;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
+    const px = Math.round(-ox) % iw;
+    const py = Math.round(-oy) % ih;
     g.save();
-    // the distant layer is the one place a touch of smoothing reads as "far away"
-    g.imageSmoothingEnabled = true;
     for (let kx = -1; kx <= 1; kx++) {
       for (let ky = -1; ky <= 1; ky++) {
-        g.drawImage(bg.c, px + kx * iw, py + ky * ih, iw, ih);
+        g.drawImage(fg.c, px + kx * iw, py + ky * ih, iw, ih);
       }
     }
     g.restore();
@@ -632,8 +670,8 @@ export class Renderer {
     const torches = this.world.room.torches;
     if (torches.length === 0) return;
     const now = this.visualTime * 1000;
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     g.globalCompositeOperation = "lighter";
     for (const t of torches) {
       const x = Math.round(t.x - ox) - 2;
@@ -648,20 +686,20 @@ export class Renderer {
         g.fillStyle = "#ff963f";
         g.fillRect(x - 2, y - 2, 9 * pulse, 10 * pulse);
       } else {
-        g.drawImage(frame.c, x, y);
+        g.drawImage(frame.c, x, y, frame.w, frame.h);
       }
     }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
   }
 
-  /** biome fog: blobs baked at 160×90, upscaled pixelated, composited with screen */
+  /** biome fog: blobs baked at half logical viewport resolution and composited with the scene */
   private drawFog(g: CanvasRenderingContext2D, dtReal: number): void {
     const biome = this.world.currentBiome;
     if (biome.id === "dungeon" || biome.id === "town") return;
     this.fogPhase += dtReal * 0.15;
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     const fw = 160;
     const fh = 90;
     const fg = this.fogG;
@@ -688,8 +726,8 @@ export class Renderer {
     const biome = this.world.currentBiome;
     if (biome.id === "dungeon" || biome.id === "town") return;
     const time = this.visualTime;
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     const drift = time * 14;
     for (let i = 0; i < this.weather.length; i++) {
       const p = this.weather[i];
@@ -728,15 +766,44 @@ export class Renderer {
     g.globalAlpha = 1;
   }
 
+  /** radial emitters for the GL light map: torches, player, fire projectiles, burning enemies */
+  private gatherLights(ox: number, oy: number): { lights: Float32Array; cols: Float32Array; count: number } {
+    const L = CONFIG.LIGHTING;
+    const lit = CONFIG.SLIDERS.lighting;
+    const lights = new Float32Array(L.MAX * 4);
+    const cols = new Float32Array(L.MAX * 3);
+    let n = 0;
+    const add = (x: number, y: number, r: number, i: number, c: number[]): void => {
+      if (n >= L.MAX) return;
+      lights.set([x - ox, y - oy, r, i * lit], n * 4);
+      cols.set(c, n * 3);
+      n++;
+    };
+    const now = this.visualTime * 1000;
+    for (const t of this.world.room.torches) {
+      const pulse = 1 + CONFIG.RENDER.TORCH_PULSE * Math.sin(now * CONFIG.RENDER.TORCH_FLICKER + t.phase);
+      add(t.x, t.y - 4, L.TORCH.r, L.TORCH.intensity * pulse, L.TORCH.color);
+    }
+    const pl = this.world.player;
+    add(pl.x, pl.y - 6, L.PLAYER.r, L.PLAYER.intensity, L.PLAYER.color);
+    for (const p of this.world.projectiles) {
+      if (p.kind === "fireball" || p.kind === "lava") add(p.x, p.y, L.FIRE.r, L.FIRE.intensity, L.FIRE.color);
+    }
+    for (const en of this.world.enemies) {
+      if (!en.removed && en.burnTicks > 0) add(en.x, en.y - 6, L.BURN.r, L.BURN.intensity, L.BURN.color);
+    }
+    return { lights, cols, count: n };
+  }
+
   private drawAmbient(g: CanvasRenderingContext2D, ox: number, oy: number): void {
     const pl = this.world.player;
     const px = Math.round(pl.x - ox);
     const py = Math.round(pl.y - 7 - oy);
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     const biome = this.world.currentBiome;
 
-    if (biome.id !== "dungeon") {
+    if (biome.id !== "dungeon" && this.gl === null) {
       const atmosphere = g.createRadialGradient(px, py, 10, px, py, 150);
       atmosphere.addColorStop(0, "rgba(0, 0, 0, 0)");
       atmosphere.addColorStop(0.62, biome.palette.ambient);
@@ -784,13 +851,13 @@ export class Renderer {
     const room = this.world.room;
     const x0 = Math.max(0, Math.floor(ox / T));
     const y0 = Math.max(0, Math.floor(oy / T));
-    const x1 = Math.min(room.w - 1, Math.ceil((ox + CONFIG.WORLD.INTERNAL_W) / T));
-    const y1 = Math.min(room.h - 1, Math.ceil((oy + CONFIG.WORLD.INTERNAL_H) / T));
+    const x1 = Math.min(room.w - 1, Math.ceil((ox + VIEW_W) / T));
+    const y1 = Math.min(room.h - 1, Math.ceil((oy + VIEW_H) / T));
     const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
-        g.drawImage(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy));
+        g.drawImage(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy), s.w, s.h);
       }
     }
 
@@ -805,7 +872,7 @@ export class Renderer {
           if (t !== TILE.WALL && t !== TILE.DOOR) continue;
           const below = room.at(tx, ty + 1);
           if (below === TILE.WALL || below === TILE.CRATE) continue;
-          g.drawImage(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - FACE_H - oy));
+          g.drawImage(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - FACE_H - oy), face.w, face.h);
         }
       }
 
@@ -1081,6 +1148,33 @@ export class Renderer {
         if (!s.live) return;
         items.push({ y: s.y, draw: () => this.drawOneParticle(g, s, ox, oy, density) });
       });
+    }
+    // standing walls/doors occlude entities north of them; face rides along so the redraw doesn't erase it
+    const T = CONFIG.WORLD.TILE;
+    const room = this.world.room;
+    const x0 = Math.max(0, Math.floor(ox / T));
+    const y0 = Math.max(0, Math.floor(oy / T));
+    const x1 = Math.min(room.w - 1, Math.ceil((ox + VIEW_W) / T));
+    const y1 = Math.min(room.h - 1, Math.ceil((oy + VIEW_H) / T));
+    const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
+    const face = this.sprites[`wallface_${this.world.currentBiome.id}`];
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        const t = room.at(tx, ty);
+        if (t !== TILE.WALL && t !== TILE.DOOR) continue;
+        const below = room.at(tx, ty + 1);
+        if (below === TILE.WALL || below === TILE.CRATE) continue;
+        const sp = biomeTiles[t] ?? this.tileOf[t];
+        const x = Math.round(tx * T - ox);
+        const y = Math.round(ty * T - oy);
+        items.push({
+          y: (ty + 1) * T - 1,
+          draw: () => {
+            g.drawImage(sp.c, x, y, sp.w, sp.h);
+            if (face !== undefined) g.drawImage(face.c, x, y + T - face.h, face.w, face.h);
+          },
+        });
+      }
     }
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.draw();
@@ -1435,7 +1529,7 @@ export class Renderer {
         g.save();
         g.translate(cx + p.dx, cy + p.dy);
         g.rotate(p.r);
-        g.drawImage(sp.c, -sp.ax, -sp.ay);
+        g.drawImage(sp.c, -sp.ax, -sp.ay, sp.w, sp.h);
         g.restore();
       }
       g.restore();
@@ -1499,7 +1593,7 @@ export class Renderer {
       g.translate(transform.x, transform.y);
       g.rotate(transform.rotation);
       g.scale(transform.scaleX, transform.scaleY);
-      g.drawImage(flashing ? this.white[key] ?? sprite.c : sprite.c, -sprite.ax, -sprite.ay);
+      g.drawImage(flashing ? this.white[key] ?? sprite.c : sprite.c, -sprite.ax, -sprite.ay, sprite.w, sprite.h);
       g.restore();
     };
 
@@ -1514,7 +1608,7 @@ export class Renderer {
         g.save();
         g.translate(pose.leftArm.x, pose.leftArm.y + 2);
         g.rotate(pose.leftArm.rotation * 0.35);
-        g.drawImage(flashing ? this.white.playerpart_tank_shield ?? shield.c : shield.c, -shield.ax, -shield.ay);
+        g.drawImage(flashing ? this.white.playerpart_tank_shield ?? shield.c : shield.c, -shield.ax, -shield.ay, shield.w, shield.h);
         g.restore();
       }
     }
@@ -1627,7 +1721,7 @@ export class Renderer {
       const sp = this.sprites[s.sprite];
       if (sp === undefined) return;
       g.globalAlpha = alpha * 0.35;
-      g.drawImage(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy));
+      g.drawImage(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy), sp.w, sp.h);
       return;
     }
     g.globalAlpha = alpha;
@@ -1638,8 +1732,8 @@ export class Renderer {
   }
 
   private drawVignette(g: CanvasRenderingContext2D, flags: DrawFlags, glOwnsHurt = false): void {
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
+    const iw = VIEW_W;
+    const ih = VIEW_H;
     if (!glOwnsHurt && this.vignette > 0.001) {
       g.globalAlpha = Math.min(0.75, this.vignette * 1.4);
       g.fillStyle = P.VIGNETTE_HURT;

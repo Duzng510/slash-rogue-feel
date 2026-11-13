@@ -52,7 +52,7 @@ export class Hud {
     o.font = "bold 8px sans-serif";
     const padX = 4;
     const tw = o.measureText(this.toastText).width;
-    const right = CONFIG.WORLD.INTERNAL_W - 6;
+    const right = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE - 6;
     const top = 6;
     o.fillStyle = "rgba(8, 9, 13, 0.9)";
     o.fillRect(right - tw - padX * 2, top, tw + padX * 2, 15);
@@ -278,7 +278,7 @@ export class Hud {
         const bob = Math.round(Math.sin(now * 0.004 + i * 2) * 1.5);
         const sprX = Math.round(midX - sp.ax);
         const sprY = Math.round(pedY + 4 - sp.ay + bob);
-        o.drawImage(sp.c, sprX, sprY);
+        o.drawImage(sp.c, sprX, sprY, sp.w, sp.h);
       }
 
       // --- Stat Bars (HP, DMG, SPD) ---
@@ -777,14 +777,14 @@ export class Hud {
     for (const e of w.enemies) if (e.def.HP_BAR && !e.dead) boss = e;
     if (boss !== null) {
       const bw = 68;
-      const x = Math.round((o.canvas.width / scale - bw) / 2);
+      const x = Math.round((o.canvas.width / scale - bw) / 2 * scale);
       const fill = Math.round((bw * boss.hp) / boss.maxHp);
       o.fillStyle = P.VOID;
-      o.fillRect(x - 1, 5, bw + 2, 6);
+      o.fillRect(x - scale, 5 * scale, (bw + 2) * scale, 6 * scale);
       o.fillStyle = P.HP_EMPTY;
-      o.fillRect(x, 6, bw, 4);
+      o.fillRect(x, 6 * scale, bw * scale, 4 * scale);
       o.fillStyle = boss.enraged ? P.ENEMY_CHARGER : P.ENEMY_BOSS;
-      o.fillRect(x, 6, fill, 4);
+      o.fillRect(x, 6 * scale, fill * scale, 4 * scale);
     }
 
   if (w.bannerTicks > 0 && w.bannerText.length > 0) {

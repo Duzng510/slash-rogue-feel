@@ -122,7 +122,7 @@ export class WeaponSelect {
       // Weapon Icon Sprite
       const sp = this.sprites[w.sprite];
       if (sp) {
-        o.drawImage(sp.c, rx + 24, ry + 5);
+        o.drawImage(sp.c, rx + 24, ry + 5, sp.w, sp.h);
       }
 
       // Weapon Name

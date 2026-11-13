@@ -59,11 +59,14 @@ await send("Page.enable");
 await send("Page.navigate", { url: URL });
 for (let i = 0; i < 60; i++) { if (await evalJs("!!(window.__game && window.__game.ready)")) break; await sleep(100); }
 
-await evalJs(`window.__game.pickCharacter("swordsman")`);
+await evalJs(`window.__game.pickCharacter("swordsman"); window.__game.chooseWeapon("katana")`);
 await evalJs(`(() => { const g = window.__game; g.gotoRoom(0); g.addEnemies(5, ["chaser"]); return g.state().enemies.length; })()`);
 await evalJs("window.__game.advance(1/60)");
 await sleep(200);
 await shot("shot-gl-stand.png");
+await evalJs(`(() => { const g = window.__game; g.gotoRoom(1); g.addEnemies(3, ["chaser"]); for (let i = 0; i < 30; i++) g.advance(1/60); return g.state().enemies.length; })()`);
+await sleep(200);
+await shot("shot-gl-dungeon.png");
 
 // drive the swordsman into range and catch an active melee swing + hit-stop
 const caught = await evalJs(`(() => {

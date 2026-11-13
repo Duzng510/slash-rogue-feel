@@ -5,11 +5,19 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.43.0";
+export const APP_VERSION = "v0.44.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.44.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Độ phân giải:</b> nâng render nội bộ lên 480×270 với pixel scale 1.5×, giữ nguyên khung nhìn logic và TILE 16.",
+      "<b>Camera, UI và sprite atlas:</b> đồng bộ tọa độ, hit-test và đóng gói sprite độ phân giải cao để giữ nguyên bố cục ở cả 2D lẫn WebGL.",
+    ],
+  },
   {
     version: "v0.43.0",
     date: "2026-11-13",
@@ -319,7 +327,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: "v0.0.0",
     date: "2026-11-10",
     items: [
-      "<b>Nền tảng:</b> vòng lặp fixed-timestep 60Hz, canvas pixel 320×180, combat chém + auto-aim.",
+      "<b>Nền tảng:</b> vòng lặp fixed-timestep 60Hz, viewport logic 320×180 render ở 480×270, combat chém + auto-aim.",
       "<b>Khung game:</b> archetype quái, boss arena, chế độ landscape cho mobile.",
     ],
   },

@@ -77,8 +77,8 @@ export class Camera {
 
   /** integer pixels: fractional shake offsets would resample the pixel art and smear it */
   origin(room: Room): { x: number; y: number } {
-    const w = CONFIG.WORLD.INTERNAL_W;
-    const h = CONFIG.WORLD.INTERNAL_H;
+    const w = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE;
+    const h = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE;
     const raw = room.clampCamera(this.x, this.y);
     return {
       x: Math.round(raw.x - w / 2) + this.sx,

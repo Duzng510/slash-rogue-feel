@@ -179,8 +179,10 @@ function modalFromClient(x: number, y: number): string | null {
   if (r.width <= 0 || r.height <= 0) return null;
   const u = (x - r.left) / r.width;
   const v = (y - r.top) / r.height;
-  const cx = isRotated() ? v * 320 : u * 320;
-  const cy = isRotated() ? (1 - u) * 180 : v * 180;
+  const logicalW = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE;
+  const logicalH = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE;
+  const cx = isRotated() ? v * logicalW : u * logicalW;
+  const cy = isRotated() ? (1 - u) * logicalH : v * logicalH;
   if (world.weaponChoices !== null) {
     const wid = weaponSelect.handlePointer(cx, cy);
     if (wid !== null) return `w:${wid}`;
@@ -345,8 +347,10 @@ window.addEventListener("pointermove", (e) => {
     if (r.width > 0 && r.height > 0) {
       const u = (e.clientX - r.left) / r.width;
       const v = (e.clientY - r.top) / r.height;
-      const cx = isRotated() ? v * 320 : u * 320;
-      const cy = isRotated() ? (1 - u) * 180 : v * 180;
+      const logicalW = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE;
+      const logicalH = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE;
+      const cx = isRotated() ? v * logicalW : u * logicalW;
+      const cy = isRotated() ? (1 - u) * logicalH : v * logicalH;
       weaponSelect.updateHover(cx, cy);
     }
   }

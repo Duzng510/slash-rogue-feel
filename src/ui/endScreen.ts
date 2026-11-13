@@ -5,8 +5,8 @@ import { ARTIFACT_COLORS, type ArtifactId } from "../systems/artifacts.ts";
 import { emptyStats, formatRunTime, type RunStats, type EndMode, type EndAction } from "../systems/runStats.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
 
-const LW = CONFIG.WORLD.INTERNAL_W;
-const LH = CONFIG.WORLD.INTERNAL_H;
+const LW = CONFIG.WORLD.INTERNAL_W / CONFIG.WORLD.PIXEL_SCALE;
+const LH = CONFIG.WORLD.INTERNAL_H / CONFIG.WORLD.PIXEL_SCALE;
 const ROOM_TOTAL = TEMPLATES.length;
 
 const BTN_W = 140;
@@ -19,7 +19,7 @@ function inRect(b: Box, x: number, y: number): boolean {
   return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 }
 
-/** full-screen result overlay drawn in the same 320x180 logical space as the artifact modal */
+/** full-screen result overlay drawn in the base logical space shared by the other modals */
 export class EndScreen {
   private shown = false;
   private mode: EndMode = "dead";
@@ -57,8 +57,8 @@ export class EndScreen {
     if (!this.shown) return null;
     const r = this.canvas.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0 || scale <= 0) return null;
-    const lw = this.canvas.width / scale;
-    const lh = this.canvas.height / scale;
+    const lw = LW;
+    const lh = LH;
     const u = (clientX - r.left) / r.width;
     const v = (clientY - r.top) / r.height;
     const lx = isRotated() ? v * lw : u * lw;

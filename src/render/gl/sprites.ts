@@ -59,7 +59,7 @@ function collectCanvases(
  */
 function pack(list: Sprite[]): { rects: Map<HTMLCanvasElement, AtlasRect>; width: number; height: number } {
   const rects = new Map<HTMLCanvasElement, AtlasRect>();
-  let width = 256;
+  let width = MAX_ATLAS;
   let height = 256;
   let x = PAD;
   let y = PAD;
@@ -69,8 +69,8 @@ function pack(list: Sprite[]): { rects: Map<HTMLCanvasElement, AtlasRect>; width
   for (let pass = 0; pass < 2; pass++) {
     x = PAD; y = PAD; rowH = 0;
     for (const sp of list) {
-      const w = sp.w;
-      const h = sp.h;
+      const w = sp.c.width;
+      const h = sp.c.height;
       if (x + w + PAD > width) {
         x = PAD;
         y += rowH + PAD;
