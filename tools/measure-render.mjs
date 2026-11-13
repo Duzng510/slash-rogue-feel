@@ -9,8 +9,8 @@ const PORT = 9339;
 const OUT = "C:/Users/My Lenovo/Desktop/Vibe/slash-rogue-feel/tools/out";
 const BASE = "http://localhost:5199/?manual=1&seed=42";
 const VARIANTS = [
-  { name: "shipping default (presentScene upload)", url: `${BASE}` },
-  { name: "tiles batched (?glbatch=probe)", url: `${BASE}&glbatch=probe` },
+  { name: "composite default (GPU tiles)", url: `${BASE}` },
+  { name: "presentScene escape (?glbatch=0)", url: `${BASE}&glbatch=0` },
   { name: "2D reference (?renderer=2d)", url: `${BASE}&renderer=2d` },
 ];
 

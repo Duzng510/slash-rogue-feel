@@ -161,9 +161,13 @@ export class Renderer {
     const rendererParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("renderer") : null;
     this.glMode = rendererParam !== "2d";
     const glBatchParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("glbatch") : null;
-    // "probe": batch tiles for measurement, still presentScene. "1": full composite present path.
-    this.glBatch = glBatchParam === "probe" || glBatchParam === "1";
-    this.glComposite = glBatchParam === "1";
+    // Stage-1 default: the composite tiles path is ON (dungeon/town route through the GPU;
+    // distortion biomes still use presentScene via the per-frame routing in draw()).
+    //   ?glbatch=0  -> escape hatch, revert to the old presentScene upload for every biome
+    //   ?glbatch=probe -> measurement-only: batch tiles but keep presentScene + sceneRT readback
+    //   absent / =1 -> composite default
+    this.glComposite = glBatchParam !== "0" && glBatchParam !== "probe";
+    this.glBatch = this.glComposite || glBatchParam === "probe";
     if (this.glMode) {
       this.sceneCanvas = document.createElement("canvas");
       this.sceneCanvas.width = iw;

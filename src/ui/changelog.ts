@@ -5,11 +5,19 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.44.0";
+export const APP_VERSION = "v0.46.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.46.0",
+    date: "2026-11-13",
+    items: [
+      "<b>GL tiles-batch (giai đoạn 1):</b> sàn nhà dungeon/thành phố vẽ bằng SpriteBatch GPU vào sceneRT, phần còn lại (quái, FX, chữ) upload một lần làm overTex rồi composite; grade sinh học và kill-cam saturate chuyển vào POST_FS. Bỏ ~274 lệnh drawImage mỗi khung.",
+      "<b>Lối thoát:</b> thêm <code>?glbatch=0</code> để quay về đường presentScene cũ cho mọi biome; <code>?renderer=2d</code> vẫn nguyên vẹn. Các biome méo hình (forge/caverns/void) tạm giữ presentScene tới giai đoạn 3.",
+    ],
+  },
   {
     version: "v0.44.0",
     date: "2026-11-13",
