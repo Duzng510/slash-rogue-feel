@@ -24,9 +24,8 @@ function rect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
 
 function bakeBiomeTiles(S: Record<string, Sprite>, T: number, id: string, floor: string, wall: string, accent: string): void {
   const dungeon = id === "dungeon";
-  const edge = dungeon ? "#181b22" : id === "caverns" ? "#1e2d39" : id === "forge" ? "#2a150e" : "#1b0f28";
-  const floorShadow = dungeon ? "#0d0f14" : id === "caverns" ? "#09111a" : id === "forge" ? "#0d0704" : "#06030b";
-  const shadow = dungeon ? P.VOID : floorShadow;
+  const edge = dungeon ? "#202631" : id === "caverns" ? "#243a4b" : id === "forge" ? "#382116" : "#291a38";
+  const shadow = dungeon ? "#1a1e27" : id === "caverns" ? "#15212b" : id === "forge" ? "#24130d" : "#190f22";
   const wallTop = dungeon ? P.WALL_TOP : id === "caverns" ? "#2c4b64" : id === "forge" ? "#55271a" : "#321c47";
   const wallRim = dungeon ? "#4d5975" : id === "caverns" ? "#527a94" : id === "forge" ? "#8b3f29" : "#58336f";
 
@@ -681,10 +680,10 @@ function buildTileSprites(S: Record<string, Sprite>, T: number): void {
     rect(g, 0, T - 2, T, 2, P.VOID);
   });
 
-  bakeBiomeTiles(S, T, "dungeon", "#191d26", "#39445a", "#232834");
-  bakeBiomeTiles(S, T, "caverns", "#16222e", "#2a4862", "#1e3f61");
-  bakeBiomeTiles(S, T, "forge", "#25150c", "#4d2316", "#391c15");
-  bakeBiomeTiles(S, T, "void", "#110a1c", "#2a163d", "#221033");
+  bakeBiomeTiles(S, T, "dungeon", "#303848", "#48576f", "#384456");
+  bakeBiomeTiles(S, T, "caverns", "#263a4d", "#3b6078", "#345772");
+  bakeBiomeTiles(S, T, "forge", "#39251a", "#633322", "#523324");
+  bakeBiomeTiles(S, T, "void", "#30213e", "#4a3264", "#3c2854");
 }
 
 function buildParallaxSprites(S: Record<string, Sprite>): void {

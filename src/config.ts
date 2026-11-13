@@ -624,15 +624,8 @@ export const CONFIG = {
     IFRAME_ALPHA: 0.35,
   },
 
-  /** renderer visual constants: light-punch radii, weather motes, floating-text cap, cine beats */
+  /** renderer visual constants: torch animation, weather motes, floating-text cap, cine beats */
   RENDER: {
-    LIGHT_PLAYER_R: 72,
-    LIGHT_ENEMY_R: 26,
-    LIGHT_PROJ_R: 36,
-    LIGHT_BEAM_R: 36,
-    LIGHT_BEAM_MID_R: 40,
-    LIGHT_SWING_SCALE: 1.35,
-    TORCH_LIGHT_R: 26,
     /** torch flicker: sine rad per renderer-ms, glow-breath amplitude, and sprite toggle period (ms) */
     TORCH_FLICKER: 0.01,
     TORCH_PULSE: 0.15,
@@ -660,8 +653,6 @@ export const CONFIG = {
     SCANLINE: 0.1,
     /** radial RGB-split in internal pixels at full slider */
     ABERRATION: 0.5,
-    /** constant ambient rim darkening the GL composite adds on top of the hurt vignette */
-    AMBIENT_VIGNETTE: 0.22,
   },
   HAZE: {
     /** heat-haze horizontal wobble: cycles/sec and amplitude in internal px at full slider */

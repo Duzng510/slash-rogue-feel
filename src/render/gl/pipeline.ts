@@ -72,7 +72,6 @@ in vec2 vUv;
 uniform sampler2D uScene;  // clean scene (tiles + entities + baked lighting), NEAREST
 uniform sampler2D uBloom;  // blurred emit mask, half res, LINEAR
 uniform sampler2D uFx;     // additive overlay (transparent-black when unused)
-uniform sampler2D uLight;  // darkness overlay (opaque white when unused)
 uniform vec2 uRes;         // internal size in px
 uniform float uTime;
 uniform float uBloomAmt;
@@ -84,18 +83,11 @@ uniform float uBrightness;
 uniform float uBarrel;
 uniform float uScan;
 uniform float uAberr;
-uniform float uAmbientVig;
 uniform float uHazeSpeed;
 uniform float uHazeFreq;
 uniform float uHazeAmp;
 uniform float uHazeNoise;
 out vec4 fragColor;
-
-const float BAYER[4] = float[4](0.0, 0.5, 0.75, 0.25); // 2x2 ordered dither
-float bayer2(ivec2 p) {
-  int idx = (p.y % 2) * 2 + (p.x % 2);
-  return BAYER[idx];
-}
 
 float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -143,17 +135,14 @@ void main() {
 
   color += texture(uBloom, uv).rgb * uBloomAmt;   // additive glow
   color += texture(uFx, uv).rgb;                   // additive FX overlay
-  color *= texture(uLight, uv).rgb;                // darkness multiply
 
   // scanlines: darken alternate device rows while CRT is on
   float sl = 1.0 - uScan * uCrtAmt * (0.5 + 0.5 * sin(gl_FragCoord.y * 3.14159265));
   color *= sl;
 
-  // vignette: ambient rim (baseline, always on in GL) + dynamic hurt, ordered-dithered so the ramp doesn't band
-  ivec2 qpos = ivec2(gl_FragCoord.xy);
+  // dynamic hurt / low-health vignette
   float rd = length(vUv - 0.5);
-  float vig = smoothstep(0.45, 0.95, rd) * (uAmbientVig + uVignette);
-  vig += (bayer2(qpos % ivec2(2)) - 0.5) * 0.02;
+  float vig = smoothstep(0.45, 0.95, rd) * uVignette;
   color *= 1.0 - clamp(vig, 0.0, 1.0);
 
   // hurt: red push with a soft radial bias
@@ -192,7 +181,6 @@ export class GLPipeline {
   private readonly blur: WebGLProgram;
   private readonly post: WebGLProgram;
   private readonly fxTex: WebGLTexture;
-  private readonly lightTex: WebGLTexture;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -219,7 +207,6 @@ export class GLPipeline {
     this.post = makeProgram(gl, FULLSCREEN_VS, POST_FS);
 
     this.fxTex = this.makeOverlayTexture();
-    this.lightTex = this.makeOverlayTexture();
   }
 
   private makeRT(w: number, h: number, filter: number): RT {
@@ -277,14 +264,12 @@ export class GLPipeline {
     return t;
   }
 
-  private uploadOverlay(tex: WebGLTexture, canvas: HTMLCanvasElement | null, fillLit: boolean): void {
+  private uploadOverlay(tex: WebGLTexture, canvas: HTMLCanvasElement | null): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     if (canvas) {
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-    } else if (fillLit) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.iw, this.ih, 0, gl.RGBA, gl.UNSIGNED_BYTE, whitePixels(this.iw, this.ih));
     } else {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.iw, this.ih, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(this.iw * this.ih * 4));
     }
@@ -292,7 +277,7 @@ export class GLPipeline {
   }
 
   /**
-   * Fully-composited 2D canvas (all layers correctly ordered, depth-sorted, lit, and text-overlaid)
+   * Fully-composited 2D canvas (all layers correctly ordered, depth-sorted, and text-overlaid)
    * uploaded into the scene RT, then run through the GL post chain (bloom, CRT warp, scanlines, ripple).
    */
   presentScene(scene: HTMLCanvasElement, params: PresentParams): void {
@@ -300,8 +285,7 @@ export class GLPipeline {
     gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
-    this.uploadOverlay(this.fxTex, null, false);
-    this.uploadOverlay(this.lightTex, null, true);
+    this.uploadOverlay(this.fxTex, null);
     this.runPost(params);
   }
 
@@ -353,10 +337,6 @@ export class GLPipeline {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.fxTex);
     gl.uniform1i(gl.getUniformLocation(this.post, "uFx"), 2);
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, this.lightTex);
-    gl.uniform1i(gl.getUniformLocation(this.post, "uLight"), 3);
-
     gl.uniform2f(gl.getUniformLocation(this.post, "uRes"), this.iw, this.ih);
     gl.uniform1f(gl.getUniformLocation(this.post, "uTime"), params.time);
     gl.uniform1f(gl.getUniformLocation(this.post, "uBloomAmt"), params.bloom * B.INTENSITY);
@@ -368,17 +348,10 @@ export class GLPipeline {
     gl.uniform1f(gl.getUniformLocation(this.post, "uBarrel"), C.BARREL);
     gl.uniform1f(gl.getUniformLocation(this.post, "uScan"), C.SCANLINE);
     gl.uniform1f(gl.getUniformLocation(this.post, "uAberr"), C.ABERRATION);
-    gl.uniform1f(gl.getUniformLocation(this.post, "uAmbientVig"), C.AMBIENT_VIGNETTE);
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeSpeed"), H.SPEED);
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeFreq"), H.FREQ);
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeAmp"), H.AMP);
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeNoise"), H.NOISE);
     this.endPass();
   }
-}
-
-function whitePixels(w: number, h: number): Uint8Array {
-  const a = new Uint8Array(w * h * 4);
-  a.fill(255);
-  return a;
 }

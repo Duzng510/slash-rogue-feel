@@ -19,7 +19,7 @@ export type Biome = {
     outside: string;
     /** fog tint for the low-res drifting fog layer (unused in dungeon) */
     fog: string;
-    /** subtle full-scene color grade applied after lighting */
+    /** subtle full-scene color grade */
     grade: string;
   };
   enemyPool: EnemyKind[];
@@ -39,7 +39,7 @@ export const BIOMES: Record<BiomeId, Biome> = {
       accent: "#1f1a12",
       ambient: "rgba(255, 200, 100, 0.06)",
       particle: "rgba(255, 220, 150, 0.35)",
-      outside: "#100c08",
+      outside: "#211810",
       fog: "rgba(255, 200, 120, 0.3)",
       grade: "#e0c060",
     },
@@ -52,7 +52,7 @@ export const BIOMES: Record<BiomeId, Biome> = {
     color: "#8a8a9a",
     roomStart: 0,
     roomEnd: 2,
-    palette: { floor: "#121419", wall: "#2b3242", accent: "#1b1f28", ambient: "rgba(5, 7, 11, 0.5)", particle: "rgba(190, 204, 222, 0.16)", outside: "#141821", fog: "rgba(160, 180, 210, 0.5)", grade: "#8fa4c8" },
+    palette: { floor: "#121419", wall: "#2b3242", accent: "#1b1f28", ambient: "rgba(5, 7, 11, 0.5)", particle: "rgba(190, 204, 222, 0.16)", outside: "#1e2530", fog: "rgba(160, 180, 210, 0.5)", grade: "#8fa4c8" },
     enemyPool: ["chaser", "charger", "splitter", "small"],
   },
   caverns: {
@@ -62,7 +62,7 @@ export const BIOMES: Record<BiomeId, Biome> = {
     color: "#58caff",
     roomStart: 3,
     roomEnd: 5,
-    palette: { floor: "#101822", wall: "#1f3548", accent: "#16304a", ambient: "rgba(80, 180, 255, 0.15)", particle: "rgba(182, 231, 255, 0.48)", outside: "#101b26", fog: "rgba(170, 225, 255, 0.5)", grade: "#5fb8e0" },
+    palette: { floor: "#101822", wall: "#1f3548", accent: "#16304a", ambient: "rgba(80, 180, 255, 0.15)", particle: "rgba(182, 231, 255, 0.48)", outside: "#1d2c3a", fog: "rgba(170, 225, 255, 0.5)", grade: "#5fb8e0" },
     enemyPool: ["teleporter", "ranged", "shielder", "jumper"],
   },
   forge: {
@@ -72,7 +72,7 @@ export const BIOMES: Record<BiomeId, Biome> = {
     color: "#ff5a3c",
     roomStart: 6,
     roomEnd: 8,
-    palette: { floor: "#1a0e08", wall: "#3a1a10", accent: "#2a1410", ambient: "rgba(255, 90, 60, 0.12)", particle: "rgba(255, 143, 68, 0.58)", outside: "#1d0f08", fog: "rgba(255, 130, 60, 0.45)", grade: "#ff8a40" },
+    palette: { floor: "#1a0e08", wall: "#3a1a10", accent: "#2a1410", ambient: "rgba(255, 90, 60, 0.12)", particle: "rgba(255, 143, 68, 0.58)", outside: "#26160f", fog: "rgba(255, 130, 60, 0.45)", grade: "#ff8a40" },
     enemyPool: ["exploder", "charger", "sniper", "boss"],
   },
   void: {
@@ -82,7 +82,7 @@ export const BIOMES: Record<BiomeId, Biome> = {
     color: "#c99ae6",
     roomStart: 9,
     roomEnd: 11,
-    palette: { floor: "#0a0512", wall: "#1e0f2e", accent: "#180a28", ambient: "rgba(180, 100, 255, 0.15)", particle: "rgba(195, 174, 255, 0.32)", outside: "#150a22", fog: "rgba(190, 120, 255, 0.45)", grade: "#a060d0" },
+    palette: { floor: "#0a0512", wall: "#1e0f2e", accent: "#180a28", ambient: "rgba(180, 100, 255, 0.15)", particle: "rgba(195, 174, 255, 0.32)", outside: "#1c1027", fog: "rgba(190, 120, 255, 0.45)", grade: "#a060d0" },
     enemyPool: ["teleporter", "healer", "splitter", "warden"],
   },
 };

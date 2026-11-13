@@ -104,8 +104,6 @@ export class Renderer {
     halfContext: CanvasRenderingContext2D;
   } | null = null;
 
-  private lightCanvas: HTMLCanvasElement;
-  private lightG: CanvasRenderingContext2D;
   private frameCanvas: HTMLCanvasElement;
   private frameG: CanvasRenderingContext2D;
   private redCanvas: HTMLCanvasElement;
@@ -161,12 +159,6 @@ export class Renderer {
       halfContext.imageSmoothingEnabled = true;
       this.glow = { canvas, context, half, halfContext };
     }
-
-    this.lightCanvas = document.createElement("canvas");
-    this.lightCanvas.width = iw;
-    this.lightCanvas.height = ih;
-    this.lightG = ctx2d(this.lightCanvas);
-    this.lightG.imageSmoothingEnabled = true;
 
     this.frameCanvas = document.createElement("canvas");
     this.frameCanvas.width = iw;
@@ -408,7 +400,6 @@ export class Renderer {
     this.fx.drawTexts(g, ox, oy);
     this.drawAmbient(g, ox, oy);
     this.drawFog(g, dtReal);
-    this.drawLighting(g, ox, oy);
     g.save();
     g.globalCompositeOperation = "color";
     g.globalAlpha = 0.15;
@@ -617,75 +608,6 @@ export class Renderer {
     }
   }
 
-  private drawLighting(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    const iw = CONFIG.WORLD.INTERNAL_W;
-    const ih = CONFIG.WORLD.INTERNAL_H;
-    const lg = this.lightG;
-
-    lg.globalCompositeOperation = "source-over";
-    // the brightness slider scales the dim layer down (2x brightness = half the shade)
-    const bright = Math.max(0.5, CONFIG.SLIDERS.brightness);
-    const dimA = Math.min(1, 0.38 / bright);
-    // Mềm và sáng hơn: giảm từ 0.82 xuống 0.38 để tránh màn hình bị tối đen quá mức
-    lg.fillStyle = `rgba(10, 14, 22, ${dimA})`;
-    lg.fillRect(0, 0, iw, ih);
-
-    lg.globalCompositeOperation = "destination-out";
-
-    const punch = (x: number, y: number, r: number, intensity = 1) => {
-      const grad = lg.createRadialGradient(x, y, 0, x, y, r);
-      grad.addColorStop(0, `rgba(0,0,0,${intensity})`);
-      grad.addColorStop(0.55, `rgba(0,0,0,${intensity * 0.6})`);
-      grad.addColorStop(1, "rgba(0,0,0,0)");
-      lg.fillStyle = grad;
-      lg.fillRect(x - r, y - r, r * 2, r * 2);
-    };
-
-    // player aura: mở rộng bán kính và tăng cường độ sáng
-    const pl = this.world.player;
-    punch(pl.x - ox, pl.y - 8 - oy, CONFIG.RENDER.LIGHT_PLAYER_R, 1);
-
-    // enemy auras nhẹ để quái không bị chìm hoàn toàn vào bóng tối
-    for (const en of this.world.enemies) {
-      if (!en.dead && en.state !== ENEMY_STATE.VANISH) {
-        punch(en.x - ox, en.y - en.bodyH * 0.5 - oy, CONFIG.RENDER.LIGHT_ENEMY_R, 0.45);
-      }
-    }
-
-    // projectile lights: sáng rộng hơn
-    for (const p of this.world.projectiles) {
-      punch(p.x - ox, p.y - oy, CONFIG.RENDER.LIGHT_PROJ_R, 0.85);
-    }
-
-    // torch lights: flicker radius ±15%, slow enough to read as fire not strobe
-    const now = this.visualTime * 1000;
-    for (const t of this.world.room.torches) {
-      const r = CONFIG.RENDER.TORCH_LIGHT_R * (1 + CONFIG.RENDER.TORCH_PULSE * Math.sin(now * CONFIG.RENDER.TORCH_FLICKER + t.phase));
-      punch(t.x - ox, t.y - 3 - oy, r, 0.85);
-    }
-
-    // swing lights: mở rộng tầm sáng của nhát chém
-    for (const a of this.fx.swingArcs) {
-      punch(a.x - ox, a.y - oy, a.reach * CONFIG.RENDER.LIGHT_SWING_SCALE, 0.7);
-    }
-
-    // beam lights
-    for (const b of this.fx.enemyBeams) {
-      punch(b.x - ox, b.y - oy, CONFIG.RENDER.LIGHT_BEAM_R, 0.75);
-      const bx = b.x + Math.cos(b.dir) * b.len * 0.5;
-      const by = b.y + Math.sin(b.dir) * b.len * 0.5;
-      punch(bx - ox, by - oy, CONFIG.RENDER.LIGHT_BEAM_MID_R, 0.75);
-      const ex = b.x + Math.cos(b.dir) * b.len;
-      const ey = b.y + Math.sin(b.dir) * b.len;
-      punch(ex - ox, ey - oy, CONFIG.RENDER.LIGHT_BEAM_R, 0.75);
-    }
-
-    g.save();
-    g.globalCompositeOperation = "multiply";
-    g.drawImage(this.lightCanvas, 0, 0);
-    g.restore();
-  }
-
   /** distant biome backdrop, scrolled at 0.4x camera speed; drawn behind everything */
   private drawParallax(g: CanvasRenderingContext2D): void {
     const bg = this.sprites[`parallax_${this.world.currentBiome.id}`];
@@ -705,7 +627,7 @@ export class Renderer {
     g.restore();
   }
 
-  /** wall torches: sprite + additive glow; the light punch lives in drawLighting */
+  /** wall torches: sprite + additive glow */
   private drawTorches(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     const torches = this.world.room.torches;
     if (torches.length === 0) return;
@@ -813,17 +735,6 @@ export class Renderer {
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
     const biome = this.world.currentBiome;
-
-    // Ambient vignette giữ lại nhưng dịu: rìa 0.18 để quái cả phòng vẫn đọc được
-    const bright = Math.max(0.5, CONFIG.SLIDERS.brightness);
-    const rim = Math.min(0.25, 0.18 / bright);
-    const mid = Math.min(0.15, 0.08 / bright);
-    const grad = g.createRadialGradient(px, py, 60, px, py, 185);
-    grad.addColorStop(0, "rgba(5, 7, 11, 0)");
-    grad.addColorStop(0.7, `rgba(5, 7, 11, ${mid})`);
-    grad.addColorStop(1, `rgba(5, 7, 11, ${rim})`);
-    g.fillStyle = grad;
-    g.fillRect(0, 0, iw, ih);
 
     if (biome.id !== "dungeon") {
       const atmosphere = g.createRadialGradient(px, py, 10, px, py, 150);
