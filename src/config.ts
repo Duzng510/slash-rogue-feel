@@ -486,7 +486,7 @@ export const CONFIG = {
   },
 
   ROOMS: {
-    WAVES: [3, 4, 6, 8, 5, 10, 6, 4, 0, 8, 0],
+    WAVES: [3, 4, 6, 8, 5, 10, 6, 4, 0, 8, 0, 0, 1, 0, 0, 3],
     END_DELAY: 40,
     TRAP_DMG: 1,
   },
@@ -671,19 +671,20 @@ export const CONFIG = {
   },
 
   SLIDERS: {
-    shake: 1,
+    shake: 0.8,
     volume: 0.35,
     particles: 1,
     timescale: 1,
     hitStopScale: 1,
     dmgNumbers: 1,
     brightness: 1,
-    bloom: 0.8,
-    crt: 0.45,
-    ripple: 0.4,
+    bloom: 0.55,
+    crt: 0.25,
+    ripple: 0.15,
   },
 
   LAWS: {
+    /** test-harness limits and authored-balance assertions; runtime systems do not read these. */
     MIN_TELEGRAPH_S: 0.3,
     MAX_CHARGER_ARC_DEG: 60,
     /** ceilings asserted by the fuzz + determinism invariants; MAX_ENEMIES sits above the biggest authored wave */

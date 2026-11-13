@@ -80,7 +80,7 @@ export function playerSwingInit(src: Sim, combo: number, dir: number): SwingInit
     ox: src.player.x, oy: src.player.y,
     reach: cb.reach, deg: cb.deg,
     dmg:
-      cb.dmg * CHARACTERS[src.player.character].damageMult * (chain ? 1.5 : 1) *
+      (cb.dmg + src.player.weaponDamageBonus) * CHARACTERS[src.player.character].damageMult * (chain ? 1.5 : 1) *
       (src.artifacts.has("heavy") ? 1.3 : 1) * berserk * (src.artifacts.has("glasscannon") ? 1.75 : 1) *
       (src.curses.has("glass") ? CONFIG.CURSES.DEALT_MULT : 1) +
       (src.player.reprisalTicks > 0 ? 1 : 0),

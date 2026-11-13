@@ -47,6 +47,7 @@ export type Projectile = {
   /** render-only: recent positions for an afterimage trail */
   trail?: { x: number; y: number }[];
   owner: Side;
+  sourceKind?: EnemyKind;
   status?: Swing["status"];
   kind?: "bolt" | "fireball" | "ghost" | "lava";
 };
@@ -81,6 +82,7 @@ export type Intent = {
   attack: boolean;
   dash: boolean;
   skill: boolean;
+  interact: boolean;
 };
 
 export type Decal = {

@@ -4,7 +4,6 @@ import { artifactText, shake, sfx } from "../events.ts";
 import { createSwing, hitFeedback, instantSwing, playerSwingInit, stepSwing } from "../systems/combat.ts";
 import { CHARACTERS, COMBO_HITS, COMBO_WINDOW, executeSkill, type CharacterId } from "../systems/characters.ts";
 import { WEAPONS, type WeaponId } from "../systems/weapons.ts";
-import { ENEMY_STATE } from "./enemy.ts";
 import { resolveAttackDir } from "../systems/aim.ts";
 import { knockback } from "../systems/feelSim.ts";
 import { moveBody, blocked } from "../world/collision.ts";
@@ -70,6 +69,7 @@ export class Player implements Unit {
   autoTargetId = -1;
   character: CharacterId = "swordsman";
   weapon: WeaponId = "katana";
+  weaponDamageBonus = 0;
   skillCd = 0;
   skillActiveTicks = 0;
   comboHits = 0;
@@ -131,7 +131,7 @@ export class Player implements Unit {
     if (this.character === "tank" && this.skillActiveTicks > 0) {
       artifactText(src.queue, this.x, this.y - 14, "PHẢN ĐÒN", "#8ab4ff");
       sfx(src.queue, "reprisal_ready", 0.6, 1.2);
-      for (const e of src.enemies) {
+      for (const e of src.enemies.slice()) {
         if (e.dead || !e.canBeHit()) continue;
         if (dist(e.x, e.y, this.x, this.y) > 20) continue;
         const pushDir = Math.hypot(e.x - this.x, e.y - this.y) > 0.1
@@ -154,7 +154,9 @@ export class Player implements Unit {
     const dmg = sw.dmg * (src.curses.has("glass") ? CONFIG.CURSES.TAKEN_MULT : 1);
     this.hp -= dmg;
     src.runStats.damageTaken += dmg;
-    if (sw.kind === "boss") src.runStats.bossDamageTaken += dmg;
+    if (sw.kind === "boss" || sw.kind === "king" || sw.kind === "golem" || sw.kind === "warden") {
+      src.runStats.bossDamageTaken += dmg;
+    }
     src.runStats.hurtFree = false;
     this.swing = null;
     this.combo = 0;
@@ -214,9 +216,9 @@ export class Player implements Unit {
 
     const hasCursor = Number.isFinite(intent.aimX) && Number.isFinite(intent.aimY);
 
-    // low-HP heartbeat: a slow low-pitch pulse while at or below 30% health
-    if (this.hp > 0 && this.hp / this.maxHp < 0.3 && this.animTicks % 60 === 0) {
-      sfx(src.queue, "pursuit_proc", 0.5, 0.55);
+    // D4: low-HP heartbeat: nhịp tim thư thái 1.4s (84 ticks) với pitch trầm dễ chịu hơn
+    if (this.hp > 0 && this.hp / this.maxHp < 0.3 && this.animTicks % 84 === 0) {
+      sfx(src.queue, "pursuit_proc", 0.35, 0.5);
     }
 
     if (hasCursor) this.facing = Math.atan2(intent.aimY - this.y, intent.aimX - this.x);
@@ -334,7 +336,7 @@ export class Player implements Unit {
     const d = CONFIG.DASH;
     const dir = intent.moveX !== 0 || intent.moveY !== 0 ? Math.atan2(intent.moveY, intent.moveX) : this.facing;
     src.runStats.dashCount++;
-    if (src.enemies.some(e => !e.dead && e.state === ENEMY_STATE.TELEGRAPH)) src.runStats.perfectDodges++;
+    if (src.enemies.some(e => e.telegraphThreatens(this.x, this.y))) src.runStats.perfectDodges++;
     this.swing = null;
     this.combo = 0;
     this.queuedAttackTicks = 0;
@@ -351,7 +353,7 @@ export class Player implements Unit {
       this.x += Math.cos(dir) * step;
       this.y += Math.sin(dir) * step;
       const slash = instantSwing(src, { side: "player", dir, ox, oy, dmg: 2 });
-      for (const e of src.enemies) {
+      for (const e of src.enemies.slice()) {
         if (e.dead || !e.canBeHit()) continue;
         if ([0, 0.5, 1].some(t => dist(e.x, e.y, ox + (this.x - ox) * t, oy + (this.y - oy) * t) < 14)) {
           e.onHit(slash, e.x, e.y, src);
@@ -442,11 +444,6 @@ export class Player implements Unit {
     sfx(src.queue, "pursuit_proc", 0.6, 1.1);
   }
 
-  /** 0..3 walk cycle, mirrored by facing for the slash-heavy look */
-  spriteFrame(): number {
-    if (this.state === PLAYER_STATE.IDLE) return 0;
-    return Math.floor(this.animTicks / 7) % 4;
-  }
 }
 
 function cursorOf(intent: Intent): { x: number; y: number } | null {

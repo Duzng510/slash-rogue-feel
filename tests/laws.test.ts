@@ -43,11 +43,12 @@ function heading(t: string): void {
 }
 
 function intent(over: Partial<Intent> = {}): Intent {
-  return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, ...over };
+  return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, interact: false, ...over };
 }
 
 function sandbox(): World {
   const w = new World(CONFIG.SEED);
+  w.enterDungeon(false);
   w.enemies = [];
   w.syncUnits();
   w.player.reset(w.room.start.x, w.room.start.y);
@@ -287,6 +288,14 @@ heading("Input buffering through a freeze");
   src4.moveX = -1;
   const b = src4.read(2);
   ok("movement axes are latest-wins, not queued", a.moveX === 1 && b.moveX === -1);
+
+  const src5 = new IntentSource();
+  src5.pressInteract(100);
+  ok("interact remains buffered during hit-stop", !src5.read(100, false).interact && src5.read(100).interact);
+  ok("interact is consumed once", !src5.read(101).interact);
+  src5.pressInteract(102);
+  src5.clearPresses();
+  ok("reset clears buffered interact", !src5.read(102).interact);
 }
 
 heading("Combo chain");
@@ -405,6 +414,8 @@ heading("Sim purity (tick() must stay testable in node)");
 heading("Room loop");
 {
   const w = new World(CONFIG.SEED, allUnlocks());
+  w.enterDungeon(false);
+  w.characterChoices = [];
   ok("room starts with the door locked", !w.room.doorOpen);
   for (const e of w.enemies) e.die();
   w.tick(intent());
@@ -664,12 +675,12 @@ heading("Room variety (P5)");
   };
   const stuck = TEMPLATES.map((t, i) => (reachesDoor(t) ? -1 : i)).filter((i) => i >= 0);
   ok("every authored room has a reachable exit", stuck.length === 0, `stuck rooms ${stuck.join(",")}`);
-  ok("the run is now 12 rooms long", TEMPLATES.length === 12, `length ${TEMPLATES.length}`);
+  ok("the run includes five new authored room types", TEMPLATES.length === 17, `length ${TEMPLATES.length}`);
   ok("the biggest authored wave fields 8+ enemies", Math.max(...CONFIG.ROOMS.WAVES) >= 8, `max ${Math.max(...CONFIG.ROOMS.WAVES)}`);
   ok("every non-boss room has a wave entry", CONFIG.ROOMS.WAVES.length === TEMPLATES.length - 1, `waves ${CONFIG.ROOMS.WAVES.length}`);
-  // a full-reward run takes one artifact per room (rooms 0..roomTotal-1) and must still show a
-  // 3-choice offer on the last room — so pool >= (roomTotal-1) consumed + 3 remaining.
-  ok("the artifact pool can fill every reward room", ARTIFACTS.length >= TEMPLATES.length + 2 * CONFIG.CURSES.MAX_CURSES + 2, `have ${ARTIFACTS.length} need ${TEMPLATES.length + 2 * CONFIG.CURSES.MAX_CURSES + 2}`);
+  const normalArtifactRooms = TEMPLATES.filter((template) =>
+    template.kind === undefined || template.kind === "combat" || template.kind === "treasure" || template.kind === "elite").length;
+  ok("the artifact pool can fill every normal artifact reward", ARTIFACTS.length >= normalArtifactRooms + 3, `have ${ARTIFACTS.length} need ${normalArtifactRooms + 3}`);
 }
 
 heading("Rooms (P8)");
@@ -735,7 +746,7 @@ heading("Warden (P9)");
   fielded.loadRoom(mid);
   ok("the mid-boss room always fields the warden", fielded.enemies.some(e => e.kind === "warden"));
 
-  const shopIdx = TEMPLATES.findIndex(t => t.shop === true);
+  const shopIdx = TEMPLATES.findIndex(t => t.kind === "shop");
   ok("a shop room is authored before the finale", shopIdx >= 0 && shopIdx < TEMPLATES.length - 1, `shop at ${shopIdx}`);
   ok("the shop room fields no enemies", shopIdx >= 0 && TEMPLATES[shopIdx].rows.join("").split("").every(ch => MARKER_KIND[ch] === undefined));
   ok("shop prices are ordered heal < artifact < maxhp < curse", CONFIG.SHOP.HEAL < CONFIG.SHOP.ARTIFACT && CONFIG.SHOP.ARTIFACT < CONFIG.SHOP.MAXHP && CONFIG.SHOP.MAXHP < CONFIG.SHOP.CURSE);
@@ -882,27 +893,37 @@ heading("Curse (P10)");
   const earned = new Set<AchievementId>();
   for (const gate of Object.values(ARTIFACT_UNLOCKS)) if (gate !== null) earned.add(gate);
   const w = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
+  w.enterDungeon(false);
+  w.characterChoices = [];
   w.clearEnemies();
   w.tick(intent());
-  ok("the first clear offers a two-curse package", w.curseOffer !== null && w.curseOffer.curses.length === 2 && w.curseOffer.artifacts.length === 2);
-  const offer = w.curseOffer!;
-  const bundle = offer.artifacts.map(a => a.id);
-  ok("choosing a curse grants both bundled artifacts", w.chooseCurse(offer.curses[0].id) && bundle.every(id => w.artifacts.has(id)));
-  ok("the curse package opens the door and closes the modal", w.room.doorOpen && w.artifactChoices.length === 0 && w.curseOffer === null);
-  ok("a spent curse offer cannot be chosen again", w.chooseCurse(offer.curses[0].id) === false);
+  ok("the first clear does not offer a curse", w.curseOffer === null);
 
-  const f = new World(CONFIG.SEED);
-  f.curseOffer = { artifacts: [], curses: CURSES.filter(c => c.id === "frail") };
-  f.chooseCurse("frail");
-  ok("frail cuts max HP by 2", f.player.maxHp === CONFIG.PLAYER.HP - CONFIG.CURSES.FRAIL_HP && f.player.hp === f.player.maxHp);
+  const f = new World(CONFIG.SEED, { earned, best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
+  f.enterDungeon(false);
+  f.characterChoices = [];
+  f.runStats.roomsCleared = CONFIG.CURSES.OFFER_EVERY;
+  f.clearEnemies();
+  f.tick(intent());
+  ok("a later eligible clear offers a two-curse package", f.curseOffer !== null && f.curseOffer.curses.length === 2 && f.curseOffer.artifacts.length === 2);
+  const offer = f.curseOffer!;
+  const bundle = offer.artifacts.map(a => a.id);
+  ok("choosing a curse grants both bundled artifacts", f.chooseCurse(offer.curses[0].id) && bundle.every(id => f.artifacts.has(id)));
+  ok("the curse package opens the door and closes the modal", f.room.doorOpen && f.artifactChoices.length === 0 && f.curseOffer === null);
+  ok("a spent curse offer cannot be chosen again", f.chooseCurse(offer.curses[0].id) === false);
 
   const g = new World(CONFIG.SEED);
-  g.curseOffer = { artifacts: [], curses: CURSES.filter(c => c.id === "glass") };
-  g.chooseCurse("glass");
-  const hp0 = g.player.hp;
-  g.player.onHit(createSwing(g, { side: "enemy", combo: 0, dir: 0, ox: 0, oy: 0, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } }), g.player.x, g.player.y, g);
-  ok("glass doubles damage taken", g.player.hp === hp0 - CONFIG.CURSES.TAKEN_MULT, `hp ${g.player.hp}`);
-  ok("glass multiplies damage dealt", playerSwingInit(g, 1, 0).dmg === CONFIG.ATTACK.DMG * CONFIG.CURSES.DEALT_MULT);
+  g.curseOffer = { artifacts: [], curses: CURSES.filter(c => c.id === "frail") };
+  g.chooseCurse("frail");
+  ok("frail cuts max HP by 2", g.player.maxHp === CONFIG.PLAYER.HP - CONFIG.CURSES.FRAIL_HP && g.player.hp === g.player.maxHp);
+
+  const h = new World(CONFIG.SEED);
+  h.curseOffer = { artifacts: [], curses: CURSES.filter(c => c.id === "glass") };
+  h.chooseCurse("glass");
+  const hp0 = h.player.hp;
+  h.player.onHit(createSwing(h, { side: "enemy", combo: 0, dir: 0, ox: 0, oy: 0, reach: 0, deg: 0, dmg: 1, knockback: 0, fd: { startup: 0, active: 1, recovery: 0 } }), h.player.x, h.player.y, h);
+  ok("glass doubles damage taken", h.player.hp === hp0 - CONFIG.CURSES.TAKEN_MULT, `hp ${h.player.hp}`);
+  ok("glass multiplies damage dealt", playerSwingInit(h, 1, 0).dmg === CONFIG.ATTACK.DMG * CONFIG.CURSES.DEALT_MULT);
 
   const s = new World(CONFIG.SEED);
   s.curses.add("slow_hand");
@@ -920,6 +941,8 @@ heading("Curse (P10)");
   ok("heavy_legs slows the run by 20%", Math.abs(run(true) - plain * CONFIG.CURSES.SPEED_MULT) < 1, `plain ${plain.toFixed(1)}`);
 
   const b = new World(CONFIG.SEED);
+  b.enterDungeon(false);
+  b.characterChoices = [];
   b.clearEnemies();
   b.curses.add("butterfingers");
   b.spawnEnemy(b.player.x + 20, b.player.y, "chaser");
@@ -1485,9 +1508,9 @@ heading("Mage normal attack: ranged arcane volley");
 
 heading("Biomes and Ascension");
 {
-  const expectedBiomes = ["dungeon", "dungeon", "dungeon", "caverns", "caverns", "caverns", "forge", "forge", "forge", "void", "void", "void"];
+  const expectedBiomes = ["dungeon", "dungeon", "dungeon", "caverns", "caverns", "caverns", "forge", "forge", "forge", "void", "void", "void", "void", "void", "void", "void", "void"];
   const rangesMatch = expectedBiomes.every((id, room) => biomeForRoom(room).id === id);
-  ok("the twelve room indices map to the four requested biomes", rangesMatch);
+  ok("all room indices map to the four requested biomes", rangesMatch);
 
   const world = new World(CONFIG.SEED, emptyAchievements());
   let poolsMatch = true;
@@ -1499,7 +1522,9 @@ heading("Biomes and Ascension");
   ok("normal enemies use biome pools while scripted bosses remain", poolsMatch);
 
   const levelFive = new World(CONFIG.SEED, { ...emptyAchievements(), ascensionMax: 5 });
+  levelFive.enterDungeon(false);
   const baseline = new World(CONFIG.SEED, emptyAchievements());
+  baseline.enterDungeon(false);
   ok("Ascension V adds two enemies to the opening wave", levelFive.enemies.length === baseline.enemies.length + 2);
   ok("Ascension level selection stays within the unlocked maximum", levelFive.ascensionLevel === 5 && !levelFive.setAscensionLevel(6) && levelFive.setAscensionLevel(3));
 

@@ -5,6 +5,7 @@ import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
 import { CHARACTERS, COMBO_HITS } from "../systems/characters.ts";
 import { WEAPONS } from "../systems/weapons.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
+import { dialogueOptionAt, dialogueOptionBounds } from "./dialogueLayout.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -60,8 +61,55 @@ export class Hud {
     o.restore();
   }
 
+  drawInteractPrompt(o: CanvasRenderingContext2D, scale: number, origin: { x: number; y: number }): void {
+    const npc = this.world.nearbyNpc;
+    if (npc === null || this.world.mode !== "town" || this.world.dialogue !== null) return;
+    if (
+      this.world.characterChoices.length > 0 ||
+      this.world.weaponChoices !== null ||
+      this.world.shopOffers !== null ||
+      this.world.artifactChoices.length > 0 ||
+      this.world.roomChoices !== null
+    ) return;
+
+    const wx = Math.round(npc.x - origin.x);
+    const wy = Math.round(npc.y - npc.bodyH - 14 - origin.y);
+
+    o.save();
+    o.scale(scale, scale);
+    o.font = "bold 6px ui-monospace, monospace";
+    o.textAlign = "center";
+    o.textBaseline = "middle";
+    const text = npc.prompt;
+    const tw = o.measureText(text).width;
+    const bgW = Math.ceil(tw) + 8;
+    const bgH = 10;
+    o.fillStyle = "rgba(5, 7, 11, 0.9)";
+    o.fillRect(wx - bgW / 2, wy - bgH / 2, bgW, bgH);
+    o.strokeStyle = "#7fd1ff";
+    o.lineWidth = 1;
+    o.strokeRect(wx - bgW / 2 + 0.5, wy - bgH / 2 + 0.5, bgW - 1, bgH - 1);
+    o.fillStyle = "#d8f0ff";
+    o.fillText(text, wx, wy);
+    o.restore();
+    o.textBaseline = "alphabetic";
+    o.textAlign = "left";
+  }
+
   modalAt(x: number, y: number): string | null {
     const w = this.world;
+    if (w.dialogue !== null) {
+      const node = w.dialogue.source.nodes[w.dialogue.nodeId];
+      if (!node) return null;
+      const option = dialogueOptionAt(x, y, node.options.length);
+      return option === null ? null : `d:${option}`;
+    }
+    if (w.roomChoices !== null) {
+      if (y < 38 || y > 158) return null;
+      const i = x >= 12 && x <= 104 ? 0 : x >= 114 && x <= 206 ? 1 : x >= 216 && x <= 308 ? 2 : -1;
+      const choice = w.roomChoices.choices[i];
+      return i >= 0 && choice !== undefined && !choice.disabled ? `e:${i}` : null;
+    }
     if (this.world.characterChoices.length > 0) {
       if (this.world.achievements.ascensionMax > 0 && y >= 164 && y <= 180) {
         if (x >= 104 && x <= 132) return "q:-";
@@ -87,7 +135,7 @@ export class Hud {
       if (i < 0 || i >= w.shopOffers.length) return null;
       return `s:${i}`;
     }
-    if (w.curseOffer !== null && y >= 20 && y <= 32) {
+    if (w.curseOffer !== null && w.room.kind !== "shrine" && y >= 20 && y <= 32) {
       if (x >= 16 && x < 160) return "t:normal";
       if (x >= 160 && x <= 304) return "t:curse";
       return null;
@@ -312,7 +360,59 @@ export class Hud {
     o.restore();
   }
 
+  private drawDialogue(o: CanvasRenderingContext2D, scale: number): void {
+    const dialogue = this.world.dialogue;
+    if (dialogue === null) return;
+    const node = dialogue.source.nodes[dialogue.nodeId];
+    if (!node) return;
+    o.save();
+    o.scale(scale, scale);
+    o.fillStyle = "rgba(7, 10, 16, 0.94)";
+    o.fillRect(24, 28, 272, 124);
+    o.strokeStyle = "#7fd1ff";
+    o.strokeRect(24.5, 28.5, 271, 123);
+    o.fillStyle = "#e4ebf7";
+    o.textAlign = "left";
+    o.textBaseline = "top";
+    o.font = "bold 10px sans-serif";
+    o.fillText(node.speaker, 36, 38);
+    o.fillStyle = "#9db0cc";
+    o.font = "7px sans-serif";
+    const shown = node.text.slice(0, Math.floor(dialogue.charIndex));
+    const lines = wrapLines(o, shown, 210);
+    lines.slice(0, 4).forEach((line, index) => o.fillText(line, 36, 54 + index * 10));
+    if (dialogue.charIndex < node.text.length) {
+      const lastLine = lines[lines.length - 1] ?? "";
+      const cursorX = 36 + o.measureText(lastLine).width + 1;
+      const cursorY = 54 + (lines.length - 1) * 10;
+      if (Math.floor(performance.now() / 200) % 2 === 0) {
+        o.fillStyle = "#7fd1ff";
+        o.fillRect(cursorX, cursorY + 1, 4, 1);
+      }
+    }
+    const optsReady = dialogue.charIndex >= node.text.length;
+    node.options.forEach((option, i) => {
+      const { x, y, width, height } = dialogueOptionBounds(i);
+      o.fillStyle = optsReady ? "rgba(17, 22, 34, 0.95)" : "rgba(10, 13, 20, 0.95)";
+      o.fillRect(x, y, width, height);
+      o.strokeStyle = optsReady ? "#ffd166" : "#3a4458";
+      o.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+      o.fillStyle = optsReady ? "#ffffff" : "#7a8aa5";
+      o.font = "bold 7px sans-serif";
+      o.fillText(`[${i + 1}] ${option.label}`, x + 8, y + 4);
+    });
+    o.restore();
+  }
+
   drawArtifacts(o: CanvasRenderingContext2D, scale: number): void {
+    if (this.world.dialogue !== null) {
+      this.drawDialogue(o, scale);
+      return;
+    }
+    if (this.world.roomChoices !== null) {
+      this.drawRoomChoices(o, scale);
+      return;
+    }
     if (this.world.artifactChoices.length === 0 && this.world.shopOffers === null) return;
     o.save();
     o.scale(scale, scale);
@@ -325,7 +425,9 @@ export class Hud {
     o.font = "bold 11px sans-serif";
     const offer = this.world.curseOffer;
     const shop = this.world.shopOffers;
-    o.fillText(shop !== null ? "CỬA HÀNG" : this.world.curseTab && offer !== null ? "HAI CỔ VẬT + MỘT NGUYỀN RỦA" : "CHỌN MỘT CỔ VẬT", 160, 10);
+    o.fillText(shop !== null ? "CỬA HÀNG" :
+      this.world.room.kind === "shrine" ? "HIẾN TẾ ĐỔI CỔ VẬT" :
+        this.world.curseTab && offer !== null ? "HAI CỔ VẬT + MỘT NGUYỀN RỦA" : "CHỌN MỘT CỔ VẬT", 160, 10);
     o.font = "7px sans-serif";
     if (shop !== null) {
       o.fillStyle = "#ffd166";
@@ -334,15 +436,17 @@ export class Hud {
       o.fillStyle = "#a7b4c9";
       o.fillText("Đã sạch phòng · Chạm để chọn và tiếp tục", 160, 26);
     } else {
-      const tabs: [string, number, boolean][] = [
-        ["THƯỜNG", 16, !this.world.curseTab],
-        ["NGUYỀN RỦA", 160, this.world.curseTab],
-      ];
-      for (const [label, left, active] of tabs) {
-        o.fillStyle = active ? "#2b3242" : "#121419";
-        o.fillRect(left, 24, 144, 11);
-        o.fillStyle = active ? "#ffd166" : "#a7b4c9";
-        o.fillText(label, left + 72, 26);
+      if (this.world.room.kind !== "shrine") {
+        const tabs: [string, number, boolean][] = [
+          ["THƯỜNG", 16, !this.world.curseTab],
+          ["NGUYỀN RỦA", 160, this.world.curseTab],
+        ];
+        for (const [label, left, active] of tabs) {
+          o.fillStyle = active ? "#2b3242" : "#121419";
+          o.fillRect(left, 24, 144, 11);
+          o.fillStyle = active ? "#ffd166" : "#a7b4c9";
+          o.fillText(label, left + 72, 26);
+        }
       }
     }
     o.textAlign = "left";
@@ -477,6 +581,43 @@ export class Hud {
     o.restore();
   }
 
+  private drawRoomChoices(o: CanvasRenderingContext2D, scale: number): void {
+    const offer = this.world.roomChoices;
+    if (offer === null) return;
+    o.save();
+    o.scale(scale, scale);
+    o.fillStyle = "rgba(8, 9, 13, 0.94)";
+    o.fillRect(0, 0, 320, 180);
+    o.textBaseline = "top";
+    o.textAlign = "center";
+    o.fillStyle = "#e4ebf7";
+    o.font = "bold 11px sans-serif";
+    o.fillText(offer.title, 160, 12);
+    o.fillStyle = "#a7b4c9";
+    o.font = "7px sans-serif";
+    o.fillText(offer.subtitle, 160, 28);
+    offer.choices.forEach((choice, i) => {
+      const x = 12 + i * 102;
+      const color = choice.disabled ? "#626a78" : i === 2 ? "#c99ae6" : "#ffd166";
+      o.globalAlpha = choice.disabled ? 0.48 : 1;
+      o.fillStyle = "#111622";
+      o.fillRect(x, 48, 92, 88);
+      o.strokeStyle = color;
+      o.strokeRect(x + 0.5, 48.5, 91, 87);
+      o.fillStyle = color;
+      o.fillRect(x, 48, 92, 3);
+      o.fillStyle = "#ffffff";
+      o.font = "bold 8px sans-serif";
+      o.fillText(`[${i + 1}] ${choice.label}`, x + 46, 64, 82);
+      o.fillStyle = "#b8c2d4";
+      o.font = "7px sans-serif";
+      const lines = wrapLines(o, choice.detail, 78);
+      lines.slice(0, 4).forEach((line, lineIndex) => o.fillText(line, x + 46, 82 + lineIndex * 9, 80));
+      o.globalAlpha = 1;
+    });
+    o.restore();
+  }
+
   /** persistent strip of owned artifacts, placed below room info and gold */
   drawOwnedArtifacts(o: CanvasRenderingContext2D, scale: number): void {
     const ids = [...this.world.artifacts];
@@ -512,10 +653,14 @@ export class Hud {
     const empty = this.sprites.heart_empty;
     const step = 9;
 
-    // 1. Dãy tim máu (HP)
+    // 1. Dãy tim máu (HP): Hỗ trợ cuộn/gập hàng khi maxHp lớn (D10)
+    const maxPerRow = 10;
+    const clampedStep = w.player.maxHp > maxPerRow ? 8 : step;
     for (let i = 0; i < w.player.maxHp; i++) {
-      const x = Math.round((6 + i * step) * scale);
-      const y = Math.round(6 * scale);
+      const col = i % maxPerRow;
+      const row = Math.floor(i / maxPerRow);
+      const x = Math.round((6 + col * clampedStep) * scale);
+      const y = Math.round((6 + row * 8) * scale);
       const width = full.w * scale;
       const height = full.h * scale;
       const fill = Math.max(0, Math.min(1, w.player.hp - i));
@@ -540,7 +685,8 @@ export class Hud {
 
     // 2. Thông tin nhân vật và vũ khí (Tách sang bên phải với khoảng cách thoáng tối thiểu 72px)
     const cdef = CHARACTERS[w.player.character];
-    const badgeX = Math.max(72, 10 + w.player.maxHp * step + 8);
+    const heartsWidth = Math.min(maxPerRow, w.player.maxHp) * clampedStep;
+    const badgeX = Math.max(72, 10 + heartsWidth + 8);
 
     // Huy hiệu & Tên nhân vật (Hàng 1: y = 5)
     o.textBaseline = "top";
@@ -560,7 +706,10 @@ export class Hud {
       o.font = `${Math.round(5.5 * scale)}px sans-serif`;
       o.globalAlpha = 0.9;
       o.fillStyle = wdef.color;
-      o.fillText(wdef.name, Math.round((badgeX + 8) * scale), wy);
+      const weaponLabel = w.player.weaponDamageBonus > 0
+        ? `${wdef.name} +${w.player.weaponDamageBonus} dmg`
+        : wdef.name;
+      o.fillText(weaponLabel, Math.round((badgeX + 8) * scale), wy);
     }
     o.globalAlpha = 1;
 
@@ -586,7 +735,10 @@ export class Hud {
     o.textBaseline = "top";
     o.fillStyle = P.TEXT;
     o.globalAlpha = 0.75;
-    o.fillText(`${w.roomIndex + 1}/${w.roomTotal}  ${w.room.name}`, Math.round(6 * scale), Math.round(16 * scale));
+    const roomLabel = w.mode === "town"
+      ? w.room.name
+      : `${w.roomIndex + 1}/${w.roomTotal}  ${w.room.name}`;
+    o.fillText(roomLabel, Math.round(6 * scale), Math.round(16 * scale));
     o.fillStyle = P.ENEMY_EYE;
     const coinY = Math.round((25 + Math.sin(w.tickCount * 0.1)) * scale);
     o.fillText(`◆ ${w.runStats.gold}`, Math.round(6 * scale), coinY);

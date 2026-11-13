@@ -328,8 +328,10 @@ export class FxLayer {
       const shockFlash = type === "shock" && ft.left > ft.total - 2;
       const pulse = ft.style === "heal" ? 1 + 0.12 * Math.sin(ft.left * 0.55) : 1;
       g.font = crit ? "bold 7px ui-monospace, monospace" : "bold 5px ui-monospace, monospace";
-      // crits jitter ±1px so the blow reads heavy
-      if (crit || type === "shock") x += Math.floor((ft.left * (type === "shock" ? 17 : 7)) % (type === "shock" ? 5 : 3)) - (type === "shock" ? 2 : 1);
+      // D5: Giảm jitter của damage numbers để dễ đọc khi đông quái
+      if (this.texts.length <= 4 && (crit || type === "shock")) {
+        x += Math.floor((ft.left * (type === "shock" ? 17 : 7)) % (type === "shock" ? 3 : 2)) - 1;
+      }
       g.globalAlpha = Math.min(1, (ft.left / ft.total) * 1.8);
       if (shockFlash) g.globalAlpha = 1;
       if (pulse !== 1) g.globalAlpha *= 0.8 + 0.2 * pulse;

@@ -59,10 +59,14 @@ if (qs.get("resetAch") === "1") {
 const game = document.getElementById("game") as HTMLCanvasElement;
 const overlay = document.getElementById("overlay") as HTMLCanvasElement;
 const panel = document.getElementById("panel") as HTMLDivElement;
+const startScreen = document.getElementById("start-screen") as HTMLDivElement;
 
 const sprites = buildSprites();
 const world = new World(seed, readStore());
-if (qs.get("room") !== null) world.loadRoom(Number(qs.get("room")));
+if (qs.get("room") !== null) {
+  world.mode = "dungeon";
+  world.loadRoom(Number(qs.get("room")));
+}
 const cam = new Camera();
 cam.snap(world.player.x, world.player.y - 6);
 const renderer = new Renderer(game, overlay, world, cam, sprites);
@@ -81,7 +85,7 @@ const flags: DebugFlags = {
 };
 
 function applyHotkey(k: Hotkey): void {
-  if (world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null) return;
+  if (world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || world.roomChoices !== null || world.dialogue !== null) return;
   switch (k) {
     case "panel":
       panel.classList.toggle("on");
@@ -118,7 +122,7 @@ function applyHotkey(k: Hotkey): void {
 
 const desk = new DesktopInput(intent, {
   tick: () => world.tickCount,
-  blocked: () => world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || endScreen.isOpen(),
+  blocked: () => world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || world.roomChoices !== null || world.dialogue !== null || endScreen.isOpen(),
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
@@ -138,7 +142,8 @@ if (touchLayer !== null) {
         document.getElementById("knob") as HTMLElement,
         document.getElementById("btn-attack") as HTMLElement,
         document.getElementById("btn-dash") as HTMLElement,
-        document.getElementById("btn-skill") as HTMLElement
+        document.getElementById("btn-skill") as HTMLElement,
+        document.getElementById("btn-interact") ?? document.createElement("div")
       );
     }
   }
@@ -150,7 +155,7 @@ function resetInput(): void {
   touch?.reset();
 }
 /** the start screen sits above the canvas, so its clicks must not be swallowed by the modal blocker */
-const modalActive = (): boolean => startScreen.hidden && (world.characterChoices.length > 0 || world.weaponChoices !== null || world.artifactChoices.length > 0 || world.shopOffers !== null);
+const modalActive = (): boolean => startScreen.hidden && (world.characterChoices.length > 0 || world.weaponChoices !== null || world.artifactChoices.length > 0 || world.shopOffers !== null || world.roomChoices !== null || world.dialogue !== null);
 function syncArtifactModal(): boolean {
   const open = modalActive();
   if (open !== modalOpen) {
@@ -188,6 +193,14 @@ function applyModal(key: string, from: ModalKey): void {
     else if (key === "q:+") world.setAscensionLevel(world.ascensionLevel + 1);
     return;
   }
+  if (from === "d" || key.startsWith("d:")) {
+    if (world.chooseDialogueOption(Number(key.slice(2)))) {
+      resetInput();
+      suppressModalClick = false;
+    }
+    syncArtifactModal();
+    return;
+  }
   if (from === "w" || key.startsWith("w:")) {
     if (world.pickWeapon(key.slice(2) as WeaponId)) {
       resetInput();
@@ -219,10 +232,16 @@ function applyModal(key: string, from: ModalKey): void {
       suppressModalClick = false;
     }
     syncArtifactModal();
+  } else if (key.startsWith("e:")) {
+    if (world.chooseRoomOption(Number(key.slice(2)))) {
+      resetInput();
+      suppressModalClick = false;
+    }
+    syncArtifactModal();
   } else chooseArtifact(key.slice(2) as ArtifactId);
 }
 /** which modal a pointer press landed in; the key after the prefix tells which id was hit */
-type ModalKey = "p" | "w" | "a" | "c" | "s" | "t" | "q";
+type ModalKey = "p" | "w" | "a" | "c" | "s" | "t" | "q" | "e" | "d";
 function modalKind(key: string | null): ModalKey | null {
   if (key === null) return null;
   return key[0] as ModalKey;
@@ -275,6 +294,26 @@ for (const type of ["pointerup", "pointercancel"] as const) {
 }
 // Keyboard selection shortcuts for character screen [1]-[3] and weapon screen [1]-[5]
 window.addEventListener("keydown", (e) => {
+  if (e.code === "Escape" && world.dialogue !== null) {
+    e.preventDefault();
+    world.closeDialogueByUser();
+    syncArtifactModal();
+    return;
+  }
+  if (world.dialogue !== null && /^Digit[1-3]$|^Numpad[1-3]$/.test(e.code)) {
+    e.preventDefault();
+    const index = Number(e.code.slice(-1)) - 1;
+    world.chooseDialogueOption(index);
+    syncArtifactModal();
+    return;
+  }
+  if (world.roomChoices !== null && /^Digit[1-3]$|^Numpad[1-3]$/.test(e.code)) {
+    e.preventDefault();
+    const index = Number(e.code.slice(-1)) - 1;
+    world.chooseRoomOption(index);
+    syncArtifactModal();
+    return;
+  }
   if (world.weaponChoices !== null && world.weaponChoices.length > 0) {
     let pickWId: WeaponId | null = null;
     if (e.code === "Digit1" || e.code === "Numpad1") pickWId = world.weaponChoices[0];
@@ -358,7 +397,7 @@ function botIntent(): Intent {
     }
   }
   if (target === null) {
-    return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
+    return { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, interact: false };
   }
   const a = Math.atan2(target.y - p.y, target.x - p.x);
   const close = best <= CONFIG.ATTACK.REACH * 0.95;
@@ -370,6 +409,7 @@ function botIntent(): Intent {
     attack: close && world.tickCount % 14 === 0,
     dash: best > 70 && world.tickCount % 89 === 0,
     skill: false,
+    interact: false,
   };
 }
 
@@ -384,6 +424,9 @@ function sim(): void {
   /** hit-stop must not swallow presses: read(live=false) leaves them queued for the first tick after the freeze */
   const live = world.hitStopTicks === 0;
   if (!autoplay) {
+    const aim = intent.aim ?? { x: world.player.x, y: world.player.y };
+    cam.follow(world.player.x, world.player.y - 6, aim.x, aim.y, world.room, CONFIG.TIME.TICK);
+    renderer.origin = cam.origin(world.room);
     desk.sampleAim();
     world.tick(intent.read(world.tickCount, live));
     return;
@@ -402,6 +445,7 @@ let originalTimescale = 1;
 
 function frame(dtReal: number): void {
   syncArtifactModal();
+  world.tickDialogueVisual(dtReal);
   diag.frame();
 
   // Slowmo 0.3x trong 0.3s khi người chơi vừa hy sinh
@@ -442,6 +486,7 @@ function frame(dtReal: number): void {
   hud.drawCharacters(o, renderer.scale);
   if (weaponSelect.isOpen()) weaponSelect.draw(o, renderer.scale);
   if (endScreen.isOpen()) endScreen.draw(o, renderer.scale);
+  hud.drawInteractPrompt(o, renderer.scale, renderer.origin);
   hud.drawAchievementToast(o, renderer.scale);
 }
 
@@ -455,15 +500,16 @@ const diag = startDiag(qs.get("diag") === "1", () => ({
 }));
 
 const loop = new GameLoop(sim, frame);
-const startScreen = document.getElementById("start-screen") as HTMLDivElement;
 const startButton = document.getElementById("btn-start") as HTMLButtonElement;
 function startGame(): void {
   startScreen.hidden = true;
   document.body.classList.remove("starting");
+  sfx.unlock(); // D9: Đảm bảo AudioContext được mở khóa kể cả ở autoplay / manual
   /** the capture harnesses assert on frames counted from the fight itself, so no intro walk there */
   if (autoplay) {
     world.characterChoices = [];
     world.weaponChoices = null;
+    world.enterDungeon(false);
   }
   if (!autoplay) {
     desk.attach();

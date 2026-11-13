@@ -35,14 +35,36 @@ export const MARKER_KIND: Record<string, EnemyKind> = {
 
 export type SpawnMark = { x: number; y: number; kind: EnemyKind };
 
+export type RoomKind = "combat" | "town" | "shop" | "treasure" | "rest" | "elite" | "event" | "shrine" | "boss" | "challenge";
+
 export type Template = {
   name: string;
-  /** interior rows only; a wall border is added automatically, short rows are padded with floor */
   rows: string[];
   shop?: boolean;
+  /** scene the template belongs to; omitted means "combat" */
+  kind?: RoomKind;
 };
 
 const FLOOR_ROW = ".".repeat(22);
+
+export const TOWN_TEMPLATE: Template = {
+  name: "Thị trấn",
+  kind: "town",
+  rows: [
+    "......................",
+    "......................",
+    "......................",
+    "......................",
+    "......................",
+    "S.....................",
+    "......................",
+    "......................",
+    "......................",
+    "......................",
+    "......................",
+    "......................",
+  ],
+};
 
 export const TEMPLATES: Template[] = [
   {
@@ -179,6 +201,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     name: "Phòng kho báu",
+    kind: "treasure",
     rows: [
       "......................",
       "..OO..............OO..",
@@ -213,6 +236,7 @@ export const TEMPLATES: Template[] = [
   },
   {
     name: "Cửa hàng",
+    kind: "shop",
     shop: true,
     rows: [
       "......................",
@@ -230,7 +254,98 @@ export const TEMPLATES: Template[] = [
     ],
   },
   {
+    name: "Lửa trại",
+    kind: "rest",
+    rows: [
+      "......................",
+      "..O................O..",
+      "......................",
+      "......................",
+      "......................",
+      "S.....................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "..O................O..",
+      "......................",
+    ],
+  },
+  {
+    name: "Sàn tinh anh",
+    kind: "elite",
+    rows: [
+      "......................",
+      "..O................O..",
+      "......................",
+      "......................",
+      "......................",
+      "S.....................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "..O................O..",
+      "......................",
+    ],
+  },
+  {
+    name: "Giếng cổ",
+    kind: "event",
+    rows: [
+      "......................",
+      "..O................O..",
+      "......................",
+      "......................",
+      "......................",
+      "S.....................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "..O................O..",
+      "......................",
+    ],
+  },
+  {
+    name: "Đền thờ",
+    kind: "shrine",
+    rows: [
+      "......................",
+      "..O................O..",
+      "......................",
+      "......................",
+      "......................",
+      "S.....................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "..O................O..",
+      "......................",
+    ],
+  },
+  {
+    name: "Thử thách",
+    kind: "challenge",
+    rows: [
+      "......................",
+      "......................",
+      "..E......C......R.....",
+      "......................",
+      "......................",
+      "S.....................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+      "......................",
+    ],
+  },
+  {
     name: "Sàn nghi thức",
+    kind: "boss",
     rows: [
       "..........................",
       "..O....O........O....O....",
@@ -253,7 +368,10 @@ export class Room {
   readonly h: number;
   readonly index: number;
   readonly name: string;
-  readonly shop: boolean;
+  readonly kind: RoomKind;
+  get shop(): boolean {
+    return this.kind === "shop";
+  }
   readonly tiles: Uint8Array;
   readonly spawns: SpawnMark[] = [];
   /** wall torches: one every ~8 wall tiles, flicker phase varies per torch */
@@ -271,7 +389,7 @@ export class Room {
     this.h = innerH + 2;
     this.index = index;
     this.name = template.name;
-    this.shop = template.shop ?? false;
+    this.kind = template.kind ?? (template.shop ? "shop" : "combat");
     this.tiles = new Uint8Array(this.w * this.h);
 
     const rng = makeRng(0x9e37 + index * 7919);

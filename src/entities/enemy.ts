@@ -155,6 +155,31 @@ export class Enemy implements Unit {
     return this.state === ENEMY_STATE.ATTACK && this.swing !== null && this.swing.phase === "recover";
   }
 
+  telegraphThreatens(x: number, y: number): boolean {
+    if (this.state !== ENEMY_STATE.TELEGRAPH) return false;
+    const e = this.def;
+    const dx = x - this.x;
+    const dy = y - this.y;
+    const distance = Math.hypot(dx, dy);
+    if (e.EXPLODE_RADIUS > 0) return distance <= e.EXPLODE_RADIUS;
+    if (this.kind === "warden" && this.pattern === "summon") return false;
+    if (this.kind === "king" && this.kingPhase === 3) return distance <= e.ATTACK_REACH + 8;
+    if (e.SNIPER || this.kind === "warden" && this.pattern === "laser") {
+      const along = dx * Math.cos(this.telegraphDir) + dy * Math.sin(this.telegraphDir);
+      const across = Math.abs(-dx * Math.sin(this.telegraphDir) + dy * Math.cos(this.telegraphDir));
+      return along >= 0 && across <= 8;
+    }
+    if (this.kind === "warden" && this.pattern === "spiral") {
+      const ray = Math.PI / 4;
+      const nearestRay = Math.round(Math.atan2(dy, dx) / ray) * ray;
+      return distance <= e.ATTACK_REACH + 8 &&
+        Math.abs(normAngle(Math.atan2(dy, dx) - nearestRay)) <= Math.PI / 8;
+    }
+    if (distance > e.ATTACK_REACH + 8) return false;
+    if (e.RADIAL) return true;
+    return Math.abs(normAngle(Math.atan2(dy, dx) - this.telegraphDir)) <= e.ATTACK_ARC_DEG * Math.PI / 360;
+  }
+
   onHit(sw: Swing, _cx: number, _cy: number, src: Sim): boolean {
     const e = this.def;
     if (this.dead) return false;
@@ -205,7 +230,10 @@ export class Enemy implements Unit {
       this.split(src);
       src.runStats.enemiesKilled++;
       src.runStats.killStreak++;
-      const bounty = this.isElite ? 3 : this.kind === "boss" ? 20 : 1;
+      const baseBounty = this.isElite
+        ? src.room.kind === "elite" ? 6 : 3
+        : this.kind === "boss" ? 20 : 1;
+      const bounty = baseBounty * (src.room.kind === "challenge" ? 3 : 1);
       src.runStats.gold += bounty;
       src.runStats.totalGoldEarned += bounty;
       if (this.isElite) src.runStats.eliteKills++;
@@ -573,6 +601,7 @@ export class Enemy implements Unit {
       shake(src.queue, this.x, this.y, dir, 1.2);
       sfx(src.queue, "aftershock_boom", 1, 1.1);
       this.die();
+      src.runStats.enemiesKilled++;
       return;
     }
     if (this.kind === "warden") {
@@ -635,6 +664,7 @@ export class Enemy implements Unit {
       dmg: e.SHOT_DMG * this.dmgScale,
       ticksLeft: e.SHOT_LIFE_TICKS,
       owner: "enemy",
+      sourceKind: this.kind,
       ...(kind !== undefined ? { kind } : {}),
     });
   }
@@ -781,9 +811,6 @@ export class Enemy implements Unit {
     return pulse(elapsed, e.BLINK_INTERVAL);
   }
 
-  spriteFrame(): number {
-    return Math.floor(this.animTicks / 11) % 2;
-  }
 }
 
 export function resetEnemyIds(): void {

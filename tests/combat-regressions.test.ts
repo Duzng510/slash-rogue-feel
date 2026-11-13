@@ -2,20 +2,28 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CONFIG } from "../src/config.ts";
 import { World } from "../src/world/world.ts";
-import { Room } from "../src/world/rooms.ts";
+import { Room, TEMPLATES } from "../src/world/rooms.ts";
 import { createSwing, hitboxOf, playerSwingInit, resolveHits } from "../src/systems/combat.ts";
 import { makeEnemy, ENEMY_STATE } from "../src/entities/enemy.ts";
+import { resolveProjectiles } from "../src/systems/projectiles.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
 import { ARTIFACTS, ARTIFACT_UNLOCKS } from "../src/systems/artifacts.ts";
+import type { Dialogue } from "../src/systems/dialogue.ts";
 import { emptyStats } from "../src/systems/runStats.ts";
 import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import type { Intent } from "../src/sim/types.ts";
+import { dialogueOptionAt } from "../src/ui/dialogueLayout.ts";
 
-const idle: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
+function dialogueNodeId(world: World): string | null {
+  return world.dialogue?.nodeId ?? null;
+}
+
+const idle: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, interact: false };
 function sandbox() {
   const w = new World();
+  w.enterDungeon(false);
   w.clearEnemies();
   w.player.reset(160, 100);
   w.queue.drain();
@@ -57,6 +65,73 @@ test("broad phase preserves arc-edge hits for both combos in every direction", (
       assert.equal(e.hp, hp - sw.dmg);
     }
   }
+});
+
+test("dash credit requires a telegraph that can reach the player", () => {
+  const w = sandbox();
+  const far = makeEnemy(240, w.player.y, "chaser");
+  far.setState(ENEMY_STATE.TELEGRAPH);
+  far.telegraphDir = Math.PI;
+  const near = makeEnemy(w.player.x + 15, w.player.y, "chaser");
+  near.setState(ENEMY_STATE.TELEGRAPH);
+  near.telegraphDir = Math.PI;
+  w.enemies = [far];
+  w.player.tick({ ...idle, dash: true }, w);
+  assert.equal(w.runStats.perfectDodges, 0);
+
+  w.player.reset(160, 100);
+  near.telegraphDir = 0;
+  w.enemies = [near];
+  w.player.tick({ ...idle, dash: true }, w);
+  assert.equal(w.runStats.perfectDodges, 0);
+
+  w.player.reset(160, 100);
+  near.telegraphDir = Math.PI;
+  w.enemies = [near];
+  w.player.tick({ ...idle, dash: true }, w);
+  assert.equal(w.runStats.perfectDodges, 1);
+});
+
+test("boss-origin projectiles count toward boss damage taken", () => {
+  const w = sandbox();
+  w.projectiles.push({
+    x: w.player.x,
+    y: w.player.y - 4,
+    vx: 0,
+    vy: 0,
+    dmg: 2,
+    ticksLeft: 2,
+    owner: "enemy",
+    sourceKind: "king",
+  });
+  resolveProjectiles(w);
+  assert.equal(w.runStats.bossDamageTaken, 2);
+});
+
+test("tank reflect does not hit splitter children spawned during its enemy pass", () => {
+  const w = sandbox();
+  w.player.character = "tank";
+  w.player.skillActiveTicks = 1;
+  const splitter = makeEnemy(w.player.x + 10, w.player.y, "splitter");
+  splitter.hp = 1;
+  w.enemies = [splitter];
+  w.syncUnits();
+  const sw = createSwing(w, {
+    side: "enemy",
+    combo: 1,
+    dir: 0,
+    ox: splitter.x,
+    oy: splitter.y,
+    reach: 1,
+    deg: 90,
+    dmg: 1,
+    knockback: 0,
+    fd: { startup: 0, active: 1, recovery: 0 },
+  });
+  w.player.onHit(sw, w.player.x, w.player.y, w);
+  const children = w.enemies.filter(e => e !== splitter);
+  assert.equal(children.length, 2);
+  assert.ok(children.every(child => child.hp === child.maxHp));
 });
 
 test("attacking preserves normal movement in every swing phase and leaves dash unchanged", () => {
@@ -187,6 +262,8 @@ test("being hit clears combo immediately", () => {
 
 test("artifacts gate doors, pause combat and cannot be farmed", () => {
   const w = new World(CONFIG.SEED, allUnlocks());
+  w.enterDungeon(false);
+  w.characterChoices = [];
   w.clearEnemies();
   w.player.reset(160, 100);
   w.queue.drain();
@@ -212,7 +289,37 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
   for (let room = 1; room < w.roomTotal; room++) {
     w.loadRoom(room);
     w.clearEnemies();
+    if (w.room.kind === "rest") {
+      w.player.x = w.room.widthPx / 2;
+      w.player.y = w.room.heightPx / 2;
+      w.tick(idle);
+      assert.equal(w.chooseRoomOption(0), true);
+      continue;
+    }
     w.tick(idle);
+    if (w.room.kind === "event") {
+      assert.ok(w.roomChoices);
+      assert.equal(w.chooseRoomOption(w.roomChoices.choices.length - 1), true);
+      continue;
+    }
+    if (w.room.kind === "shrine") {
+      if (w.curseOffer !== null) {
+        assert.equal(w.curseOffer.artifacts.length, 1);
+        assert.equal(w.curseOffer.curses.length, 1);
+        assert.equal(w.chooseCurse(w.curseOffer.curses[0]!.id), true);
+      } else assert.equal(w.room.doorOpen, true);
+      continue;
+    }
+    if (w.room.kind === "challenge") {
+      for (let wave = 1; wave < 3; wave++) {
+        for (let tick = 0; tick < 90; tick++) w.tick(idle);
+        w.clearEnemies();
+        w.tick(idle);
+      }
+      if (w.artifactChoices.length > 0) w.chooseArtifact(w.artifactChoices[0]!.id);
+      else assert.equal(w.room.doorOpen, true);
+      continue;
+    }
     if (w.room.shop) {
       assert.equal(w.shopOffers!.length, 3);
       w.leaveShop();
@@ -226,6 +333,8 @@ test("artifacts gate doors, pause combat and cannot be farmed", () => {
 
 test("a fresh save only offers the two unlocked artifacts, then gating opens more", () => {
   const fresh = new World(CONFIG.SEED, { earned: new Set<AchievementId>(), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
+  fresh.enterDungeon(false);
+  fresh.characterChoices = [];
   fresh.clearEnemies();
   fresh.player.reset(160, 100);
   fresh.tick(idle);
@@ -235,6 +344,8 @@ test("a fresh save only offers the two unlocked artifacts, then gating opens mor
   assert.ok(!offered.includes("lightning"));
 
   const withFirstBlood = new World(CONFIG.SEED, { earned: new Set<AchievementId>(["first_blood"]), best: null, totalGold: 0, charactersWon: new Set(), weaponsWon: new Set(), ascensionMax: 0 });
+  withFirstBlood.enterDungeon(false);
+  withFirstBlood.characterChoices = [];
   withFirstBlood.clearEnemies();
   withFirstBlood.player.reset(160, 100);
   withFirstBlood.tick(idle);
@@ -273,7 +384,7 @@ test("dying freezes the run, ends it after END_DELAY, then restart resets it", (
   assert.equal(w.runStats.enemiesKilled, 4);
   w.restart();
   assert.equal(w.pendingEnd, null);
-  assert.equal(w.roomIndex, 0);
+  assert.equal(w.roomIndex, -1);
   assert.equal(w.artifacts.size, 0);
   assert.equal(w.runStats.enemiesKilled, 0);
 });
@@ -308,7 +419,7 @@ test("clearing the last room ends the run with victory", () => {
   w2.artifacts.add("fire");
   w2.restart();
   assert.equal(w2.pendingEnd, null);
-  assert.equal(w2.roomIndex, 0);
+  assert.equal(w2.roomIndex, -1);
   assert.equal(w2.artifacts.size, 0);
 });
 
@@ -735,7 +846,7 @@ test("healer pulses 1 HP to nearby allies every 3s, never itself or far allies",
   assert.deepEqual([near.hp, far.hp, h.hp], [21, 20, 1]);
 });
 
-test("exploder detonates for 3 dmg within 50px, spares outsiders, dies without kill credit", () => {
+test("exploder detonates for 3 dmg within 50px, spares outsiders, and counts as killed", () => {
   const w = sandbox();
   const e = makeEnemy(w.player.x + 40, w.player.y, "exploder");
   w.enemies = [e];
@@ -744,7 +855,7 @@ test("exploder detonates for 3 dmg within 50px, spares outsiders, dies without k
   for (let i = 0; i < 200 && !e.dead; i++) e.tick(w, w.grid);
   assert.ok(e.dead);
   assert.equal(w.player.hp, hp - 3);
-  assert.equal(w.runStats.enemiesKilled, 0);
+  assert.equal(w.runStats.enemiesKilled, 1);
 
   const w2 = sandbox();
   const f = makeEnemy(w2.player.x + 90, w2.player.y, "exploder");
@@ -842,7 +953,7 @@ test("boss death pays 20 gold into both run and lifetime counters", () => {
 
 test("shop offers three goods, purchases deduct gold and reject when broke", () => {
   const w = sandbox();
-  w.loadRoom(w.roomTotal - 2);
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "shop"));
   w.player.hp = 1;
   w.runStats.gold = 20;
   w.tick(idle);
@@ -857,16 +968,291 @@ test("shop offers three goods, purchases deduct gold and reject when broke", () 
   assert.equal(w.shopOffers, null);
 });
 
+test("town NPCs target nearby interactions and lock character changes after a kill", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  assert.equal(w.characterChoices.length, 3);
+  assert.deepEqual(w.npcList.map((npc) => npc.kind), ["character_master", "merchant", "guard"]);
+  w.characterChoices = [];
+  w.weaponChoices = null;
+  const nearbyKind = () => w.nearbyNpc?.kind ?? null;
+
+  w.player.x = 136 + 25;
+  w.player.y = 76;
+  w.tick({ ...idle, interact: true });
+  assert.equal(nearbyKind(), null);
+  assert.equal(w.shopOffers, null);
+
+  w.player.x = 136 + 24;
+  w.tick(idle);
+  assert.equal(nearbyKind(), "merchant");
+
+  w.player.x = 136;
+  w.player.y = 76;
+  w.tick({ ...idle, attack: true, interact: true });
+  assert.equal(nearbyKind(), "merchant");
+  assert.equal(dialogueNodeId(w), "greet");
+  assert.equal(w.shopOffers, null);
+  assert.equal(w.player.swing, null);
+  w.chooseDialogueOption(1);
+  w.chooseDialogueOption(1);
+  assert.equal(w.dialogue, null);
+  assert.equal(w.shopOffers, null);
+
+  w.player.x = 264;
+  w.player.y = 124;
+  w.tick({ ...idle, interact: true });
+  assert.equal(nearbyKind(), "guard");
+  assert.equal(w.bannerText, "Hầm ngục ở phía đông — chúc may mắn.");
+
+  w.player.x = 40;
+  w.player.y = 60;
+  w.tick({ ...idle, interact: true });
+  assert.equal(dialogueNodeId(w), "greet");
+  assert.equal(w.characterChoices.length, 0);
+  w.chooseDialogueOption(1);
+  w.chooseDialogueOption(1);
+  assert.equal(w.dialogue, null);
+  assert.equal(w.characterChoices.length, 0);
+  w.characterChoices = [];
+  w.enterDungeon(false);
+  w.runStats.enemiesKilled = 1;
+  w.enterTown();
+  w.characterChoices = [];
+  w.player.x = 40;
+  w.player.y = 60;
+  w.tick({ ...idle, interact: true });
+  assert.equal(w.characterChoices.length, 0);
+  assert.equal(w.bannerText, "Đã vào hầm ngục, không thể đổi nữa.");
+
+  w.enterDungeon(false);
+  assert.equal(w.npcList.length, 0);
+  assert.equal(w.nearbyNpc, null);
+});
+
+test("town props are scoped to town and dialogue text must finish before an option runs", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  assert.deepEqual(w.townProps.map((prop) => prop.sprite), [
+    "prop_well",
+    "prop_tree",
+    "prop_tree",
+    "prop_signpost",
+    "prop_lantern",
+    "prop_lantern",
+  ]);
+  w.enterDungeon(false);
+  assert.deepEqual(w.townProps, []);
+  w.enterTown();
+
+  const dialogue: Dialogue = {
+    start: "first",
+    nodes: {
+      first: {
+        speaker: "Test",
+        portrait: "",
+        text: "Hello",
+        options: [{ label: "Continue", action: { t: "next", node: "second" } }],
+      },
+      second: {
+        speaker: "Test",
+        portrait: "",
+        text: "Done",
+        options: [{ label: "Close", action: { t: "close" } }],
+      },
+    },
+  };
+  w.openDialogue(dialogue);
+  w.tickDialogueVisual(0.05);
+  assert.equal(w.dialogue?.charIndex, 2);
+  assert.equal(w.chooseDialogueOption(0), true);
+  assert.equal(w.dialogue?.nodeId, "first");
+  assert.equal(w.dialogue?.charIndex, 5);
+  assert.equal(w.chooseDialogueOption(0), true);
+  assert.equal(w.dialogue?.nodeId, "second");
+  assert.equal(w.dialogue?.charIndex, 0);
+
+  assert.equal(w.closeDialogueByUser(), true);
+  assert.equal(w.dialogue?.charIndex, 4);
+  assert.equal(w.closeDialogueByUser(), true);
+  assert.equal(w.dialogue, null);
+});
+
+test("dialogue pointer targets match the drawn option rectangles for every row", () => {
+  assert.equal(dialogueOptionAt(36, 108, 3), 0);
+  assert.equal(dialogueOptionAt(164, 108, 3), 1);
+  assert.equal(dialogueOptionAt(36, 128, 3), 2);
+  assert.equal(dialogueOptionAt(36, 125, 3), null);
+  assert.equal(dialogueOptionAt(36, 145, 3), null);
+});
+
+test("town bell waits four seconds, repeats on its town timer, and stops in dungeons", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  const hasBell = () => w.queue.drain().some((event) => event.t === "sfx" && event.name === "town_bell");
+
+  for (let i = 0; i < 240; i++) w.tick(idle);
+  assert.equal(hasBell(), false);
+  w.tick(idle);
+  assert.equal(hasBell(), true);
+
+  for (let i = 0; i < 361; i++) w.tick(idle);
+  assert.equal(hasBell(), true);
+  w.enterDungeon(false);
+  w.queue.drain();
+  for (let i = 0; i < 361; i++) w.tick(idle);
+  assert.equal(hasBell(), false);
+});
+
 test("shop curse removal deletes one curse and charges 30 gold", () => {
   const w = sandbox();
   w.curses.add("glass");
-  w.loadRoom(w.roomTotal - 2);
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "shop"));
   w.runStats.gold = 50;
   w.tick(idle);
   const i = w.shopOffers!.findIndex(o => o.kind === "curse");
   assert.ok(i >= 0);
   assert.ok(w.chooseShop(i));
   assert.deepEqual([w.curses.size, w.runStats.gold], [0, 20]);
+});
+
+test("rest room offers one heal or a persistent capped weapon upgrade", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "rest"));
+  w.player.x = w.room.widthPx / 2;
+  w.player.y = w.room.heightPx / 2;
+  w.player.hp = 1;
+  w.player.weaponDamageBonus = 2;
+  w.tick(idle);
+  assert.equal(w.roomChoices?.choices.length, 2);
+  assert.equal(w.chooseRoomOption(1), true);
+  assert.equal(w.player.weaponDamageBonus, 3);
+  assert.equal(playerSwingInit(w, 1, 0).dmg, 4);
+  assert.equal(w.room.doorOpen, true);
+
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "rest"));
+  w.player.x = w.room.widthPx / 2;
+  w.player.y = w.room.heightPx / 2;
+  w.player.hp = 1;
+  w.tick(idle);
+  assert.equal(w.roomChoices?.choices[1]?.disabled, true);
+  assert.equal(w.chooseRoomOption(0), true);
+  assert.equal(w.player.hp, 3);
+  assert.equal(w.player.weaponDamageBonus, 3);
+});
+
+test("treasure room offers normal artifacts and a one-curse bundle", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "treasure"));
+  w.tick(idle);
+  assert.equal(w.artifactChoices.length, 3);
+  assert.equal(w.curseOffer?.artifacts.length, 2);
+  assert.equal(w.curseOffer?.curses.length, 1);
+});
+
+test("elite room fields one elite and doubles its bounty", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "elite"));
+  assert.equal(w.enemies.length, 1);
+  const elite = w.enemies[0]!;
+  assert.equal(elite.isElite, true);
+  elite.hp = 1;
+  elite.onHit(createSwing(w, {
+    side: "player",
+    combo: 1,
+    dir: 0,
+    ox: elite.x,
+    oy: elite.y,
+    reach: 1,
+    deg: 90,
+    dmg: 1,
+    knockback: 0,
+    fd: { startup: 0, active: 1, recovery: 0 },
+  }), elite.x, elite.y, w);
+  assert.equal(w.runStats.gold, 6);
+});
+
+test("event room opens a seeded choice modal and leaving unlocks the exit", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "event"));
+  w.tick(idle);
+  assert.ok(w.roomChoices);
+  assert.equal(w.chooseRoomOption(w.roomChoices.choices.length - 1), true);
+  assert.equal(w.roomChoices, null);
+  assert.equal(w.room.doorOpen, true);
+});
+
+test("event variants resolve the well bargain and blood-altar prayer", () => {
+  const eventIndex = TEMPLATES.findIndex(room => room.kind === "event");
+  let sawWell = false;
+  let sawAltar = false;
+  for (let attempt = 1; attempt <= 32 && (!sawWell || !sawAltar); attempt++) {
+    const seed = Math.imul(attempt, 0x9e3779b9) >>> 0;
+    const w = new World(seed, allUnlocks());
+    w.loadRoom(eventIndex);
+    w.runStats.gold = 5;
+    w.tick(idle);
+    if (w.roomChoices?.title === "CÁI GIẾNG CỔ") {
+      sawWell = true;
+      assert.equal(w.chooseRoomOption(1), true);
+      assert.equal(w.runStats.gold, 0);
+      assert.equal(w.runStats.artifactsTaken, 1);
+      assert.equal(w.room.doorOpen, true);
+    } else {
+      sawAltar = true;
+      assert.equal(w.roomChoices?.title, "BÀN THỜ MÁU");
+      assert.equal(w.chooseRoomOption(1), true);
+      assert.equal(w.curseOffer?.artifacts.length, 2);
+      assert.equal(w.chooseCurse(w.curseOffer!.curses[0]!.id), true);
+      assert.equal(w.runStats.artifactsTaken, 2);
+      assert.equal(w.runStats.cursesTaken, 1);
+    }
+  }
+  assert.ok(sawWell && sawAltar);
+});
+
+test("shrine exchanges one curse for one rare artifact", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "shrine"));
+  w.tick(idle);
+  assert.equal(w.curseOffer?.artifacts.length, 1);
+  assert.equal(w.curseOffer?.curses.length, 1);
+  assert.equal(w.chooseCurse(w.curseOffer!.curses[0]!.id), true);
+  assert.equal(w.runStats.artifactsTaken, 1);
+  assert.equal(w.runStats.cursesTaken, 1);
+  assert.equal(w.room.doorOpen, true);
+});
+
+test("challenge room pauses 90 ticks between waves and rewards rare artifacts", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "challenge"));
+  assert.equal(w.enemies.length, 3);
+  const first = w.enemies[0]!;
+  first.hp = 1;
+  first.onHit(createSwing(w, {
+    side: "player",
+    combo: 1,
+    dir: 0,
+    ox: first.x,
+    oy: first.y,
+    reach: 1,
+    deg: 90,
+    dmg: 1,
+    knockback: 0,
+    fd: { startup: 0, active: 1, recovery: 0 },
+  }), first.x, first.y, w);
+  assert.equal(w.runStats.gold, 3);
+  w.clearEnemies();
+  w.tick(idle);
+  for (let i = 0; i < 89; i++) w.tick(idle);
+  assert.equal(w.enemies.length, 0);
+  w.tick(idle);
+  assert.equal(w.enemies.length, 4);
+  w.clearEnemies();
+  w.tick(idle);
+  for (let i = 0; i < 90; i++) w.tick(idle);
+  assert.equal(w.enemies.length, 5);
+  w.clearEnemies();
+  w.tick(idle);
+  assert.ok(w.artifactChoices.length > 0);
+  assert.ok(w.artifactChoices.every(artifact => artifact.id === "glasscannon" || artifact.id === "phantom_dash"));
 });
 
 test("rich unlocks at 100 lifetime gold and totalGold survives a save round-trip", () => {

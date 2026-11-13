@@ -1,6 +1,7 @@
 import { CONFIG, enemyDef } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
 import { ENEMY_STATE, type Enemy } from "../entities/enemy.ts";
+import type { Npc } from "../entities/npc.ts";
 import { PLAYER_STATE } from "../entities/player.ts";
 import { angleLerp } from "../mathx.ts";
 import { TILE } from "../world/rooms.ts";
@@ -11,7 +12,7 @@ import { WEAPONS, type WeaponId } from "../systems/weapons.ts";
 import type { Slot } from "../systems/particles.ts";
 import type { Projectile } from "../sim/types.ts";
 import type { Camera } from "./camera.ts";
-import type { World } from "../world/world.ts";
+import type { TownProp, World } from "../world/world.ts";
 import { GLPipeline } from "./gl/pipeline.ts";
 import { FxLayer, wedge } from "./fxLayer.ts";
 
@@ -96,10 +97,12 @@ export class Renderer {
     return made;
   }
 
-  private glowCanvas: HTMLCanvasElement;
-  private glowG: CanvasRenderingContext2D;
-  private glowHalf: HTMLCanvasElement;
-  private glowHalfG: CanvasRenderingContext2D;
+  private glow: {
+    canvas: HTMLCanvasElement;
+    context: CanvasRenderingContext2D;
+    half: HTMLCanvasElement;
+    halfContext: CanvasRenderingContext2D;
+  } | null = null;
 
   private lightCanvas: HTMLCanvasElement;
   private lightG: CanvasRenderingContext2D;
@@ -114,6 +117,8 @@ export class Renderer {
 
   /** WebGL2 migration mode (?renderer=gl): scene is drawn offscreen into `sceneCanvas`, then composited by `gl`. */
   private glMode = false;
+  /** Keep batching off until the scene layers can be composed at their intended depths. */
+  private readonly glBatchEnabled = false;
   private sceneCanvas: HTMLCanvasElement | null = null;
   private gl: GLPipeline | null = null;
 
@@ -144,18 +149,20 @@ export class Renderer {
     this.o = ctx2d(overlay);
     this.g.imageSmoothingEnabled = false;
     this.o.imageSmoothingEnabled = false;
+    if (!this.glMode) {
+      const canvas = document.createElement("canvas");
+      canvas.width = iw;
+      canvas.height = ih;
+      const context = ctx2d(canvas);
+      context.imageSmoothingEnabled = false;
 
-    this.glowCanvas = document.createElement("canvas");
-    this.glowCanvas.width = iw;
-    this.glowCanvas.height = ih;
-    this.glowG = ctx2d(this.glowCanvas);
-    this.glowG.imageSmoothingEnabled = false;
-
-    this.glowHalf = document.createElement("canvas");
-    this.glowHalf.width = Math.floor(iw / 2);
-    this.glowHalf.height = Math.floor(ih / 2);
-    this.glowHalfG = ctx2d(this.glowHalf);
-    this.glowHalfG.imageSmoothingEnabled = true;
+      const half = document.createElement("canvas");
+      half.width = Math.floor(iw / 2);
+      half.height = Math.floor(ih / 2);
+      const halfContext = ctx2d(half);
+      halfContext.imageSmoothingEnabled = true;
+      this.glow = { canvas, context, half, halfContext };
+    }
 
     this.lightCanvas = document.createElement("canvas");
     this.lightCanvas.width = iw;
@@ -216,6 +223,7 @@ export class Renderer {
         this.shadowSprites[key] = tinted(sprites[key].c, P.VOID);
         this.eliteSprites[key] = tinted(sprites[key].c, "#ffd166");
       }
+      if (key.startsWith("npc_")) this.shadowSprites[key] = tinted(sprites[key].c, P.VOID);
     }
     this.tileOf[TILE.FLOOR] = sprites.floor;
     this.tileOf[TILE.ACCENT] = sprites.accent;
@@ -333,7 +341,7 @@ export class Renderer {
     g.fillRect(0, 0, CONFIG.WORLD.INTERNAL_W, CONFIG.WORLD.INTERNAL_H);
     this.drawParallax(g);
 
-    // kill-cam: everything world-space gets the zoom punch; first frame also desaturates
+    // Apply the kill-cam to the complete canvas scene before GL post-processing.
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
     const impactFlash = this.impactTicks === CONFIG.FEEL.IMPACT_TICKS;
@@ -345,8 +353,9 @@ export class Renderer {
       g.translate(-iw / 2, -ih / 2);
     }
 
-    if (this.glMode && this.gl) this.queueTilesGL(ox, oy);
+    if (this.glMode && this.gl && this.glBatchEnabled) this.queueTilesGL(ox, oy);
     else this.drawTiles(g, ox, oy);
+    this.drawRoomFeature(g, ox, oy);
     this.drawBossIntroCracks(g, ox, oy);
     this.drawDecals(g, ox, oy);
     this.drawTorches(g, ox, oy, false);
@@ -365,10 +374,10 @@ export class Renderer {
     this.drawSortedWorld(g, ox, oy);
 
     // --- Glow Bloom Pass (canvas 2D only; in GL mode the bloom post chain replaces it) ---
-    if (!this.glMode) {
+    if (this.glow !== null) {
       const hw = Math.floor(iw / 2);
       const hh = Math.floor(ih / 2);
-      const gg = this.glowG;
+      const { canvas, context: gg, half, halfContext: hg } = this.glow;
       gg.clearRect(0, 0, iw, ih);
 
       // Render bright FX onto isolated glow canvas
@@ -380,21 +389,20 @@ export class Renderer {
       this.drawTelegraphs(gg, ox, oy, true);
       this.drawTorches(gg, ox, oy, true);
       // Fake gaussian blur via downscale -> upscale
-      const hg = this.glowHalfG;
       hg.clearRect(0, 0, hw, hh);
-      hg.drawImage(this.glowCanvas, 0, 0, hw, hh);
+      hg.drawImage(canvas, 0, 0, hw, hh);
 
       // Composite bloom softly with additive blend
       g.save();
       g.globalCompositeOperation = "lighter";
       g.globalAlpha = 0.85;
-      g.drawImage(this.glowHalf, 0, 0, iw, ih);
+      g.drawImage(half, 0, 0, iw, ih);
       g.restore();
     }
 
     // Sharp pixel-crisp foreground layer on main canvas
     this.fx.drawArcs(g, ox, oy, false);
-    if (this.glMode && this.gl) this.fx.queueGL(this.gl.batch, ox, oy);
+    if (this.glMode && this.gl && this.glBatchEnabled) this.fx.queueGL(this.gl.batch, ox, oy);
     else {
       this.fx.drawSlices(g, ox, oy, false);
       this.fx.drawBeams(g, ox, oy, false);
@@ -417,20 +425,18 @@ export class Renderer {
     g.restore();
     g.filter = "none";
     if (impactFlash) {
-      g.globalAlpha = CONFIG.FEEL.IMPACT_FLASH_ALPHA;
+      g.globalAlpha = 0.22; // D1: Giảm độ chớp từ 0.4 xuống 0.22 để êm mắt, tránh nhấp nháy gắt
       g.fillStyle = P.VIGNETTE_HURT;
       g.fillRect(0, 0, iw, ih);
       g.globalAlpha = 1;
     }
 
     this.drawTransition(g);
-    this.drawVignette(g, flags, this.glMode);
+    this.drawVignette(g, flags, false); // D7: Cho phép render viền đỏ hurt vignette và boss intro flash cả ở GL
     this.applyBiomeDistortion(g, iw, ih);
 
     if (this.gl && this.sceneCanvas) {
-      // GL owns bloom + vignette now; the dynamic hurt pulse rides on uHurt (red push),
-      // while the baseline ambient rim comes from CONFIG.CRT.AMBIENT_VIGNETTE in the shader.
-      this.gl.presentSceneWithBatch(this.sceneCanvas, {
+      const params = {
         hurt: this.vignette,
         vignette: 0,
         brightness: CONFIG.SLIDERS.brightness,
@@ -438,7 +444,9 @@ export class Renderer {
         crt: CONFIG.SLIDERS.crt,
         ripple: CONFIG.SLIDERS.ripple,
         time: this.visualTime,
-      });
+      };
+      if (this.glBatchEnabled) this.gl.presentSceneWithBatch(this.sceneCanvas, params);
+      else this.gl.presentScene(this.sceneCanvas, params);
     }
   }
 
@@ -464,7 +472,7 @@ export class Renderer {
 
   private applyBiomeDistortion(g: CanvasRenderingContext2D, iw: number, ih: number): void {
     const biome = this.world.currentBiome.id;
-    if (biome === "dungeon") return;
+    if (biome === "dungeon" || biome === "town") return;
     this.frameG.clearRect(0, 0, iw, ih);
     // Snapshot the scene we just drew into `g`'s canvas. In GL mode `g` is the offscreen
     // sceneCanvas and `this.game` is the composited GL output — reading this.game here would
@@ -735,7 +743,7 @@ export class Renderer {
   /** biome fog: blobs baked at 160×90, upscaled pixelated, composited with screen */
   private drawFog(g: CanvasRenderingContext2D, dtReal: number): void {
     const biome = this.world.currentBiome;
-    if (biome.id === "dungeon") return;
+    if (biome.id === "dungeon" || biome.id === "town") return;
     this.fogPhase += dtReal * 0.15;
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
@@ -763,6 +771,7 @@ export class Renderer {
   /** weather motes: snow (caverns), rising ash + embers (forge), drifting crystals + stars (void) */
   private drawWeather(g: CanvasRenderingContext2D): void {
     const biome = this.world.currentBiome;
+    if (biome.id === "dungeon" || biome.id === "town") return;
     const time = this.visualTime;
     const iw = CONFIG.WORLD.INTERNAL_W;
     const ih = CONFIG.WORLD.INTERNAL_H;
@@ -915,6 +924,19 @@ export class Renderer {
     }
   }
 
+  private drawRoomFeature(g: CanvasRenderingContext2D, ox: number, oy: number): void {
+    if (this.world.room.kind !== "treasure") return;
+    const x = Math.round(this.world.room.widthPx / 2 - ox);
+    const y = Math.round(this.world.room.heightPx / 2 - oy);
+    g.fillStyle = "#573716";
+    g.fillRect(x - 7, y - 3, 14, 8);
+    g.fillStyle = "#d99b42";
+    g.fillRect(x - 8, y - 6, 16, 5);
+    g.fillRect(x - 1, y - 4, 2, 4);
+    g.fillStyle = "#f4ce79";
+    g.fillRect(x - 6, y - 5, 12, 1);
+  }
+
   private queueTilesGL(ox: number, oy: number): void {
     const T = CONFIG.WORLD.TILE;
     const room = this.world.room;
@@ -950,7 +972,7 @@ export class Renderer {
       const cx = Math.round(en.x - ox);
       const cy = Math.round(en.y - e.BODY_H * 0.5 - oy);
 
-      if (this.glMode && this.gl && (en.kind === "charger" || en.kind === "sniper")) {
+      if (this.glMode && this.gl && this.glBatchEnabled && (en.kind === "charger" || en.kind === "sniper")) {
         const reach = en.kind === "sniper" ? Math.hypot(this.world.room.widthPx, this.world.room.heightPx) : e.ATTACK_REACH;
         const alpha = (en.kind === "sniper" ? 0.35 : CONFIG.READABILITY.TELEGRAPH_FILL) * (0.55 + 0.45 * prog);
         const width = en.kind === "sniper" ? 1 : 4;
@@ -1141,7 +1163,7 @@ export class Renderer {
   }
 
   private drawShadows(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    if (this.glMode && this.gl) {
+    if (this.glMode && this.gl && this.glBatchEnabled) {
       this.queueShadowsGL(ox, oy);
       return;
     }
@@ -1198,15 +1220,21 @@ export class Renderer {
   /** depth sort: enemies, player, projectiles and particles in one y-sorted draw list.
    *  Floor indicators (telegraphs, arcs, beams) stay below; damage numbers stay above. */
   private drawSortedWorld(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    if (this.glMode && this.gl) {
+    if (this.glMode && this.gl && this.glBatchEnabled) {
       this.queueSortedWorldGL(ox, oy);
       return;
     }
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
+    for (const prop of this.world.townProps) {
+      items.push({ y: prop.y, draw: () => this.drawOneProp(g, prop, ox, oy) });
+    }
     for (const en of this.world.enemies) {
       if (en.removed) continue;
       items.push({ y: en.y, draw: () => this.drawOneEnemy(g, en, ox, oy) });
+    }
+    for (const npc of this.world.npcList) {
+      items.push({ y: npc.y, draw: () => this.drawOneNpc(g, npc, ox, oy) });
     }
     items.push({ y: this.world.player.y, draw: () => this.drawPlayer(g, ox, oy) });
     for (const p of this.world.projectiles) {
@@ -1224,7 +1252,19 @@ export class Renderer {
   }
 
   private queueSortedWorldGL(ox: number, oy: number): void {
+    for (const prop of this.world.townProps) {
+      const sp = this.sprites[prop.sprite];
+      if (!sp) continue;
+      this.gl!.batch.drawSprite(
+        sp.c,
+        Math.round(prop.x - sp.ax - ox),
+        Math.round(prop.y - sp.ay - oy),
+        sp.w, sp.h,
+        [1, 1, 1, 1],
+      );
+    }
     for (const en of this.world.enemies) this.queueEnemyGL(en, ox, oy);
+    for (const npc of this.world.npcList) this.queueNpcGL(npc, ox, oy);
     this.queuePlayerGL(ox, oy);
     for (const p of this.world.projectiles) this.queueProjectileGL(p, ox, oy);
     const density = CONFIG.SLIDERS.particles;
@@ -1238,6 +1278,22 @@ export class Renderer {
         this.gl!.batch.drawSprite(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy), sp.w, sp.h, [1, 1, 1, alpha]);
       });
     }
+  }
+
+  private queueNpcGL(npc: Npc, ox: number, oy: number): void {
+    const key = `npc_${npc.kind}`;
+    const base = this.sprites[key];
+    if (!base) return;
+    const sp = Math.cos(npc.facing) > 0.15 ? this.mirrored(base, key) : base;
+    const bob = Math.round(Math.sin(npc.animTicks * 0.05) * 0.5);
+    const x = Math.round(npc.x - sp.ax - ox);
+    const y = Math.round(npc.y - sp.ay - oy) - bob;
+    const sx = Math.round(npc.x - base.ax - ox);
+    const sy = Math.round(npc.y - base.ay - oy) - bob;
+    const batch = this.gl!.batch;
+    batch.drawSprite(base.c, sx, sy + 1, base.w, base.h, [0, 0, 0, 0.3]);
+    batch.drawSprite(base.c, sx, sy + 2, base.w, base.h, [0, 0, 0, 0.15]);
+    batch.drawSprite(sp.c, x, y, sp.w, sp.h, [1, 1, 1, 1]);
   }
 
   private queueProjectileGL(p: Projectile, ox: number, oy: number): void {
@@ -1350,6 +1406,7 @@ export class Renderer {
       const spawn = this.anims[`${key}_spawn`];
       if (spawn) set = spawn;
     }
+
     let sp = baseSprite;
     if (set) {
       const fi = phaseFrame !== null
@@ -1507,14 +1564,44 @@ export class Renderer {
     }
   }
 
+  private drawOneNpc(g: CanvasRenderingContext2D, npc: Npc, ox: number, oy: number): void {
+    const key = `npc_${npc.kind}`;
+    const base = this.sprites[key];
+    if (!base) return;
+    const sp = Math.cos(npc.facing) > 0.15 ? this.mirrored(base, key) : base;
+    const bob = Math.round(Math.sin(npc.animTicks * 0.05) * 0.5);
+    const x = Math.round(npc.x - sp.ax - ox);
+    const y = Math.round(npc.y - sp.ay - oy) - bob;
+    const shadow = this.shadowSprites[key];
+    g.save();
+    if (shadow) {
+      const sx = Math.round(npc.x - base.ax - ox);
+      g.globalAlpha = 0.3;
+      g.drawImage(shadow, sx, y + 1, base.w, base.h);
+      g.globalAlpha = 0.15;
+      g.drawImage(shadow, sx, y + 2, base.w, base.h);
+      g.globalAlpha = 1;
+    }
+    g.drawImage(sp.c, x, y, sp.w, sp.h);
+    g.restore();
+  }
+
+  private drawOneProp(g: CanvasRenderingContext2D, prop: TownProp, ox: number, oy: number): void {
+    const sp = this.sprites[prop.sprite];
+    if (!sp) return;
+    const x = Math.round(prop.x - sp.ax - ox);
+    const y = Math.round(prop.y - sp.ay - oy);
+    g.drawImage(sp.c, x, y, sp.w, sp.h);
+  }
+
   private drawProjectiles(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
-    if (this.glMode) return;
+    if (this.glMode && this.glBatchEnabled) return;
     for (const p of this.world.projectiles) this.drawOneProjectile(g, p, ox, oy, glowOnly);
   }
 
   /** afterimage trails: 4 faded ghosts behind each shot, matching its palette */
   private drawProjectileTrails(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
-    if (this.glMode) return;
+    if (this.glMode && this.glBatchEnabled) return;
     for (const p of this.world.projectiles) {
       if (!p.trail) continue;
       for (let i = 0; i < p.trail.length; i++) {
@@ -1829,9 +1916,7 @@ export class Renderer {
     const density = CONFIG.SLIDERS.particles;
     if (density <= 0.01) return;
     this.world.particles.visit((s) => {
-      // Sprite particles are queued into the WebGL batch in GL mode. Geometric
-      // particles stay on this canvas path until a matching atlas primitive exists.
-      if (this.glMode && s.sprite !== null) return;
+      if (this.glMode && this.glBatchEnabled && s.sprite !== null) return;
       this.drawOneParticle(g, s, ox, oy, density);
     });
   }

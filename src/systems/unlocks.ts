@@ -99,7 +99,7 @@ export const ACHIEVEMENT_NAMES: Record<AchievementId, string> = {
   poison_master: "Bậc thầy độc",
   crit_king: "Vua chí mạng",
   dodge_king: "Vua né đòn",
-  perfect_boss: "Boss không vết xước",
+  perfect_boss: "Không trúng đòn boss (cả run)",
   warden_slayer: "Hạ ngục trưởng",
   golem_slayer: "Hạ Golem Lò Rèn",
   king_slayer: "Hạ Vua Lãng Quên",

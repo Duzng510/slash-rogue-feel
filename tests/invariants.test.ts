@@ -25,7 +25,7 @@ import { World } from "../src/world/world.ts";
 import { makeRng } from "../src/mathx.ts";
 import type { Intent } from "../src/sim/types.ts";
 
-const IDLE: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false };
+const IDLE: Intent = { moveX: 0, moveY: 0, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, interact: false };
 const TRIALS = Number(process.env.INV_TRIALS ?? CONFIG.LAWS.FUZZ_TRIALS);
 const BUDGET = Number(process.env.INV_BUDGET ?? CONFIG.LAWS.FUZZ_BUDGET);
 
@@ -74,6 +74,7 @@ function fuzzIntent(grng: ReturnType<typeof makeRng>, attack: boolean): Intent {
     attack: attack && grng.next() < 0.7,
     dash: grng.next() < 0.1,
     skill: grng.next() < 0.1,
+    interact: false,
   };
 }
 
@@ -85,6 +86,8 @@ type Result = { violation: string | null; maxEnemies: number; maxProjectiles: nu
 /** drive one seeded run; with report=false it stops at the first invariant breach */
 function runWorld(seed: number, ticks: number, attack: boolean, report: boolean): Result {
   const w = new World(seed);
+  w.enterDungeon(false);
+  w.characterChoices = [];
   w.clearEnemies();
   w.player.reset(160, 100);
   const grng = makeRng(seed * 7919 + 13);

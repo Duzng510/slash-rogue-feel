@@ -65,6 +65,33 @@ body.touch #keys {
   display: none;
 }
 
+body:not(.touch) #btn-interact {
+  display: none;
+}
+
+body.touch #btn-interact {
+  position: absolute;
+  right: calc(env(safe-area-inset-right, 0px) + 140px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(127, 209, 255, 0.18);
+  border: 1px solid #7fd1ff;
+  color: #d8f0ff;
+  font: bold 14px ui-monospace, monospace;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+  user-select: none;
+  pointer-events: auto;
+}
+
+body.touch #btn-interact.press {
+  background: rgba(127, 209, 255, 0.42);
+}
+
 body.artifact-modal #overlay {
   pointer-events: auto;
   cursor: pointer;

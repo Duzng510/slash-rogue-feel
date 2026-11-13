@@ -20,11 +20,13 @@ const RECIPES: Record<SfxName, Recipe> = {
   reprisal_ready: { dur: 0.16, type: "tone", f0: 500, f1: 960, gain: 0.24 },
   shoot: { dur: 0.06, type: "noise", f0: 1800, f1: 700, gain: 0.24, filter: 1400 },
   teleport: { dur: 0.14, type: "tone", f0: 300, f1: 900, gain: 0.24 },
+  town_bell: { dur: 1.2, type: "tone", f0: 660, f1: 440, gain: 0.08 },
 };
 
 export class Sfx {
   private ctx: AudioContext | null = null;
   private noiseBuf: AudioBuffer | null = null;
+  private lastPlayTime: Partial<Record<SfxName, number>> = {};
 
   /** browsers refuse audio until a gesture; call from a click/keydown */
   unlock(): void {
@@ -47,8 +49,24 @@ export class Sfx {
     const vol = CONFIG.SLIDERS.volume;
     if (vol <= 0.001) return;
 
-    const r = RECIPES[name];
     const t = ctx.currentTime;
+
+    // D3: Audio clutter throttling cho các hiệu ứng lặp dày
+    const minInterval: Partial<Record<SfxName, number>> = {
+      telegraph: 0.12,
+      burn_tick: 0.18,
+      pursuit_proc: 0.25,
+      teleport: 0.15,
+      town_bell: 5,
+    };
+    const interval = minInterval[name];
+    if (interval !== undefined) {
+      const last = this.lastPlayTime[name] ?? -1;
+      if (t - last < interval) return;
+      this.lastPlayTime[name] = t;
+    }
+
+    const r = RECIPES[name];
     const out = ctx.createGain();
     out.gain.setValueAtTime(r.gain * gainMul * vol * CONFIG.AUDIO.MASTER * 2, t);
     out.gain.exponentialRampToValueAtTime(0.0001, t + r.dur);
@@ -64,7 +82,15 @@ export class Sfx {
       bp.frequency.setValueAtTime(r.f0 * pitchMul, t);
       bp.frequency.exponentialRampToValueAtTime(Math.max(60, r.f1 * pitchMul), t + r.dur);
       src.connect(bp);
-      bp.connect(out);
+      if (r.filter !== undefined) {
+        const lowpass = ctx.createBiquadFilter();
+        lowpass.type = "lowpass";
+        lowpass.frequency.setValueAtTime(r.filter * pitchMul, t);
+        bp.connect(lowpass);
+        lowpass.connect(out);
+      } else {
+        bp.connect(out);
+      }
       src.start(t);
       src.stop(t + r.dur);
     } else {

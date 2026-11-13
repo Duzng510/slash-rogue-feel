@@ -5,11 +5,25 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.40.0";
+export const APP_VERSION = "v0.42.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.42.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Town NPCs:</b> thêm Character Master, Merchant và Guard; tương tác gần bằng [F], mở chọn nhân vật/cửa hàng và giữ nguyên đường vào dungeon.",
+    ],
+  },
+  {
+    version: "v0.41.0",
+    date: "2026-11-13",
+    items: [
+      "<b>Room variety:</b> thêm lửa trại nâng cấp vũ khí, rương kho báu/nguyền rủa, phòng tinh anh, sự kiện, đền thờ và thử thách ba đợt.",
+    ],
+  },
   {
     version: "v0.40.0",
     date: "2026-11-13",

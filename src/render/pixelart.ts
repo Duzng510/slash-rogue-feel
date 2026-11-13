@@ -88,6 +88,8 @@ export function buildSprites(): Record<string, Sprite> {
   buildPlayerSprites(S);
   buildPlayerPartSprites(S);
   buildEnemySprites(S);
+  buildNpcSprites(S);
+  buildTownPropSprites(S);
   buildHudSprites(S);
   buildTileSprites(S, T);
   buildParallaxSprites(S);
@@ -96,6 +98,103 @@ export function buildSprites(): Record<string, Sprite> {
   buildTorchSprites(S);
   buildArtifactSprites(S);
   return S;
+}
+
+function buildNpcSprites(S: Record<string, Sprite>): void {
+  S.npc_merchant = bake(12, 17, 6, 16, (g) => {
+    rect(g, 2, 1, 8, 2, "#3d2817");
+    rect(g, 3, 0, 6, 1, "#4d3222");
+    rect(g, 4, 3, 4, 3, "#d4a373");
+    rect(g, 5, 4, 1, 1, "#1a1a1a");
+    rect(g, 7, 4, 1, 1, "#1a1a1a");
+    rect(g, 2, 6, 8, 8, "#8b5a2b");
+    rect(g, 3, 7, 6, 6, "#a6703d");
+    rect(g, 2, 10, 8, 1, "#3d2817");
+    rect(g, 1, 10, 2, 3, "#ffd166");
+    rect(g, 1, 10, 1, 1, "#ffffff");
+    rect(g, 3, 14, 2, 2, "#1a1a1a");
+    rect(g, 7, 14, 2, 2, "#1a1a1a");
+  });
+
+  S.npc_guard = bake(12, 18, 6, 17, (g) => {
+    rect(g, 3, 0, 6, 4, "#8fa8c8");
+    rect(g, 4, 0, 4, 1, "#d8f0ff");
+    rect(g, 5, 2, 2, 1, "#1a1a1a");
+    rect(g, 2, 4, 8, 3, "#4a6076");
+    rect(g, 3, 4, 6, 2, "#8fa8c8");
+    rect(g, 3, 6, 6, 6, "#4a6076");
+    rect(g, 4, 7, 4, 4, "#8fa8c8");
+    rect(g, 4, 8, 4, 1, "#5a7a94");
+    rect(g, 10, 2, 1, 14, "#795548");
+    rect(g, 9, 0, 3, 3, "#c8ff8a");
+    rect(g, 10, 0, 1, 1, "#ffffff");
+    rect(g, 3, 12, 2, 4, "#2b2d42");
+    rect(g, 7, 12, 2, 4, "#2b2d42");
+    rect(g, 2, 16, 3, 1, "#1a1a1a");
+    rect(g, 7, 16, 3, 1, "#1a1a1a");
+  });
+
+  S.npc_character_master = bake(12, 18, 6, 17, (g) => {
+    rect(g, 3, 0, 6, 3, "#4a148c");
+    rect(g, 4, 0, 4, 1, "#9d4edd");
+    rect(g, 3, 3, 6, 2, "#2a0b3d");
+    rect(g, 5, 3, 2, 1, "#ffd166");
+    rect(g, 2, 5, 8, 9, "#5a189a");
+    rect(g, 3, 6, 6, 7, "#7b2cbf");
+    rect(g, 5, 6, 2, 7, "#c99ae6");
+    rect(g, 10, 3, 1, 13, "#795548");
+    rect(g, 9, 1, 3, 3, "#9d4edd");
+    rect(g, 10, 0, 1, 1, "#ffd166");
+    rect(g, 3, 14, 2, 2, "#2a0b3d");
+    rect(g, 7, 14, 2, 2, "#2a0b3d");
+  });
+}
+
+function buildTownPropSprites(S: Record<string, Sprite>): void {
+  S.prop_well = bake(24, 24, 12, 23, (g) => {
+    rect(g, 4, 4, 16, 16, "#3a2f22");
+    rect(g, 5, 5, 14, 14, "#5a4a38");
+    rect(g, 7, 7, 10, 10, "#0d1419");
+    rect(g, 8, 8, 8, 8, "#1a3a4a");
+    rect(g, 10, 10, 4, 4, "#2a5a70");
+    rect(g, 2, 0, 20, 3, "#2a1a0e");
+    rect(g, 10, 2, 4, 4, "#8b5a2b");
+    rect(g, 11, 6, 2, 6, "#a6703d");
+    rect(g, 10, 12, 4, 2, "#3a2f22");
+  });
+
+  S.prop_tree = bake(20, 32, 10, 31, (g) => {
+    rect(g, 8, 16, 4, 15, "#3a2817");
+    rect(g, 9, 16, 2, 15, "#5a3d28");
+    rect(g, 2, 2, 16, 14, "#1f4d2a");
+    rect(g, 3, 1, 14, 15, "#2a6b3d");
+    rect(g, 5, 3, 10, 11, "#3a8853");
+    rect(g, 7, 5, 6, 7, "#4da36b");
+    rect(g, 6, 4, 2, 2, "#6bc088");
+    rect(g, 12, 8, 2, 2, "#6bc088");
+  });
+
+  S.prop_signpost = bake(12, 20, 6, 19, (g) => {
+    rect(g, 5, 6, 2, 13, "#5a3d28");
+    rect(g, 4, 15, 4, 2, "#3a2817");
+    rect(g, 1, 4, 10, 6, "#8b5a2b");
+    rect(g, 2, 5, 8, 4, "#a6703d");
+    rect(g, 2, 5, 8, 1, "#c88a52");
+    rect(g, 9, 4, 2, 6, "#8b5a2b");
+    rect(g, 10, 5, 1, 4, "#8b5a2b");
+    rect(g, 4, 7, 4, 1, "#2a1a0e");
+    rect(g, 4, 8, 2, 1, "#2a1a0e");
+  });
+
+  S.prop_lantern = bake(8, 24, 4, 23, (g) => {
+    rect(g, 3, 8, 2, 15, "#3a2817");
+    rect(g, 2, 22, 4, 1, "#2a1a0e");
+    rect(g, 1, 2, 6, 8, "#2a1a0e");
+    rect(g, 2, 3, 4, 6, "#ff963f");
+    rect(g, 3, 4, 2, 4, "#ffe66b");
+    rect(g, 2, 1, 4, 1, "#2a1a0e");
+    rect(g, 3, 10, 2, 2, "#8b5a2b");
+  });
 }
 
 function buildPlayerSprites(S: Record<string, Sprite>): void {

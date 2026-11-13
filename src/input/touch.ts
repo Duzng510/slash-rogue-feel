@@ -20,7 +20,8 @@ export class TouchInput {
     private readonly knob: HTMLElement,
     private readonly attackBtn: HTMLElement,
     private readonly dashBtn: HTMLElement,
-    private readonly skillBtn: HTMLElement
+    private readonly skillBtn: HTMLElement,
+    private readonly interactBtn: HTMLElement
   ) {}
 
   attach(): void {
@@ -34,6 +35,9 @@ export class TouchInput {
     this.dashBtn.addEventListener("pointerup", this.releaseDash);
     this.skillBtn.addEventListener("pointerdown", this.onSkill);
     this.skillBtn.addEventListener("pointerup", this.releaseSkill);
+    this.interactBtn.addEventListener("pointerdown", this.onInteract);
+    this.interactBtn.addEventListener("pointerup", this.releaseInteract);
+    this.interactBtn.addEventListener("pointercancel", this.releaseInteract);
   }
 
   detach(): void {
@@ -47,6 +51,9 @@ export class TouchInput {
     this.dashBtn.removeEventListener("pointerup", this.releaseDash);
     this.skillBtn.removeEventListener("pointerdown", this.onSkill);
     this.skillBtn.removeEventListener("pointerup", this.releaseSkill);
+    this.interactBtn.removeEventListener("pointerdown", this.onInteract);
+    this.interactBtn.removeEventListener("pointerup", this.releaseInteract);
+    this.interactBtn.removeEventListener("pointercancel", this.releaseInteract);
   }
 
   reset(): void {
@@ -62,6 +69,7 @@ export class TouchInput {
     this.releaseAttack();
     this.releaseDash();
     this.releaseSkill();
+    this.releaseInteract();
   }
 
   private onStickDown = (e: PointerEvent): void => {
@@ -88,6 +96,13 @@ export class TouchInput {
   };
 
   private applyStick(clientX: number, clientY: number): void {
+    if (!Number.isFinite(this.radius) || this.radius <= 0) {
+      this.intent.moveX = 0;
+      this.intent.moveY = 0;
+      this.intent.aim = null;
+      this.knob.style.transform = "translate(-50%, -50%)";
+      return;
+    }
     const v = rotateVec(clientX - this.baseX, clientY - this.baseY, isRotated());
     let dx = v.x;
     let dy = v.y;
@@ -132,5 +147,15 @@ export class TouchInput {
 
   private releaseSkill = (): void => {
     this.skillBtn.classList.remove("press");
+  };
+
+  private onInteract = (e: PointerEvent): void => {
+    e.preventDefault();
+    this.interactBtn.classList.add("press");
+    this.intent.pressInteract(this.tick());
+  };
+
+  private releaseInteract = (): void => {
+    this.interactBtn.classList.remove("press");
   };
 }

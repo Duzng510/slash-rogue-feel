@@ -17,7 +17,8 @@ export type SfxName =
   | "pursuit_proc"
   | "reprisal_ready"
   | "shoot"
-  | "teleport";
+  | "teleport"
+  | "town_bell";
 
 export type VisualEvent =
   | { t: "shake"; x: number; y: number; dir: number; mag: number }

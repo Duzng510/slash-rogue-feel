@@ -1,6 +1,6 @@
 import type { EnemyKind } from "../config.ts";
 
-export type BiomeId = "dungeon" | "caverns" | "forge" | "void";
+export type BiomeId = "town" | "dungeon" | "caverns" | "forge" | "void";
 
 export type Biome = {
   id: BiomeId;
@@ -26,6 +26,25 @@ export type Biome = {
 };
 
 export const BIOMES: Record<BiomeId, Biome> = {
+  town: {
+    id: "town",
+    name: "Thị trấn",
+    desc: "Nơi trú ẩn cuối cùng trước hầm ngục.",
+    color: "#e0c341",
+    roomStart: -1,
+    roomEnd: -1,
+    palette: {
+      floor: "#2a2418",
+      wall: "#3a2f22",
+      accent: "#1f1a12",
+      ambient: "rgba(255, 200, 100, 0.06)",
+      particle: "rgba(255, 220, 150, 0.35)",
+      outside: "#100c08",
+      fog: "rgba(255, 200, 120, 0.3)",
+      grade: "#e0c060",
+    },
+    enemyPool: [],
+  },
   dungeon: {
     id: "dungeon",
     name: "Ngục Tối",

@@ -46,7 +46,7 @@ export function resolveProjectiles(src: Sim): void {
       continue;
     }
     if (pl.canBeHit() && rectsOverlap({ x: p.x - 1.5, y: p.y - 1.5, w: 3, h: 3 }, hb)) {
-      const sw = { side: "enemy", dmg: p.dmg, dir: Math.atan2(p.vy, p.vx) } as unknown as Swing;
+      const sw = { side: "enemy", kind: p.sourceKind, dmg: p.dmg, dir: Math.atan2(p.vy, p.vx) } as unknown as Swing;
       pl.onHit(sw, p.x, p.y, src);
       continue;
     }

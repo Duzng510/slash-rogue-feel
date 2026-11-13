@@ -90,7 +90,7 @@ function blastAt(src: Sim, dmg: number, x: number, y: number, radius: number, kn
     dmg,
     knockback,
   } as unknown as Swing;
-  for (const e of src.enemies) {
+  for (const e of src.enemies.slice()) {
     if (e.dead || !e.canBeHit()) continue;
     if (dist(e.x, e.y, x, y) > radius) continue;
     const killed = e.onHit(blast, e.x, e.y, src);
