@@ -7,9 +7,10 @@
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/combat-regressions.test.ts tests/invariants.test.ts && node tests/laws.test.ts",
+    "test": "node --test tests/combat-regressions.test.ts tests/invariants.test.ts tests/gl-batch.test.ts && node tests/laws.test.ts",
     "test:laws": "node tests/laws.test.ts",
     "test:combat": "node --test tests/combat-regressions.test.ts",
+    "test:batch": "node --test tests/gl-batch.test.ts",
     "test:inv": "node --test tests/invariants.test.ts",
     "measure": "node tools/measure-render.mjs",
     "preview": "vite preview"

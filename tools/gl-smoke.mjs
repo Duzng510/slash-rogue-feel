@@ -81,12 +81,10 @@ try {
     // Drive a real scene: pick a melee char, load a room, spawn enemies, swing into hit-stop.
     await evalJs(`window.__game.pickCharacter("swordsman")`);
 
-    // Regression (màn 4 corruption): non-dungeon biomes call applyBiomeDistortion, which must
-    // snapshot the offscreen scene canvas — not this.game (the composited GL output). Reading the
-    // GL canvas back as the scene discards the freshly drawn world every frame and feeds it to
-    // itself, so the lighting baked into the scene is thrown away and the image collapses to a
-    // black ghost on software GL (blows to a white octagon on real-GPU/Android readbacks). The
-    // invariant: an idle, enemy-free scene stays rendered — its mean luminance must NOT collapse.
+    // Non-dungeon biomes use the post shader for distortion; the scene must remain in its GPU
+    // render target instead of being read back from the final composited canvas each frame.
+    // An idle, enemy-free scene must keep stable non-zero luminance rather than feeding the
+    // post-processed output back into itself.
     const readMean = `(() => {
       const gl = document.getElementById('game').getContext('webgl2');
       const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
@@ -96,16 +94,25 @@ try {
       for (let i = 0; i < px.length; i += 4) s += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
       return s / (w * h);
     })()`;
-    await evalJs(`window.__game.gotoRoom(3)`);
-    await evalJs(`(() => { const g = window.__game; for (let i = 0; i < 60; i++) g.advance(1/60); })()`);
-    const settle = await evalJs(readMean);
-    await evalJs(`(() => { const g = window.__game; for (let i = 0; i < 240; i++) g.advance(1/60); })()`);
-    const later = await evalJs(readMean);
-    const drift = Math.abs(later - settle);
-    if (settle < 4 || later < 4 || drift > settle * 0.5) fail("non-dungeon biome renders a stable world (no feedback ghost)", `settle=${settle.toFixed(1)} later=${later.toFixed(1)} drift=${drift.toFixed(1)}`);
-    else pass("non-dungeon biome renders a stable world (no feedback ghost)", `settle=${settle.toFixed(1)} later=${later.toFixed(1)}`);
+    for (const room of [3, 6, 9]) {
+      await evalJs(`window.__game.gotoRoom(${room})`);
+      await evalJs(`(() => { const g = window.__game; for (let i = 0; i < 60; i++) g.advance(1/60); })()`);
+      const settle = await evalJs(readMean);
+      await evalJs(`(() => { const g = window.__game; for (let i = 0; i < 240; i++) g.advance(1/60); })()`);
+      const later = await evalJs(readMean);
+      const drift = Math.abs(later - settle);
+      if (settle < 4 || later < 4 || drift > settle * 0.5) {
+        fail(`biome room ${room} renders a stable world`, `settle=${settle.toFixed(1)} later=${later.toFixed(1)} drift=${drift.toFixed(1)}`);
+      } else {
+        pass(`biome room ${room} renders a stable world`, `settle=${settle.toFixed(1)} later=${later.toFixed(1)}`);
+      }
+    }
 
     await evalJs(`window.__game.gotoRoom(0)`);
+    await evalJs(`(() => { const g = window.__game; for (let i = 0; i < 60; i++) g.advance(1/60); })()`);
+    const idleStats = await evalJs(`window.__game.stats()`);
+    if (idleStats.uploads !== 0 || idleStats.overlayDirty) fail("clean scene skips CPU overlay upload", JSON.stringify(idleStats));
+    else pass("clean scene skips CPU overlay upload", JSON.stringify(idleStats));
     await evalJs(`window.__game.addEnemies(5, ["chaser"])`);
     await evalJs(`(() => {
       const g = window.__game;

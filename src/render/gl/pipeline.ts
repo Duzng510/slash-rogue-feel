@@ -8,8 +8,8 @@ import type { Sprite, SpriteSet } from "../pixelart.ts";
 // (canvas sizing / WebGL2 acquisition); every shader is raw GLSL ES 3.00 and every draw
 // is issued directly, so state stays fully under our control.
 //
-// The scene arrives at CONFIG.WORLD.INTERNAL_W × CONFIG.WORLD.INTERNAL_H pixels (today a fully-composited 2D canvas uploaded via
-// presentScene; later the batched atlas world-draw renders straight into the scene FBO).
+// The scene is rendered at CONFIG.WORLD.INTERNAL_W × CONFIG.WORLD.INTERNAL_H pixels by the
+// instanced SpriteBatch; Canvas-only effects are composited as a transparent overlay.
 // The post chain runs on top of it: threshold -> separable gaussian bloom -> CRT barrel
 // warp + scanlines + chromatic aberration + heat-haze/ripple displacement + dithered
 // vignette. Every strength is a uniform fed from CONFIG x SLIDERS, so effects stay graduated.
@@ -30,6 +30,10 @@ export type PresentParams = {
   grade?: readonly [number, number, number];
   gradeAmt?: number;
   saturate?: number;
+  biomeDistortion?: 0 | 1 | 2 | 3;
+  fogColor?: readonly [number, number, number];
+  fogAmount?: number;
+  fogTime?: number;
 };
 
 /** presentComposited extras: the same params plus the kill-cam geometric zoom for the composite. */
@@ -125,6 +129,11 @@ uniform float uHazeNoise;
 uniform vec3 uGrade;      // biome "color" grade tint (0..1)
 uniform float uGradeAmt;  // grade strength (0 = no-op, presentScene bakes it in 2D instead)
 uniform float uSaturate;  // kill-cam saturate factor (1 = no-op)
+uniform int uBiomeDistortion; // 1 forge, 2 caverns, 3 void
+uniform float uPixelScale;
+uniform vec3 uFogColor;
+uniform float uFogAmount;
+uniform float uFogTime;
 out vec4 fragColor;
 
 float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -161,15 +170,55 @@ vec2 haze(vec2 uv) {
 
 void main() {
   vec2 uv = haze(crtWarp(vUv));
+  vec2 sceneUv = uv;
+  if (uBiomeDistortion == 1) {
+    float logicalY = (1.0 - uv.y) * uRes.y / uPixelScale;
+    sceneUv.x += sin(logicalY * 0.3 + uTime * 2.2) * 1.5 * uPixelScale / uRes.x;
+  }
   float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
 
   // chromatic aberration: split R/B along the screen radius
   vec2 dir = uv - 0.5;
   float ab = uAberr * uCrtAmt / uRes.x;
   vec3 color;
-  color.r = texture(uScene, uv + dir * ab).r;
-  color.g = texture(uScene, uv).g;
-  color.b = texture(uScene, uv - dir * ab).b;
+  color.r = texture(uScene, sceneUv + dir * ab).r;
+  color.g = texture(uScene, sceneUv).g;
+  color.b = texture(uScene, sceneUv - dir * ab).b;
+  if (uBiomeDistortion == 2) {
+    float edge = 4.0 * uPixelScale / uRes.x;
+    float left = 1.0 - smoothstep(edge * 0.7, edge, vUv.x);
+    float right = smoothstep(1.0 - edge, 1.0 - edge * 0.7, vUv.x);
+    float top = smoothstep(1.0 - edge, 1.0 - edge * 0.7, vUv.y);
+    float bottom = 1.0 - smoothstep(edge * 0.7, edge, vUv.y);
+    vec3 echo = vec3(0.0);
+    float weight = 0.0;
+    if (left > 0.0) { echo += texture(uScene, sceneUv + vec2(1.0 / uRes.x, 0.0)).rgb * left; weight += left; }
+    if (right > 0.0) { echo += texture(uScene, sceneUv - vec2(1.0 / uRes.x, 0.0)).rgb * right; weight += right; }
+    if (top > 0.0) { echo += texture(uScene, sceneUv + vec2(0.0, 1.0 / uRes.y)).rgb * top; weight += top; }
+    if (bottom > 0.0) { echo += texture(uScene, sceneUv - vec2(0.0, 1.0 / uRes.y)).rgb * bottom; weight += bottom; }
+    if (weight > 0.0) color = mix(color, echo / weight, 0.3 * min(1.0, weight));
+  }
+  if (uBiomeDistortion == 3) {
+    float shift = uPixelScale / uRes.x;
+    color.r += texture(uScene, sceneUv + vec2(shift, 0.0)).r * 0.2;
+    color.b += texture(uScene, sceneUv - vec2(shift, 0.0)).b * 0.2;
+  }
+  if (uFogAmount > 0.0) {
+    vec2 fogPx = vec2(uv.x * uRes.x / 3.0, (1.0 - uv.y) * uRes.y / 3.0);
+    float fog = 0.0;
+    for (int i = 0; i < 5; i++) {
+      float fi = float(i);
+      vec2 center = vec2(
+        160.0 * (0.5 + 0.45 * sin(uFogTime * (0.3 + fi * 0.13) + fi * 1.7)),
+        90.0 * (0.5 + 0.4 * cos(uFogTime * (0.2 + fi * 0.11) + fi * 2.3))
+      );
+      float radius = max(10.0, 26.0 + 12.0 * sin(uFogTime * 0.8 + fi));
+      float blob = clamp(1.0 - distance(fogPx, center) / radius, 0.0, 1.0);
+      fog = 1.0 - (1.0 - fog) * (1.0 - blob);
+    }
+    vec3 fogLight = uFogColor * (fog * uFogAmount);
+    color = vec3(1.0) - (vec3(1.0) - color) * (vec3(1.0) - fogLight);
+  }
   color *= texture(uLight, uv).rgb;              // darkness falls on the scene, not on emissive glow
 
   color += texture(uBloom, uv).rgb * uBloomAmt;   // additive glow
@@ -201,7 +250,7 @@ void main() {
   fragColor = vec4(color, 1.0);
 }`;
 
-// composite for the batched-tiles path: opaque sceneRT (GPU tiles + outside) UNDER a
+// composite for the batched scene path: opaque sceneRT (GPU world + outside) UNDER a
 // transparent overTex (2D entity/fx/text passes), source-over. uZoom applies the kill-cam
 // geometric zoom to BOTH layers at once so neither double-zooms (the 2D overlay is NOT
 // transform-scaled in this path — that is the whole point of folding zoom here).
@@ -251,10 +300,12 @@ export class GLPipeline {
   private readonly post: WebGLProgram;
   private readonly fxTex: WebGLTexture;
   private readonly compRT: RT;
+  private readonly overRT: RT;
   private readonly overTex: WebGLTexture;
   private readonly composite: WebGLProgram;
+  private overlayUploaded = false;
 
-  /** true while the batched-tiles path is active (?glbatch=probe); the renderer reads this */
+  /** true while tiles participate in the GPU batch, including the default world path */
   batchTiles = false;
 
   constructor(
@@ -285,7 +336,9 @@ export class GLPipeline {
 
     this.fxTex = this.makeOverlayTexture();
     this.compRT = this.makeRT(iw, ih, gl.NEAREST);
-    this.overTex = this.makeOverlayTexture();
+    this.overRT = this.makeRT(iw, ih, gl.NEAREST);
+    this.overTex = this.overRT.tex;
+    this.clearOverlayTarget();
     this.composite = makeProgram(gl, FULLSCREEN_VS, COMPOSITE_FS);
   }
 
@@ -366,7 +419,7 @@ export class GLPipeline {
     const t = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.iw, this.ih, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.iw, this.ih, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(this.iw * this.ih * 4));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -375,16 +428,20 @@ export class GLPipeline {
     return t;
   }
 
-  private uploadOverlay(tex: WebGLTexture, canvas: HTMLCanvasElement | null): void {
+  private uploadOverlay(tex: WebGLTexture, canvas: HTMLCanvasElement): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    if (canvas) {
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-    } else {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.iw, this.ih, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(this.iw * this.ih * 4));
-    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
     gl.bindTexture(gl.TEXTURE_2D, null);
+  }
+
+  private clearOverlayTarget(): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.overRT.fbo);
+    gl.viewport(0, 0, this.overRT.w, this.overRT.h);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   /**
@@ -396,27 +453,26 @@ export class GLPipeline {
     gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
-    this.uploadOverlay(this.fxTex, null);
     this.runPostFrom(this.sceneRT, params);
   }
 
   /**
-   * Batched-tiles present: the renderer has already flushed the GPU tile batch into sceneRT
-   * (opaque). Upload the transparent 2D overlay once, composite sceneRT UNDER overTex into
-   * compRT (applying the kill-cam geometric zoom to both layers at once), then run the existing
-   * bloom/CRT chain reading compRT as the scene. An empty overlay skips the canvas upload.
+   * Batched-scene present: the GPU world is in sceneRT. Composite the optional 2D overlay
+   * over it, then run the post chain. Empty overlay transitions are cleared on the GPU.
    */
   presentComposited(over: HTMLCanvasElement, params: PresentCompositedParams): void {
     const gl = this.gl;
     if (params.overlayDirty === false) {
-      this.uploadOverlay(this.overTex, null); // transparent, no CPU→GPU canvas read
+      if (this.overlayUploaded) {
+        this.clearOverlayTarget();
+        this.overlayUploaded = false;
+      }
     } else {
       // FLIP_Y=true so the 2D canvas top row lands at texel row 0, matching the batch-drawn sceneRT.
-      gl.bindTexture(gl.TEXTURE_2D, this.overTex);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, over);
+      this.uploadOverlay(this.overTex, over);
       gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      this.overlayUploaded = true;
     }
 
     this.beginPass(this.compRT, this.composite);
@@ -429,7 +485,6 @@ export class GLPipeline {
     gl.uniform1f(gl.getUniformLocation(this.composite, "uZoom"), params.zoom);
     this.endPass();
 
-    this.uploadOverlay(this.fxTex, null);
     this.runPostFrom(this.compRT, params);
   }
 
@@ -515,6 +570,12 @@ export class GLPipeline {
     gl.uniform3f(gl.getUniformLocation(this.post, "uGrade"), g3[0], g3[1], g3[2]);
     gl.uniform1f(gl.getUniformLocation(this.post, "uGradeAmt"), params.gradeAmt ?? 0);
     gl.uniform1f(gl.getUniformLocation(this.post, "uSaturate"), params.saturate ?? 1);
+    gl.uniform1i(gl.getUniformLocation(this.post, "uBiomeDistortion"), params.biomeDistortion ?? 0);
+    gl.uniform1f(gl.getUniformLocation(this.post, "uPixelScale"), CONFIG.WORLD.PIXEL_SCALE);
+    const fog = params.fogColor ?? [0, 0, 0];
+    gl.uniform3f(gl.getUniformLocation(this.post, "uFogColor"), fog[0], fog[1], fog[2]);
+    gl.uniform1f(gl.getUniformLocation(this.post, "uFogAmount"), params.fogAmount ?? 0);
+    gl.uniform1f(gl.getUniformLocation(this.post, "uFogTime"), params.fogTime ?? 0);
     this.endPass();
   }
 }

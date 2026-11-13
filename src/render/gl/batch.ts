@@ -55,9 +55,11 @@ export class SpriteBatch {
   private additiveCount = 0;
   private capacity: number;
   private readonly invAtlas: [number, number];
+  private readonly atlas: Atlas;
 
-  constructor(gl: WebGL2RenderingContext, private readonly atlas: Atlas) {
+  constructor(gl: WebGL2RenderingContext, atlas: Atlas) {
     this.gl = gl;
+    this.atlas = atlas;
     this.capacity = 1024;
     this.data = new Float32Array(this.capacity * FLOATS);
     this.invAtlas = [1 / atlas.width, 1 / atlas.height];
@@ -121,22 +123,22 @@ export class SpriteBatch {
     rot = 0,
     flash = 0,
     additive = false,
+    flipX = false,
   ): void {
     const rect = this.atlas.rectOf.get(canvas);
-    if (rect) this.push(rect, x, y, w, h, tint, rot, flash, additive);
+    if (rect) this.push(rect, x, y, w, h, tint, rot, flash, additive, flipX);
   }
 
   /** Queue a pixel-aligned solid rectangle without requiring an atlas entry. */
   drawSolidRect(x: number, y: number, w: number, h: number, tint: readonly [number, number, number, number], additive = false, rot = 0): void {
-    const n = additive ? this.additiveCount : this.normalCount;
-    if (n >= this.capacity) return;
+    const n = this.reserveIndex(additive);
     const i = n * FLOATS;
     const a = this.data;
     a[i] = x; a[i + 1] = y; a[i + 2] = w; a[i + 3] = h;
     a[i + 4] = 0; a[i + 5] = 0; a[i + 6] = 0; a[i + 7] = 0;
     a[i + 8] = tint[0]; a[i + 9] = tint[1]; a[i + 10] = tint[2]; a[i + 11] = tint[3];
     a[i + 12] = rot; a[i + 13] = -1;
-    if (additive) this.additiveCount = n + 1; else this.normalCount = n + 1;
+    if (additive) this.additiveCount++; else this.normalCount++;
   }
 
   push(
@@ -149,19 +151,44 @@ export class SpriteBatch {
     rot: number,
     flash: number,
     additive: boolean,
+    flipX = false,
   ): void {
-    const n = additive ? this.additiveCount : this.normalCount;
-    if (n >= this.capacity) return; // saturate rather than throw mid-frame
+    const n = this.reserveIndex(additive);
     const i = n * FLOATS;
     const a = this.data;
     a[i] = x; a[i + 1] = y; a[i + 2] = w; a[i + 3] = h;
-    a[i + 4] = rect.x * this.invAtlas[0];
+    a[i + 4] = (flipX ? rect.x + rect.w : rect.x) * this.invAtlas[0];
     a[i + 5] = rect.y * this.invAtlas[1];
-    a[i + 6] = rect.w * this.invAtlas[0];
+    a[i + 6] = (flipX ? -rect.w : rect.w) * this.invAtlas[0];
     a[i + 7] = rect.h * this.invAtlas[1];
     a[i + 8] = tint[0]; a[i + 9] = tint[1]; a[i + 10] = tint[2]; a[i + 11] = tint[3];
     a[i + 12] = rot; a[i + 13] = flash;
-    if (additive) this.additiveCount = n + 1; else this.normalCount = n + 1;
+    if (additive) this.additiveCount++; else this.normalCount++;
+  }
+
+  private reserveIndex(additive: boolean): number {
+    const total = this.normalCount + this.additiveCount;
+    this.ensureCapacity(total + 1);
+    if (additive) return total;
+    if (this.additiveCount > 0) {
+      this.data.copyWithin(
+        (this.normalCount + 1) * FLOATS,
+        this.normalCount * FLOATS,
+        total * FLOATS,
+      );
+    }
+    return this.normalCount;
+  }
+
+  private ensureCapacity(required: number): void {
+    if (required <= this.capacity) return;
+    while (this.capacity < required) this.capacity *= 2;
+    const next = new Float32Array(this.capacity * FLOATS);
+    next.set(this.data);
+    this.data = next;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.dataBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
   }
 
   private flushRange(start: number, count: number, additive: boolean): void {
@@ -177,7 +204,7 @@ export class SpriteBatch {
     gl.vertexAttribPointer(2, 4, gl.FLOAT, false, STRIDE, base + 16);
     gl.vertexAttribPointer(3, 4, gl.FLOAT, false, STRIDE, base + 32);
     gl.vertexAttribPointer(4, 2, gl.FLOAT, false, STRIDE, base + 48);
-    if (additive) gl.blendFunc(gl.ONE, gl.ONE);
+    if (additive) gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     else gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
   }

@@ -5,11 +5,19 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.46.0";
+export const APP_VERSION = "v0.47.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.47.0",
+    date: "2026-11-14",
+    items: [
+      "<b>WebGL world batch (giai đoạn 2):</b> batch GPU xử lý tiles, parallax, foreground, shadows, actors, NPC/props, projectiles, sprite particles, telegraphs và FX slash/beam trên mọi biome; distortion forge/caverns/void chuyển sang post shader.",
+      "<b>Upload overlay:</b> bỏ upload sceneCanvas trong đường mặc định; chỉ upload overlay Canvas 2D khi có nội dung, và xóa texture bằng GPU khi overlay chuyển về rỗng. SpriteBatch tự tăng capacity khi cảnh vượt 1.024 instance.",
+    ],
+  },
   {
     version: "v0.46.0",
     date: "2026-11-13",
