@@ -424,9 +424,6 @@ function sim(): void {
   /** hit-stop must not swallow presses: read(live=false) leaves them queued for the first tick after the freeze */
   const live = world.hitStopTicks === 0;
   if (!autoplay) {
-    const aim = intent.aim ?? { x: world.player.x, y: world.player.y };
-    cam.follow(world.player.x, world.player.y - 6, aim.x, aim.y, world.room, CONFIG.TIME.TICK);
-    renderer.origin = cam.origin(world.room);
     desk.sampleAim();
     world.tick(intent.read(world.tickCount, live));
     return;
@@ -445,7 +442,6 @@ let originalTimescale = 1;
 
 function frame(dtReal: number): void {
   syncArtifactModal();
-  world.tickDialogueVisual(dtReal);
   diag.frame();
 
   // Slowmo 0.3x trong 0.3s khi người chơi vừa hy sinh

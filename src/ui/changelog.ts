@@ -5,11 +5,22 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.42.0";
+export const APP_VERSION = "v0.42.1";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.42.1",
+    date: "2026-11-13",
+    items: [
+      "<b>Camera:</b> sửa lỗi camera bị integrate hai lần mỗi frame — follow lerp và shake decay giờ chạy đúng một lần trên visual clock, hết hụt nhịp khi hit-stop.",
+      "<b>Hội thoại:</b> typewriter chạy theo fixed step; phím tương tác đóng hội thoại đang mở thay vì mở lại; hộp chọn phòng tạm dừng đồng hồ run và vùng click khớp đúng thẻ bài được vẽ.",
+      "<b>CONFIG:</b> gom các hằng số rải rác (alpha impact flash, tốc độ chữ, ngưỡng lửa trại/rèn/giếng/thử thách, bán kính NPC) về một mối, kèm law chống trôi.",
+      "<b>Dọn đường chết:</b> xóa cờ glBatchEnabled và toàn bộ nhánh queue*GL — renderer chỉ còn một đường scene duy nhất (2D composite → GL post chain).",
+      "<b>Regression:</b> khôi phục 3 test PR#3 (stun/HURT, VANISH miễn status, swing của enemy không cộng damageDealt) và siết law pool artifact theo worst-case run.",
+    ],
+  },
   {
     version: "v0.42.0",
     date: "2026-11-13",

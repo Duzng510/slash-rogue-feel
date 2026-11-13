@@ -193,8 +193,6 @@ export class GLPipeline {
   private readonly post: WebGLProgram;
   private readonly fxTex: WebGLTexture;
   private readonly lightTex: WebGLTexture;
-  private fxPending: HTMLCanvasElement | null = null;
-  private lightPending: HTMLCanvasElement | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -293,43 +291,6 @@ export class GLPipeline {
     gl.bindTexture(gl.TEXTURE_2D, null);
   }
 
-  setClearColor(r: number, g: number, b: number): void {
-    this.batch.setClearColor(r, g, b);
-  }
-
-  /** queue a 2D overlay canvas to upload on the next present. */
-  setFxOverlay(canvas: HTMLCanvasElement | null): void {
-    this.fxPending = canvas;
-  }
-
-  setLightOverlay(canvas: HTMLCanvasElement | null): void {
-    this.lightPending = canvas;
-  }
-
-  /** render the batched scene into the scene RT, then run the post chain. */
-  present(params: PresentParams): void {
-    const gl = this.gl;
-    this.batch.render({
-      width: this.iw,
-      height: this.ih,
-      bind: () => {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneRT.fbo);
-        gl.viewport(0, 0, this.iw, this.ih);
-      },
-      unbind: () => gl.bindFramebuffer(gl.FRAMEBUFFER, null),
-    });
-    this.uploadOverlay(this.fxTex, this.fxPending, false);
-    this.uploadOverlay(this.lightTex, this.lightPending, true);
-    this.fxPending = null;
-    this.lightPending = null;
-    this.runPost(params);
-    this.batch.clear();
-  }
-
-  presentSceneWithBatch(scene: HTMLCanvasElement, params: PresentParams): void {
-    this.presentScene(scene, params);
-  }
-
   /**
    * Fully-composited 2D canvas (all layers correctly ordered, depth-sorted, lit, and text-overlaid)
    * uploaded into the scene RT, then run through the GL post chain (bloom, CRT warp, scanlines, ripple).
@@ -342,7 +303,6 @@ export class GLPipeline {
     this.uploadOverlay(this.fxTex, null, false);
     this.uploadOverlay(this.lightTex, null, true);
     this.runPost(params);
-    this.batch.clear();
   }
 
   /** threshold -> horizontal blur -> vertical blur -> CRT/haze composite to the canvas. */

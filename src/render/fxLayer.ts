@@ -4,7 +4,6 @@
 // the effect bookkeeping lives in one place instead of scattered across the Renderer class.
 import { CONFIG } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
-import type { SpriteBatch } from "./gl/batch.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -263,28 +262,6 @@ export class FxLayer {
     }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
-  }
-
-  queueGL(batch: SpriteBatch, ox: number, oy: number): void {
-    for (const s of this.slices) {
-      const prog = Math.max(0, s.left / Math.max(1, s.total));
-      const cx = Math.round(s.x - ox);
-      const cy = Math.round(s.y - oy);
-      const angle = s.dir + Math.PI * 0.5;
-      const half = s.len * 0.5;
-      const x = Math.round(cx - half);
-      const y = Math.round(cy - 1);
-      batch.drawSolidRect(x, y - 1, s.len, 2, [0.35, 0.85, 1, prog * 0.8], true, angle);
-      batch.drawSolidRect(x, y, s.len, 1, [1, 1, 1, prog], true, angle);
-    }
-    for (const b of this.beams) {
-      const alpha = Math.max(0, b.left / Math.max(1, b.total));
-      const x = b.x - ox;
-      const y = b.y - oy;
-      batch.drawSolidRect(x - b.len * 0.5, y - 3, b.len, 6, [0.65, 0.25, 0.82, alpha], true, b.dir);
-      batch.drawSolidRect(x - b.len * 0.5, y - 2, b.len, 4, [0.06, 0.03, 0.10, alpha], false, b.dir);
-      batch.drawSolidRect(x - b.len * 0.5, y - 1, b.len, 2, [0.67, 0.39, 0.82, alpha], true, b.dir);
-    }
   }
 
   drawBeams(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {

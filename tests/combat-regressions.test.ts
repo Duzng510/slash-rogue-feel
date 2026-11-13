@@ -3,18 +3,19 @@ import { test } from "node:test";
 import { CONFIG } from "../src/config.ts";
 import { World } from "../src/world/world.ts";
 import { Room, TEMPLATES } from "../src/world/rooms.ts";
-import { createSwing, hitboxOf, playerSwingInit, resolveHits } from "../src/systems/combat.ts";
+import { createSwing, hitFeedback, hitboxOf, playerSwingInit, resolveHits } from "../src/systems/combat.ts";
 import { makeEnemy, ENEMY_STATE } from "../src/entities/enemy.ts";
 import { resolveProjectiles } from "../src/systems/projectiles.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { ParticlePool } from "../src/systems/particles.ts";
 import { ARTIFACTS, ARTIFACT_UNLOCKS } from "../src/systems/artifacts.ts";
 import type { Dialogue } from "../src/systems/dialogue.ts";
+import { GUARD_DIALOGUE } from "../src/systems/dialogue.ts";
 import { emptyStats } from "../src/systems/runStats.ts";
 import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import type { Intent } from "../src/sim/types.ts";
-import { dialogueOptionAt } from "../src/ui/dialogueLayout.ts";
+import { dialogueOptionAt, roomChoiceAt } from "../src/ui/dialogueLayout.ts";
 
 function dialogueNodeId(world: World): string | null {
   return world.dialogue?.nodeId ?? null;
@@ -566,6 +567,39 @@ test("status artifacts apply wet then extended shock without refreshing an activ
   }
 });
 
+test("stun time advances the hurt animation and expires hurt recovery concurrently", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  e.state = ENEMY_STATE.HURT;
+  e.hurtTicks = 1;
+  e.freezeTicks = 3;
+  e.tick(w, w.grid);
+  assert.equal(e.hurtTicks, 0);
+  assert.equal(e.state, ENEMY_STATE.CHASE);
+  assert.equal(e.freezeTicks, 2);
+});
+
+test("vanishing enemies ignore incoming statuses", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  e.state = ENEMY_STATE.VANISH;
+  e.applyStatus("freeze", w);
+  e.applyStatus("shock", w);
+  assert.equal(e.state, ENEMY_STATE.VANISH);
+  assert.equal(e.freezeTicks, 0);
+  assert.equal(e.shockTicks, 0);
+});
+
+test("enemy-owned damage does not inflate player damage dealt", () => {
+  const w = sandbox();
+  const e = makeEnemy(100, 100);
+  const swing = createSwing(w, playerSwingInit(w, 1, 0));
+  swing.side = "enemy";
+  const before = w.runStats.damageDealt;
+  hitFeedback(w, e, swing, e.x, e.y, false, false);
+  assert.equal(w.runStats.damageDealt, before);
+});
+
 test("status slow expires and shock blocks movement without extending on reapplication", () => {
   const w = sandbox();
   const e = makeEnemy(100, 100);
@@ -1003,6 +1037,9 @@ test("town NPCs target nearby interactions and lock character changes after a ki
   w.tick({ ...idle, interact: true });
   assert.equal(nearbyKind(), "guard");
   assert.equal(w.bannerText, "Hầm ngục ở phía đông — chúc may mắn.");
+  /** one interact press closes the open line; only the next press talks to a different NPC */
+  w.tick({ ...idle, interact: true });
+  assert.equal(w.dialogue, null);
 
   w.player.x = 40;
   w.player.y = 60;
@@ -1061,8 +1098,8 @@ test("town props are scoped to town and dialogue text must finish before an opti
     },
   };
   w.openDialogue(dialogue);
-  w.tickDialogueVisual(0.05);
-  assert.equal(w.dialogue?.charIndex, 2);
+  for (let i = 0; i < 3; i++) w.tick(idle);
+  assert.ok(w.dialogue!.charIndex > 0 && w.dialogue!.charIndex < 5, "the line should be partially revealed");
   assert.equal(w.chooseDialogueOption(0), true);
   assert.equal(w.dialogue?.nodeId, "first");
   assert.equal(w.dialogue?.charIndex, 5);
@@ -1082,6 +1119,27 @@ test("dialogue pointer targets match the drawn option rectangles for every row",
   assert.equal(dialogueOptionAt(36, 128, 3), 2);
   assert.equal(dialogueOptionAt(36, 125, 3), null);
   assert.equal(dialogueOptionAt(36, 145, 3), null);
+});
+
+test("room choice pointer targets match the drawn cards, not the empty margin", () => {
+  assert.equal(roomChoiceAt(58, 48, 3), 0);
+  assert.equal(roomChoiceAt(160, 136, 3), 1);
+  assert.equal(roomChoiceAt(262, 92, 3), 2);
+  assert.equal(roomChoiceAt(58, 47, 3), null);
+  assert.equal(roomChoiceAt(58, 137, 3), null);
+  assert.equal(roomChoiceAt(110, 92, 3), null);
+  assert.equal(roomChoiceAt(262, 92, 2), null);
+});
+
+test("interact closes an open dialogue instead of reopening it", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.enterTown();
+  const npc = w.npcList[0]!;
+  w.player.x = npc.x;
+  w.player.y = npc.y;
+  w.openDialogue(GUARD_DIALOGUE);
+  w.tick({ ...idle, interact: true });
+  assert.equal(w.dialogue, null);
 });
 
 test("town bell waits four seconds, repeats on its town timer, and stops in dungeons", () => {
@@ -1136,6 +1194,33 @@ test("rest room offers one heal or a persistent capped weapon upgrade", () => {
   assert.equal(w.chooseRoomOption(0), true);
   assert.equal(w.player.hp, 3);
   assert.equal(w.player.weaponDamageBonus, 3);
+});
+
+test("an open room choice pauses the run clock", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.loadRoom(TEMPLATES.findIndex(room => room.kind === "rest"));
+  w.player.x = w.room.widthPx / 2;
+  w.player.y = w.room.heightPx / 2;
+  w.tick(idle);
+  assert.ok(w.roomChoices);
+  const elapsed = w.runStats.ticksElapsed;
+  const ticks = w.tickCount;
+  for (let i = 0; i < 30; i++) w.tick(idle);
+  assert.equal(w.runStats.ticksElapsed, elapsed);
+  assert.equal(w.tickCount, ticks);
+});
+
+test("dialogue text advances on the fixed step", () => {
+  const w = new World(CONFIG.SEED, allUnlocks());
+  w.openDialogue(GUARD_DIALOGUE);
+  const full = GUARD_DIALOGUE.nodes.greet!.text.length;
+  assert.equal(w.dialogue?.charIndex, 0);
+  for (let i = 0; i < 10; i++) w.tick(idle);
+  const shown = w.dialogue!.charIndex;
+  assert.ok(shown > 0, "the typewriter never advanced");
+  assert.ok(shown < full, "the whole line appeared at once");
+  for (let i = 0; i < 300; i++) w.tick(idle);
+  assert.equal(w.dialogue!.charIndex, full);
 });
 
 test("treasure room offers normal artifacts and a one-curse bundle", () => {

@@ -107,7 +107,6 @@ export class World implements Sim {
   shopOffers: ShopOffer[] | null = null;
   roomChoices: RoomChoiceOffer | null = null;
   dialogue: ActiveDialogue | null = null;
-  characterLocked = false;
   decals: Decal[] = [];
   fireTrails: FireTrail[] = [];
   projectiles: Projectile[] = [];
@@ -141,14 +140,14 @@ export class World implements Sim {
     const safePool = pool.length > 0 ? pool : ["chaser" as EnemyKind];
     const centerX = this.room.widthPx / 2;
     const centerY = this.room.heightPx / 2;
-    const count = this.challengeWave + 2;
+    const count = this.challengeWave + CONFIG.ROOMS.CHALLENGE_BASE_COUNT;
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2 + this.challengeWave * 0.41;
       const kind = safePool[Math.floor(this.rng.next() * safePool.length)]!;
-      this.spawnEnemy(centerX + Math.cos(angle) * 38, centerY + Math.sin(angle) * 28, kind);
+      this.spawnEnemy(centerX + Math.cos(angle) * CONFIG.ROOMS.CHALLENGE_RING_X, centerY + Math.sin(angle) * CONFIG.ROOMS.CHALLENGE_RING_Y, kind);
     }
     this.syncUnits();
-    this.banner(`ĐỢT ${this.challengeWave}/3`);
+    this.banner(`ĐỢT ${this.challengeWave}/${CONFIG.ROOMS.CHALLENGE_WAVES}`);
   }
 
   setAscensionLevel(level: number): boolean {
@@ -172,7 +171,6 @@ export class World implements Sim {
     this.player.hp = this.player.maxHp;
     this.characterChoices = [];
     this.weaponChoices = [...WEAPON_LIST];
-    this.characterLocked = true;
     return true;
   }
 
@@ -313,7 +311,6 @@ export class World implements Sim {
     this.rewardedRooms.clear();
     this.characterChoices = [...CHARACTER_LIST];
     this.weaponChoices = null;
-    this.characterLocked = false;
     this.dialogue = null;
     this.gateCooldown = 0;
     this.enterTown();
@@ -326,7 +323,6 @@ export class World implements Sim {
     this.rewardedRooms.clear();
     this.characterChoices = [...CHARACTER_LIST];
     this.weaponChoices = null;
-    this.characterLocked = false;
     this.dialogue = null;
     this.gateCooldown = 0;
     this.loadRoom(0);
@@ -361,7 +357,6 @@ export class World implements Sim {
     this.hitStopTicks = 0;
     this.bossIntroPending = false;
     this.introTicks = 0;
-    this.characterLocked = false;
     this.dialogue = null;
     this.gateCooldown = 0;
     this.townBellCd = 240;
@@ -424,7 +419,7 @@ export class World implements Sim {
     if (offer === null || choice === undefined || choice.disabled) return false;
     if (this.room.kind === "rest") {
       if (choice.id === "rest") this.player.hp = Math.min(this.player.maxHp, this.player.hp + 2);
-      else if (choice.id === "forge" && this.player.weaponDamageBonus < 3) this.player.weaponDamageBonus++;
+      else if (choice.id === "forge" && this.player.weaponDamageBonus < CONFIG.ROOMS.FORGE_CAP) this.player.weaponDamageBonus++;
       else return false;
       this.restUsed = true;
       this.roomChoices = null;
@@ -445,17 +440,17 @@ export class World implements Sim {
         return this.finishRoomChoice(gain ? "Giếng cổ: +2 HP" : "Giếng cổ: -1 HP");
       }
       if (choice.id === "gold") {
-        if (this.runStats.gold < 5) return false;
+        if (this.runStats.gold < CONFIG.ROOMS.WELL_COST) return false;
         const pool = this.availableArtifacts();
         if (pool.length === 0) return false;
-        this.runStats.gold -= 5;
+        this.runStats.gold -= CONFIG.ROOMS.WELL_COST;
         this.grantArtifact(pool[Math.floor(this.artifactRng.next() * pool.length)]!);
         return this.finishRoomChoice("Vàng đổi lấy cổ vật");
       }
     } else {
       if (choice.id === "sacrifice") {
-        if (this.player.hp <= 2) return false;
-        this.player.hp -= 2;
+        if (this.player.hp <= CONFIG.ROOMS.SACRIFICE_HP) return false;
+        this.player.hp -= CONFIG.ROOMS.SACRIFICE_HP;
         this.player.maxHp++;
         return this.finishRoomChoice("Bàn thờ máu: +1 HP tối đa");
       }
@@ -485,13 +480,6 @@ export class World implements Sim {
 
   openDialogue(source: Dialogue): void {
     this.dialogue = { source, nodeId: source.start, charIndex: 0 };
-  }
-
-  tickDialogueVisual(dtReal: number): void {
-    if (this.dialogue === null) return;
-    const node = this.dialogue.source.nodes[this.dialogue.nodeId];
-    if (!node) return;
-    this.dialogue.charIndex = Math.min(node.text.length, this.dialogue.charIndex + dtReal * 40);
   }
 
   dialogueFullyShown(): boolean {
@@ -565,9 +553,9 @@ export class World implements Sim {
         break;
       case "retreat":
         this.closeDialogue();
-        this.player.x -= 24;
+        this.player.x -= CONFIG.TOWN.RETREAT_PUSH;
         this.player.vx = 0;
-        this.gateCooldown = 30;
+        this.gateCooldown = CONFIG.TOWN.GATE_COOLDOWN_TICKS;
         this.banner("Hãy chuẩn bị kỹ.", 90);
         break;
     }
@@ -715,8 +703,15 @@ export class World implements Sim {
     if (this.weaponChoices !== null) return;
     if (this.artifactChoices.length > 0) return;
     if (this.shopOffers !== null) return;
+    if (this.roomChoices !== null) return;
     if (this.pendingEnd !== null) return;
-    if (this.dialogue !== null && !input.interact) return;
+    if (this.dialogue !== null) {
+      const node = this.dialogue.source.nodes[this.dialogue.nodeId];
+      if (node) {
+        this.dialogue.charIndex = Math.min(node.text.length, this.dialogue.charIndex + CONFIG.DIALOGUE.CHARS_PER_SECOND * CONFIG.TIME.TICK);
+      }
+      if (!input.interact) return;
+    }
 
     if (this.mode === "dungeon" && this.bossIntroPending) {
       this.bossIntroPending = false;
@@ -748,7 +743,7 @@ export class World implements Sim {
   private tickTown(input: Intent): void {
     this.player.tick({ ...input, attack: false, skill: false }, this);
 
-    const radius = 24;
+    const radius = CONFIG.TOWN.NPC_INTERACT_RADIUS;
     let nearest: Npc | null = null;
     let nearestDist = radius;
     for (const npc of this.npcList) {
@@ -762,7 +757,7 @@ export class World implements Sim {
 
     if (this.dialogue !== null) {
       if (input.interact) this.closeDialogue();
-      else return;
+      return;
     }
 
     if (nearest !== null) {
@@ -779,7 +774,7 @@ export class World implements Sim {
 
     if (this.townBellCd > 0) this.townBellCd--;
     else {
-      this.townBellCd = 360;
+      this.townBellCd = CONFIG.TOWN.BELL_TICKS;
       sfx(this.queue, "town_bell", 0.6, 1);
     }
 
@@ -891,13 +886,13 @@ export class World implements Sim {
       this.room.openDoors();
       const centerX = this.room.widthPx / 2;
       const centerY = this.room.heightPx / 2;
-      if (!this.restUsed && this.roomChoices === null && Math.hypot(this.player.x - centerX, this.player.y - centerY) <= 18) {
+      if (!this.restUsed && this.roomChoices === null && Math.hypot(this.player.x - centerX, this.player.y - centerY) <= CONFIG.ROOMS.CAMPFIRE_RADIUS) {
         this.roomChoices = {
           title: "LỬA TRẠI",
           subtitle: "Chọn một cách chuẩn bị cho chặng tiếp theo",
           choices: [
             { id: "rest", label: "NGHỈ", detail: "+2 HP" },
-            { id: "forge", label: "RÈN", detail: this.player.weaponDamageBonus < 3 ? `+1 sát thương (${this.player.weaponDamageBonus}/3)` : "Đã đạt tối đa +3", disabled: this.player.weaponDamageBonus >= 3 },
+            { id: "forge", label: "RÈN", detail: this.player.weaponDamageBonus < CONFIG.ROOMS.FORGE_CAP ? `+1 sát thương (${this.player.weaponDamageBonus}/${CONFIG.ROOMS.FORGE_CAP})` : `Đã đạt tối đa +${CONFIG.ROOMS.FORGE_CAP}`, disabled: this.player.weaponDamageBonus >= CONFIG.ROOMS.FORGE_CAP },
           ],
         };
       }
@@ -912,7 +907,7 @@ export class World implements Sim {
             subtitle: "Tiếng vọng dưới đáy giếng hứa hẹn một món quà",
             choices: [
               { id: "drink", label: "UỐNG", detail: "50% +2 HP · 50% -1 HP" },
-              { id: "gold", label: "NÉM 5 VÀNG", detail: "Nhận 1 cổ vật ngẫu nhiên", disabled: this.runStats.gold < 5 || artifacts.length === 0 },
+              { id: "gold", label: `NÉM ${CONFIG.ROOMS.WELL_COST} VÀNG`, detail: "Nhận 1 cổ vật ngẫu nhiên", disabled: this.runStats.gold < CONFIG.ROOMS.WELL_COST || artifacts.length === 0 },
               { id: "leave", label: "BỎ ĐI", detail: "Rời khỏi giếng" },
             ],
           };
@@ -921,7 +916,7 @@ export class World implements Sim {
             title: "BÀN THỜ MÁU",
             subtitle: "Một lời khấn đổi lấy sức mạnh",
             choices: [
-              { id: "sacrifice", label: "HIẾN 2 HP", detail: "+1 HP tối đa", disabled: this.player.hp <= 2 },
+              { id: "sacrifice", label: `HIẾN ${CONFIG.ROOMS.SACRIFICE_HP} HP`, detail: "+1 HP tối đa", disabled: this.player.hp <= CONFIG.ROOMS.SACRIFICE_HP },
               { id: "prayer", label: "CẦU NGUYỆN", detail: "+2 cổ vật, nhận 1 nguyền rủa", disabled: curses.length === 0 || this.curses.size >= CONFIG.CURSES.MAX_CURSES || artifacts.length < 2 },
               { id: "leave", label: "BỎ ĐI", detail: "Rời khỏi bàn thờ" },
             ],
@@ -946,10 +941,10 @@ export class World implements Sim {
         }
       }
     } else if (this.room.kind === "challenge" && this.aliveEnemies() === 0 && !this.room.doorOpen) {
-      if (this.challengeWave < 3) {
+      if (this.challengeWave < CONFIG.ROOMS.CHALLENGE_WAVES) {
         if (this.challengeBreakTicks < 0) {
-          this.challengeBreakTicks = 90;
-          this.banner(`ĐỢT ${this.challengeWave}/3 HOÀN THÀNH`);
+          this.challengeBreakTicks = CONFIG.ROOMS.CHALLENGE_BREAK_TICKS;
+          this.banner(`ĐỢT ${this.challengeWave}/${CONFIG.ROOMS.CHALLENGE_WAVES} HOÀN THÀNH`);
         } else if (--this.challengeBreakTicks <= 0) {
           this.challengeWave++;
           this.challengeBreakTicks = -1;
@@ -963,8 +958,8 @@ export class World implements Sim {
         if (this.artifactChoices.length > 0) return;
         this.rewardedRooms.add(this.roomIndex);
       }
-      if (this.challengeWave >= 3 && !this.rewardedRooms.has(this.roomIndex)) return;
-      if (this.challengeWave >= 3 && this.artifactChoices.length > 0) return;
+      if (this.challengeWave >= CONFIG.ROOMS.CHALLENGE_WAVES && !this.rewardedRooms.has(this.roomIndex)) return;
+      if (this.challengeWave >= CONFIG.ROOMS.CHALLENGE_WAVES && this.artifactChoices.length > 0) return;
       this.room.openDoors();
       sfx(this.queue, "door");
       this.banner("THỬ THÁCH HOÀN TẤT — cửa mở");

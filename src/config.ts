@@ -478,6 +478,10 @@ export const CONFIG = {
     TICK: 1 / 60,
   },
 
+  DIALOGUE: {
+    CHARS_PER_SECOND: 40,
+  },
+
   WORLD: {
     TILE: 16,
     INTERNAL_W: 320,
@@ -489,6 +493,22 @@ export const CONFIG = {
     WAVES: [3, 4, 6, 8, 5, 10, 6, 4, 0, 8, 0, 0, 1, 0, 0, 3],
     END_DELAY: 40,
     TRAP_DMG: 1,
+    CAMPFIRE_RADIUS: 18,
+    FORGE_CAP: 3,
+    WELL_COST: 5,
+    SACRIFICE_HP: 2,
+    CHALLENGE_WAVES: 3,
+    CHALLENGE_BASE_COUNT: 2,
+    CHALLENGE_BREAK_TICKS: 90,
+    CHALLENGE_RING_X: 38,
+    CHALLENGE_RING_Y: 28,
+  },
+
+  TOWN: {
+    NPC_INTERACT_RADIUS: 24,
+    BELL_TICKS: 360,
+    GATE_COOLDOWN_TICKS: 30,
+    RETREAT_PUSH: 24,
   },
 
   CURSES: {
@@ -584,7 +604,8 @@ export const CONFIG = {
     /** kill-cam: zoom+desat punch when a player swing kills (visual-only, see renderer) */
     IMPACT_TICKS: 2,
     IMPACT_ZOOM: 1.04,
-    IMPACT_FLASH_ALPHA: 0.4,
+    /** subtle blink, not a strobe: 0.4 read as harsh flicker on device */
+    IMPACT_FLASH_ALPHA: 0.22,
     IMPACT_SATURATE: 0.45,
     /** ground blood decals per room; oldest is recycled when full */
     DECAL_CAP: 64,

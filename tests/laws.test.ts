@@ -678,9 +678,10 @@ heading("Room variety (P5)");
   ok("the run includes five new authored room types", TEMPLATES.length === 17, `length ${TEMPLATES.length}`);
   ok("the biggest authored wave fields 8+ enemies", Math.max(...CONFIG.ROOMS.WAVES) >= 8, `max ${Math.max(...CONFIG.ROOMS.WAVES)}`);
   ok("every non-boss room has a wave entry", CONFIG.ROOMS.WAVES.length === TEMPLATES.length - 1, `waves ${CONFIG.ROOMS.WAVES.length}`);
-  const normalArtifactRooms = TEMPLATES.filter((template) =>
-    template.kind === undefined || template.kind === "combat" || template.kind === "treasure" || template.kind === "elite").length;
-  ok("the artifact pool can fill every normal artifact reward", ARTIFACTS.length >= normalArtifactRooms + 3, `have ${ARTIFACTS.length} need ${normalArtifactRooms + 3}`);
+  /** every room except rest/boss grants at most one artifact; each curse bundle swaps that pick for two */
+  const grantingRooms = TEMPLATES.filter((template) => template.kind !== "rest" && template.kind !== "boss").length;
+  const worstCaseRun = grantingRooms + CONFIG.CURSES.MAX_CURSES;
+  ok("the artifact pool survives a worst-case run", ARTIFACTS.length >= worstCaseRun, `have ${ARTIFACTS.length} need ${worstCaseRun}`);
 }
 
 heading("Rooms (P8)");
@@ -1112,6 +1113,49 @@ heading("A sim throw must not kill the frame loop");
   loop.stop();
   globalThis.requestAnimationFrame = raf;
   globalThis.cancelAnimationFrame = cancel;
+}
+
+heading("The visual clock is driven only from frame()");
+{
+  const src = readFileSync("src/main.ts", "utf8");
+  const bodyOf = (name: string): string => {
+    const start = src.indexOf(`function ${name}(`);
+    if (start < 0) return "";
+    const open = src.indexOf("{", start);
+    let depth = 0;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+    }
+    return "";
+  };
+  const simBody = bodyOf("sim");
+  const frameBody = bodyOf("frame");
+  ok("both pump halves are locatable", simBody.includes("world.tick(") && frameBody.includes("cam.follow("), "main.ts shape changed");
+  ok("the fixed step never drives the camera", !/cam\./.test(simBody), "cam.follow in sim() integrates lerp and shake decay a second time per frame");
+  ok("the fixed step never writes the render origin", !/renderer\.origin\s*=/.test(simBody), "renderer.draw() already recomputes it");
+  ok("the camera integrates exactly once per visual frame", (frameBody.match(/cam\.follow\(/g) ?? []).length === 1);
+}
+
+heading("Impact flash stays tunable");
+{
+  const src = readFileSync("src/render/renderer.ts", "utf8");
+  ok("the impact flash reads its alpha from CONFIG", src.includes("CONFIG.FEEL.IMPACT_FLASH_ALPHA"), "renderer hardcodes the flash alpha");
+  const a = CONFIG.FEEL.IMPACT_FLASH_ALPHA;
+  ok("the flash is a subtle blink, not a strobe", a > 0 && a <= 0.25, `alpha ${a}`);
+}
+
+heading("One scene path: 2D composite into the GL post chain");
+{
+  const renderer = readFileSync("src/render/renderer.ts", "utf8");
+  const pipeline = readFileSync("src/render/gl/pipeline.ts", "utf8");
+  const fx = readFileSync("src/render/fxLayer.ts", "utf8");
+  ok("no batch-mode flag survives", !/glBatchEnabled/.test(renderer + pipeline + fx), "a hardwired-off flag hides which path actually runs");
+  ok("no queue*GL draw path survives", !/queue\w*GL\(/.test(renderer + fx), "dead GL queue methods invite wiring the wrong path");
+  ok("presentScene is the only present entry point", !/presentSceneWithBatch|^\s*present\(/m.test(pipeline), "the batched present alias is dead");
+  for (const call of ["this.drawTiles(g, ox, oy)", "this.drawShadows(g, ox, oy)", "this.drawSortedWorld(g, ox, oy)", "this.drawProjectiles(g, ox, oy, false)"]) {
+    ok(`the 2D layer still draws: ${call}`, renderer.includes(call), "a scene layer went missing with the batch path");
+  }
 }
 
 heading("The player is never absent while alive");

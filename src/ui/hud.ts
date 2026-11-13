@@ -5,7 +5,7 @@ import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
 import { CHARACTERS, COMBO_HITS } from "../systems/characters.ts";
 import { WEAPONS } from "../systems/weapons.ts";
 import { ACHIEVEMENT_NAMES, type AchievementId } from "../systems/unlocks.ts";
-import { dialogueOptionAt, dialogueOptionBounds } from "./dialogueLayout.ts";
+import { dialogueOptionAt, dialogueOptionBounds, roomChoiceAt, roomChoiceBounds } from "./dialogueLayout.ts";
 
 const P = CONFIG.PALETTE;
 
@@ -105,10 +105,10 @@ export class Hud {
       return option === null ? null : `d:${option}`;
     }
     if (w.roomChoices !== null) {
-      if (y < 38 || y > 158) return null;
-      const i = x >= 12 && x <= 104 ? 0 : x >= 114 && x <= 206 ? 1 : x >= 216 && x <= 308 ? 2 : -1;
+      const i = roomChoiceAt(x, y, w.roomChoices.choices.length);
+      if (i === null) return null;
       const choice = w.roomChoices.choices[i];
-      return i >= 0 && choice !== undefined && !choice.disabled ? `e:${i}` : null;
+      return choice !== undefined && !choice.disabled ? `e:${i}` : null;
     }
     if (this.world.characterChoices.length > 0) {
       if (this.world.achievements.ascensionMax > 0 && y >= 164 && y <= 180) {
@@ -597,22 +597,22 @@ export class Hud {
     o.font = "7px sans-serif";
     o.fillText(offer.subtitle, 160, 28);
     offer.choices.forEach((choice, i) => {
-      const x = 12 + i * 102;
+      const b = roomChoiceBounds(i);
       const color = choice.disabled ? "#626a78" : i === 2 ? "#c99ae6" : "#ffd166";
       o.globalAlpha = choice.disabled ? 0.48 : 1;
       o.fillStyle = "#111622";
-      o.fillRect(x, 48, 92, 88);
+      o.fillRect(b.x, b.y, b.width, b.height);
       o.strokeStyle = color;
-      o.strokeRect(x + 0.5, 48.5, 91, 87);
+      o.strokeRect(b.x + 0.5, b.y + 0.5, b.width - 1, b.height - 1);
       o.fillStyle = color;
-      o.fillRect(x, 48, 92, 3);
+      o.fillRect(b.x, b.y, b.width, 3);
       o.fillStyle = "#ffffff";
       o.font = "bold 8px sans-serif";
-      o.fillText(`[${i + 1}] ${choice.label}`, x + 46, 64, 82);
+      o.fillText(`[${i + 1}] ${choice.label}`, b.x + 46, b.y + 16, 82);
       o.fillStyle = "#b8c2d4";
       o.font = "7px sans-serif";
       const lines = wrapLines(o, choice.detail, 78);
-      lines.slice(0, 4).forEach((line, lineIndex) => o.fillText(line, x + 46, 82 + lineIndex * 9, 80));
+      lines.slice(0, 4).forEach((line, lineIndex) => o.fillText(line, b.x + 46, b.y + 34 + lineIndex * 9, 80));
       o.globalAlpha = 1;
     });
     o.restore();

@@ -117,8 +117,6 @@ export class Renderer {
 
   /** WebGL2 migration mode (?renderer=gl): scene is drawn offscreen into `sceneCanvas`, then composited by `gl`. */
   private glMode = false;
-  /** Keep batching off until the scene layers can be composed at their intended depths. */
-  private readonly glBatchEnabled = false;
   private sceneCanvas: HTMLCanvasElement | null = null;
   private gl: GLPipeline | null = null;
 
@@ -353,8 +351,7 @@ export class Renderer {
       g.translate(-iw / 2, -ih / 2);
     }
 
-    if (this.glMode && this.gl && this.glBatchEnabled) this.queueTilesGL(ox, oy);
-    else this.drawTiles(g, ox, oy);
+    this.drawTiles(g, ox, oy);
     this.drawRoomFeature(g, ox, oy);
     this.drawBossIntroCracks(g, ox, oy);
     this.drawDecals(g, ox, oy);
@@ -402,11 +399,8 @@ export class Renderer {
 
     // Sharp pixel-crisp foreground layer on main canvas
     this.fx.drawArcs(g, ox, oy, false);
-    if (this.glMode && this.gl && this.glBatchEnabled) this.fx.queueGL(this.gl.batch, ox, oy);
-    else {
-      this.fx.drawSlices(g, ox, oy, false);
-      this.fx.drawBeams(g, ox, oy, false);
-    }
+    this.fx.drawSlices(g, ox, oy, false);
+    this.fx.drawBeams(g, ox, oy, false);
     this.drawProjectileTrails(g, ox, oy, false);
     this.drawProjectiles(g, ox, oy, false);
 
@@ -425,7 +419,7 @@ export class Renderer {
     g.restore();
     g.filter = "none";
     if (impactFlash) {
-      g.globalAlpha = 0.22; // D1: Giảm độ chớp từ 0.4 xuống 0.22 để êm mắt, tránh nhấp nháy gắt
+      g.globalAlpha = CONFIG.FEEL.IMPACT_FLASH_ALPHA;
       g.fillStyle = P.VIGNETTE_HURT;
       g.fillRect(0, 0, iw, ih);
       g.globalAlpha = 1;
@@ -445,8 +439,7 @@ export class Renderer {
         ripple: CONFIG.SLIDERS.ripple,
         time: this.visualTime,
       };
-      if (this.glBatchEnabled) this.gl.presentSceneWithBatch(this.sceneCanvas, params);
-      else this.gl.presentScene(this.sceneCanvas, params);
+      this.gl.presentScene(this.sceneCanvas, params);
     }
   }
 
@@ -937,33 +930,6 @@ export class Renderer {
     g.fillRect(x - 6, y - 5, 12, 1);
   }
 
-  private queueTilesGL(ox: number, oy: number): void {
-    const T = CONFIG.WORLD.TILE;
-    const room = this.world.room;
-    const x0 = Math.max(0, Math.floor(ox / T));
-    const y0 = Math.max(0, Math.floor(oy / T));
-    const x1 = Math.min(room.w - 1, Math.ceil((ox + CONFIG.WORLD.INTERNAL_W) / T));
-    const y1 = Math.min(room.h - 1, Math.ceil((oy + CONFIG.WORLD.INTERNAL_H) / T));
-    const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
-        this.gl!.batch.drawSprite(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy), s.w, s.h, [1, 1, 1, 1]);
-      }
-    }
-    const face = this.sprites[`wallface_${this.world.currentBiome.id}`];
-    if (!face) return;
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        const tile = room.at(tx, ty);
-        if (tile !== TILE.WALL && tile !== TILE.DOOR) continue;
-        const below = room.at(tx, ty + 1);
-        if (below === TILE.WALL || below === TILE.CRATE) continue;
-        this.gl!.batch.drawSprite(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - face.h - oy), face.w, face.h, [1, 1, 1, 1]);
-      }
-    }
-  }
-
   private drawTelegraphs(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
     for (const en of this.world.enemies) {
       if (en.state !== ENEMY_STATE.TELEGRAPH) continue;
@@ -971,18 +937,6 @@ export class Renderer {
       const prog = 1 - en.telegraphTicksLeft / Math.max(1, en.telegraphTotal);
       const cx = Math.round(en.x - ox);
       const cy = Math.round(en.y - e.BODY_H * 0.5 - oy);
-
-      if (this.glMode && this.gl && this.glBatchEnabled && (en.kind === "charger" || en.kind === "sniper")) {
-        const reach = en.kind === "sniper" ? Math.hypot(this.world.room.widthPx, this.world.room.heightPx) : e.ATTACK_REACH;
-        const alpha = (en.kind === "sniper" ? 0.35 : CONFIG.READABILITY.TELEGRAPH_FILL) * (0.55 + 0.45 * prog);
-        const width = en.kind === "sniper" ? 1 : 4;
-        const dx = Math.cos(en.telegraphDir) * reach;
-        const dy = Math.sin(en.telegraphDir) * reach;
-        const len = Math.max(1, Math.hypot(dx, dy));
-        this.gl.batch.drawSolidRect(Math.round(cx + dx / 2 - len / 2), Math.round(cy - width / 2), len, width, [0.95, 0.32, 0.25, alpha], false, en.telegraphDir);
-        if (en.kind === "sniper") this.gl.batch.drawSolidRect(Math.round(cx + dx - 2), Math.round(cy + dy - 2), 4, 4, [1, 0.35, 0.25, 0.7 + 0.3 * prog], true);
-        continue;
-      }
 
       g.globalAlpha = 0.55 + 0.45 * prog;
       g.strokeStyle = P.TELEGRAPH_EDGE;
@@ -1163,10 +1117,6 @@ export class Renderer {
   }
 
   private drawShadows(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    if (this.glMode && this.gl && this.glBatchEnabled) {
-      this.queueShadowsGL(ox, oy);
-      return;
-    }
     for (const en of this.world.enemies) {
       if (en.removed) continue;
       if (en.state === ENEMY_STATE.VANISH) continue;
@@ -1195,35 +1145,9 @@ export class Renderer {
     g.globalAlpha = 1;
   }
 
-  private queueShadowsGL(ox: number, oy: number): void {
-    const batch = this.gl!.batch;
-    for (const en of this.world.enemies) {
-      if (en.removed || en.state === ENEMY_STATE.VANISH) continue;
-      const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
-      const scale = en.isElite ? 1.3 : 1;
-      const x = Math.round(en.x - sp.ax * scale - ox);
-      const y = Math.round(en.y - sp.ay * scale - oy);
-      const w = Math.round(sp.w * scale);
-      const h = Math.round(sp.h * scale);
-      batch.drawSprite(sp.c, x, y + 1, w, h, [0, 0, 0, 0.3]);
-      batch.drawSprite(sp.c, x, y + 2, w, h, [0, 0, 0, 0.15]);
-    }
-    const pl = this.world.player;
-    const key = `player_${pl.character}`;
-    const sp = this.sprites[key] ?? this.sprites.player;
-    const x = Math.round(pl.x - sp.ax - ox);
-    const y = Math.round(pl.y - sp.ay - oy);
-    batch.drawSprite(sp.c, x, y + 1, sp.w, sp.h, [0, 0, 0, 0.3]);
-    batch.drawSprite(sp.c, x, y + 2, sp.w, sp.h, [0, 0, 0, 0.15]);
-  }
-
   /** depth sort: enemies, player, projectiles and particles in one y-sorted draw list.
    *  Floor indicators (telegraphs, arcs, beams) stay below; damage numbers stay above. */
   private drawSortedWorld(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    if (this.glMode && this.gl && this.glBatchEnabled) {
-      this.queueSortedWorldGL(ox, oy);
-      return;
-    }
     type Item = { y: number; draw: () => void };
     const items: Item[] = [];
     for (const prop of this.world.townProps) {
@@ -1249,140 +1173,6 @@ export class Renderer {
     }
     items.sort((a, b) => a.y - b.y);
     for (const it of items) it.draw();
-  }
-
-  private queueSortedWorldGL(ox: number, oy: number): void {
-    for (const prop of this.world.townProps) {
-      const sp = this.sprites[prop.sprite];
-      if (!sp) continue;
-      this.gl!.batch.drawSprite(
-        sp.c,
-        Math.round(prop.x - sp.ax - ox),
-        Math.round(prop.y - sp.ay - oy),
-        sp.w, sp.h,
-        [1, 1, 1, 1],
-      );
-    }
-    for (const en of this.world.enemies) this.queueEnemyGL(en, ox, oy);
-    for (const npc of this.world.npcList) this.queueNpcGL(npc, ox, oy);
-    this.queuePlayerGL(ox, oy);
-    for (const p of this.world.projectiles) this.queueProjectileGL(p, ox, oy);
-    const density = CONFIG.SLIDERS.particles;
-    if (density > 0.01) {
-      this.world.particles.visit((s) => {
-        if (!s.live || s.sprite === null) return;
-        const sp = this.sprites[s.sprite];
-        if (!sp) return;
-        const t = s.life / s.maxLife;
-        const alpha = Math.min(1, (0.25 + 0.75 * t) * s.alphaScale * density) * 0.35;
-        this.gl!.batch.drawSprite(sp.c, Math.round(s.x - sp.ax - ox), Math.round(s.y - sp.ay - oy), sp.w, sp.h, [1, 1, 1, alpha]);
-      });
-    }
-  }
-
-  private queueNpcGL(npc: Npc, ox: number, oy: number): void {
-    const key = `npc_${npc.kind}`;
-    const base = this.sprites[key];
-    if (!base) return;
-    const sp = Math.cos(npc.facing) > 0.15 ? this.mirrored(base, key) : base;
-    const bob = Math.round(Math.sin(npc.animTicks * 0.05) * 0.5);
-    const x = Math.round(npc.x - sp.ax - ox);
-    const y = Math.round(npc.y - sp.ay - oy) - bob;
-    const sx = Math.round(npc.x - base.ax - ox);
-    const sy = Math.round(npc.y - base.ay - oy) - bob;
-    const batch = this.gl!.batch;
-    batch.drawSprite(base.c, sx, sy + 1, base.w, base.h, [0, 0, 0, 0.3]);
-    batch.drawSprite(base.c, sx, sy + 2, base.w, base.h, [0, 0, 0, 0.15]);
-    batch.drawSprite(sp.c, x, y, sp.w, sp.h, [1, 1, 1, 1]);
-  }
-
-  private queueProjectileGL(p: Projectile, ox: number, oy: number): void {
-    const x = Math.round(p.x - ox);
-    const y = Math.round(p.y - oy);
-    const batch = this.gl!.batch;
-    if (p.kind === "ghost") {
-      batch.drawSolidRect(x - 3, y - 3, 6, 6, [0.23, 0.07, 0.32, 1]);
-      batch.drawSolidRect(x - 1, y - 1, 3, 3, [0.79, 0.60, 0.90, 1], true);
-    } else if (p.kind === "lava") {
-      const total = enemyDef("golem").SHOT_LIFE_TICKS;
-      const arc = Math.sin(Math.min(1, Math.max(0, 1 - p.ticksLeft / Math.max(1, total))) * Math.PI) * 8;
-      batch.drawSolidRect(x - 3, y - 3 - arc, 6, 6, [0.54, 0.11, 0.05, 1]);
-      batch.drawSolidRect(x - 1, y - 1 - arc, 2, 2, [1, 0.69, 0.30, 1], true);
-    } else {
-      const hot = p.owner === "player";
-      batch.drawSolidRect(x - 2, y - 2, 4, 4, hot ? [0.23, 0.11, 0.03, 1] : [0.06, 0.03, 0.10, 1]);
-      batch.drawSolidRect(x - 1, y - 1, 2, 2, hot ? [1, 0.59, 0.25, 1] : [0.67, 0.39, 0.82, 1], true);
-    }
-  }
-
-  private queueEnemyGL(en: Enemy, ox: number, oy: number): void {
-    if (en.removed || en.state === ENEMY_STATE.VANISH) return;
-    const key = en.def.SPRITE_KEY;
-    const base = this.sprites[key] ?? this.sprites.enemy;
-    let sp = base;
-    const set = this.anims[key] ?? this.anims.enemy;
-    if (set) {
-      const fi = Math.floor(en.animTicks / set.tickDur) % set.frames.length;
-      sp = Math.cos(en.facing) > 0.15 ? set.mirrored[fi]! : set.frames[fi]!;
-    } else if (Math.cos(en.facing) > 0.15) {
-      sp = this.mirrored(base, key);
-    }
-    if (en.dead) {
-      const death = this.anims[`${key}_death`];
-      if (death) {
-        const fi = Math.min(death.frames.length - 1, Math.floor((1 - en.corpseTicks / en.def.CORPSE_TICKS) * death.frames.length));
-        sp = Math.cos(en.facing) > 0.15 ? death.mirrored[fi]! : death.frames[fi]!;
-      }
-    }
-    const scale = en.isElite ? 1.3 : 1;
-    const fade = en.dead ? Math.max(0, en.corpseTicks / en.def.CORPSE_TICKS)
-      : en.state === ENEMY_STATE.APPEAR ? 0.3 + 0.7 * Math.min(1, en.ticksInState / Math.max(1, en.isElite ? CONFIG.ENEMY.ELITE_SPAWN_TICKS : en.def.APPEAR_TICKS)) : 1;
-    const w = Math.round(sp.w * scale);
-    const h = Math.round(sp.h * scale);
-    const x = Math.round(en.x - sp.ax * scale - ox);
-    const y = Math.round(en.y - sp.ay * scale - en.z * scale - oy) + (en.dead ? en.def.CORPSE_TICKS - en.corpseTicks : 0);
-    const flash = (this.flash.get(en.id) ?? 0) > 0;
-    this.gl!.batch.drawSprite(flash ? (this.white[key] ?? base.c) : sp.c, x, y, w, h, [1, 1, 1, fade], 0, flash ? 1 : 0);
-  }
-
-  private queuePlayerGL(ox: number, oy: number): void {
-    const pl = this.world.player;
-    if (pl.dead) return;
-    const dir = pl.state === PLAYER_STATE.DASH ? pl.dashDir : pl.facing;
-    const faceSign = Math.cos(dir) > 0.15 ? 1 : -1;
-    const pose = playerRigPose(pl, pl.animTicks);
-    const sx = pl.state === PLAYER_STATE.DASH ? 1.15 : 1;
-    const sy = pl.state === PLAYER_STATE.DASH ? 0.85 : 1;
-    const cx = Math.round(pl.x - ox);
-    const cy = Math.round(pl.y - oy) - (pl.state === PLAYER_STATE.DASH ? 2 : 0);
-    const alpha = pl.iframeTicks > 0 && Math.floor(pl.iframeTicks / 3) % 2 === 0 ? CONFIG.READABILITY.IFRAME_ALPHA : 1;
-    const flashing = (this.flash.get(pl.id) ?? 0) > 0;
-    const drawPart = (part: RigPart, transform: RigTransform): void => {
-      const spritePart = part === "leftArm" || part === "rightArm" ? "arm" : part;
-      const key = `playerpart_${pl.character}_${spritePart}`;
-      const sp = this.sprites[key];
-      if (!sp) return;
-      const px = cx + faceSign * sx * transform.x - faceSign * sx * sp.ax;
-      const py = cy + sy * transform.y - sy * sp.ay;
-      this.gl!.batch.drawSprite(flashing ? (this.white[key] ?? sp.c) : sp.c, Math.round(px), Math.round(py), Math.round(sp.w * sx * transform.scaleX), Math.round(sp.h * sy * transform.scaleY), [1, 1, 1, alpha], faceSign * transform.rotation, flashing ? 1 : 0);
-    };
-    drawPart("cape", pose.cape);
-    drawPart("legs", pose.legs);
-    drawPart("torso", pose.torso);
-    drawPart("leftArm", pose.leftArm);
-    if (pl.character === "tank") {
-      const shield = this.sprites.playerpart_tank_shield;
-      if (shield) this.gl!.batch.drawSprite(flashing ? (this.white.playerpart_tank_shield ?? shield.c) : shield.c, Math.round(cx + faceSign * sx * pose.leftArm.x - shield.ax), Math.round(cy + sy * (pose.leftArm.y + 2) - shield.ay), shield.w, shield.h, [1, 1, 1, alpha], faceSign * pose.leftArm.rotation * 0.35, flashing ? 1 : 0);
-    }
-    const weapon = WEAPONS[pl.weapon];
-    const ws = this.sprites[weapon.sprite];
-    if (ws) {
-      const grip = WEAPON_GRIPS[pl.weapon];
-      const local = faceSign > 0 ? this.playerWeaponAngle() + Math.PI / 4 : Math.PI - this.playerWeaponAngle() + Math.PI / 4;
-      this.gl!.batch.drawSprite(flashing ? (this.white[weapon.sprite] ?? ws.c) : ws.c, Math.round(cx + faceSign * sx * pose.weapon.x - grip.x), Math.round(cy + sy * pose.weapon.y - grip.y), Math.round(ws.w * grip.scale), Math.round(ws.h * grip.scale), [1, 1, 1, alpha], local + pose.weapon.rotation, flashing ? 1 : 0);
-    }
-    drawPart("rightArm", pose.rightArm);
-    drawPart("head", pose.head);
   }
 
   private drawOneEnemy(g: CanvasRenderingContext2D, en: Enemy, ox: number, oy: number): void {
@@ -1595,13 +1385,11 @@ export class Renderer {
   }
 
   private drawProjectiles(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
-    if (this.glMode && this.glBatchEnabled) return;
     for (const p of this.world.projectiles) this.drawOneProjectile(g, p, ox, oy, glowOnly);
   }
 
   /** afterimage trails: 4 faded ghosts behind each shot, matching its palette */
   private drawProjectileTrails(g: CanvasRenderingContext2D, ox: number, oy: number, glowOnly = false): void {
-    if (this.glMode && this.glBatchEnabled) return;
     for (const p of this.world.projectiles) {
       if (!p.trail) continue;
       for (let i = 0; i < p.trail.length; i++) {
@@ -1916,7 +1704,6 @@ export class Renderer {
     const density = CONFIG.SLIDERS.particles;
     if (density <= 0.01) return;
     this.world.particles.visit((s) => {
-      if (this.glMode && this.glBatchEnabled && s.sprite !== null) return;
       this.drawOneParticle(g, s, ox, oy, density);
     });
   }
