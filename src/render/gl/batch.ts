@@ -7,7 +7,7 @@ import type { Atlas, AtlasRect } from "./sprites.ts";
 const FLOATS = 14;
 const STRIDE = FLOATS * 4;
 
-type RenderTargetLike = { width: number; height: number; bind(): void; unbind(): void };
+export type RenderTargetLike = { width: number; height: number; bind(): void; unbind(): void };
 
 const VS = `#version 300 es
 layout(location = 0) in vec2 aCorner;   // 0..1 unit quad

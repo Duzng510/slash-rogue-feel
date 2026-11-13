@@ -21,6 +21,14 @@ const PIXEL_SCALE = CONFIG.WORLD.PIXEL_SCALE;
 const VIEW_W = CONFIG.WORLD.INTERNAL_W / PIXEL_SCALE;
 const VIEW_H = CONFIG.WORLD.INTERNAL_H / PIXEL_SCALE;
 
+const TINT_OPAQUE: readonly [number, number, number, number] = [1, 1, 1, 1];
+
+/** parse "#rrggbb" → normalized rgb tuple for the GPU tile-batch clear color */
+function rgbTuple(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 type VerletPoint = { x: number; y: number; px: number; py: number };
 const WEAPON_GRIPS: Record<WeaponId, { x: number; y: number; scale: number }> = {
   katana: { x: 3, y: 13, scale: 0.85 },
@@ -120,6 +128,10 @@ export class Renderer {
   private glMode = false;
   private sceneCanvas: HTMLCanvasElement | null = null;
   private gl: GLPipeline | null = null;
+  /** ?glbatch=probe: route world tiles through the GPU SpriteBatch into sceneRT */
+  private glBatch = false;
+  private tileBatchCount = 0;
+  private probeTilesMean = 0;
 
   constructor(
     private readonly game: HTMLCanvasElement,
@@ -139,6 +151,8 @@ export class Renderer {
     // reachable as a fallback until the WebGL path is confirmed on real Android devices.
     const rendererParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("renderer") : null;
     this.glMode = rendererParam !== "2d";
+    const glBatchParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("glbatch") : null;
+    this.glBatch = glBatchParam === "probe";
     if (this.glMode) {
       this.sceneCanvas = document.createElement("canvas");
       this.sceneCanvas.width = iw;
@@ -241,6 +255,7 @@ export class Renderer {
       // acquiring WebGL2 on `game` is only safe here: in 2D mode `game` holds a 2D context,
       // and the two contexts are mutually exclusive on one canvas.
       this.gl = new GLPipeline(game, iw, ih, sprites, this.anims);
+      this.gl.batchTiles = this.glBatch;
     }
   }
 
@@ -346,6 +361,7 @@ export class Renderer {
       g.translate(-iw / 2, -ih / 2);
     }
 
+    if (this.gl?.batchTiles) this.gl.beginTileBatch(rgbTuple(this.world.currentBiome.palette.outside));
     this.drawTiles(g, ox, oy);
     this.drawRoomFeature(g, ox, oy);
     this.drawBossIntroCracks(g, ox, oy);
@@ -423,6 +439,18 @@ export class Renderer {
     this.drawTransition(g);
     this.drawVignette(g, flags, false); // D7: Cho phép render viền đỏ hurt vignette và boss intro flash cả ở GL
     this.applyBiomeDistortion(g);
+
+    // Probe-only: flush the GPU tile batch into sceneRT and read it back BEFORE presentScene
+    // re-uploads the 2D canvas over sceneRT, so glSceneRTMean() reports the batched tiles.
+    if (this.gl?.batchTiles) {
+      this.gl.flushTileBatch();
+      const buf = this.gl.exportSceneRT();
+      if (buf !== null) {
+        let sum = 0;
+        for (let i = 0; i < buf.length; i += 4) sum += 0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2];
+        this.probeTilesMean = sum / (buf.length / 4);
+      }
+    }
 
     if (this.gl && this.sceneCanvas) {
       const { lights, cols, count } = this.gatherLights(ox, oy);
@@ -767,6 +795,11 @@ export class Renderer {
   }
 
   /** radial emitters for the GL light map: torches, player, fire projectiles, burning enemies */
+  /** tiles-batch probe: mean luminance of the last sceneRT tile flush (0 outside probe mode) */
+  glSceneRTMean(): number {
+    return this.probeTilesMean;
+  }
+
   private gatherLights(ox: number, oy: number): { lights: Float32Array; cols: Float32Array; count: number } {
     const L = CONFIG.LIGHTING;
     const lit = CONFIG.SLIDERS.lighting;
@@ -854,10 +887,19 @@ export class Renderer {
     const x1 = Math.min(room.w - 1, Math.ceil((ox + VIEW_W) / T));
     const y1 = Math.min(room.h - 1, Math.ceil((oy + VIEW_H) / T));
     const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
+    const gl = this.gl;
+    const batching = gl !== null && gl.batchTiles;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
-        g.drawImage(s.c, Math.round(tx * T - ox), Math.round(ty * T - oy), s.w, s.h);
+        const lx = Math.round(tx * T - ox), ly = Math.round(ty * T - oy);
+        if (batching && gl !== null) {
+          gl.batch.drawSprite(s.c, Math.round(lx * PIXEL_SCALE), Math.round(ly * PIXEL_SCALE),
+            Math.round(s.w * PIXEL_SCALE), Math.round(s.h * PIXEL_SCALE), TINT_OPAQUE);
+          this.tileBatchCount++;
+        } else {
+          g.drawImage(s.c, lx, ly, s.w, s.h);
+        }
       }
     }
 
@@ -872,23 +914,42 @@ export class Renderer {
           if (t !== TILE.WALL && t !== TILE.DOOR) continue;
           const below = room.at(tx, ty + 1);
           if (below === TILE.WALL || below === TILE.CRATE) continue;
-          g.drawImage(face.c, Math.round(tx * T - ox), Math.round((ty + 1) * T - FACE_H - oy), face.w, face.h);
+          const fx = Math.round(tx * T - ox), fy = Math.round((ty + 1) * T - FACE_H - oy);
+          if (batching && gl !== null) {
+            gl.batch.drawSprite(face.c, Math.round(fx * PIXEL_SCALE), Math.round(fy * PIXEL_SCALE),
+              Math.round(face.w * PIXEL_SCALE), Math.round(face.h * PIXEL_SCALE), TINT_OPAQUE);
+            this.tileBatchCount++;
+          } else {
+            g.drawImage(face.c, fx, fy, face.w, face.h);
+          }
         }
       }
 
-      g.fillStyle = "#000000";
+      const ps = PIXEL_SCALE;
+      const dh = Math.max(1, Math.round(1 * ps));
       for (let ty = y0; ty <= y1; ty++) {
         for (let tx = x0; tx <= x1; tx++) {
           const tile = room.at(tx, ty);
           if (tile !== TILE.WALL && tile !== TILE.DOOR && tile !== TILE.CRATE) continue;
           const below = room.at(tx, ty + 1);
           if (below === TILE.WALL || below === TILE.CRATE) continue;
-          const x = Math.round(tx * T - ox);
-          const y = Math.round((ty + 1) * T - oy);
-          g.globalAlpha = 0.22;
-          g.fillRect(x, y, T, 1);
-          g.globalAlpha = 0.1;
-          g.fillRect(x, y + 1, T, 1);
+          const lx = tx * T - ox;
+          const ly = (ty + 1) * T - oy;
+          if (batching && gl !== null) {
+            const dx = Math.round(lx * ps), dy1 = Math.round(ly * ps), dy2 = Math.round((ly + 1) * ps);
+            const dw = Math.round(T * ps);
+            gl.batch.drawSolidRect(dx, dy1, dw, dh, [0, 0, 0, 0.22]);
+            gl.batch.drawSolidRect(dx, dy2, dw, dh, [0, 0, 0, 0.1]);
+            this.tileBatchCount += 2;
+          } else {
+            const x = Math.round(lx);
+            const y = Math.round(ly);
+            g.globalAlpha = 0.22;
+            g.fillStyle = "#000000";
+            g.fillRect(x, y, T, 1);
+            g.globalAlpha = 0.1;
+            g.fillRect(x, y + 1, T, 1);
+          }
         }
       }
       g.globalAlpha = 1;

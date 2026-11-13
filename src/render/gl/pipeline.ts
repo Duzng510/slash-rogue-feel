@@ -1,7 +1,7 @@
 import { Renderer } from "ogl";
 import { CONFIG } from "../../config.ts";
 import { buildAtlas, type Atlas } from "./sprites.ts";
-import { SpriteBatch } from "./batch.ts";
+import { SpriteBatch, type RenderTargetLike } from "./batch.ts";
 import type { Sprite, SpriteSet } from "../pixelart.ts";
 
 // Thin WebGL2 executor for the renderer migration. OGL is used only for the context
@@ -213,6 +213,9 @@ export class GLPipeline {
   private readonly post: WebGLProgram;
   private readonly fxTex: WebGLTexture;
 
+  /** true while the batched-tiles path is active (?glbatch=probe); the renderer reads this */
+  batchTiles = false;
+
   constructor(
     canvas: HTMLCanvasElement,
     private readonly iw: number,
@@ -261,6 +264,37 @@ export class GLPipeline {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
     return { tex, fbo, w, h };
+  }
+
+  /** Adapt our RT to the batch's minimal bind target (width/height/bind/unbind). */
+  private rtAsTarget(rt: RT): RenderTargetLike {
+    const gl = this.gl;
+    return {
+      width: rt.w, height: rt.h,
+      bind: () => { gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fbo); },
+      unbind: () => { gl.bindFramebuffer(gl.FRAMEBUFFER, null); },
+    };
+  }
+
+  /** Queue-clear and set the opaque outside color (0..1 rgb) the tile batch clears sceneRT to. */
+  beginTileBatch(outsideRgb: readonly [number, number, number]): void {
+    this.batch.clear();
+    this.batch.setClearColor(outsideRgb[0], outsideRgb[1], outsideRgb[2]);
+  }
+
+  /** Draw all queued tile quads into sceneRT (opaque, cleared to the outside color). */
+  flushTileBatch(): void {
+    this.batch.render(this.rtAsTarget(this.sceneRT), true);
+  }
+
+  /** Bind sceneRT and read its RGBA pixels back to the CPU, then restore the default framebuffer. */
+  exportSceneRT(): Uint8Array | null {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneRT.fbo);
+    const buf = new Uint8Array(this.iw * this.ih * 4);
+    gl.readPixels(0, 0, this.iw, this.ih, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return buf;
   }
 
   /** bind an RT (or the default framebuffer) and select a program; uniforms are set before endPass(). */
@@ -319,11 +353,11 @@ export class GLPipeline {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
     this.uploadOverlay(this.fxTex, null);
-    this.runPost(params);
+    this.runPostFrom(this.sceneRT, params);
   }
 
-  /** threshold -> horizontal blur -> vertical blur -> CRT/haze composite to the canvas. */
-  private runPost(params: PresentParams): void {
+  /** threshold -> horizontal blur -> vertical blur -> CRT/haze composite of `scene` to the canvas. */
+  private runPostFrom(scene: RT, params: PresentParams): void {
     const gl = this.gl;
     const B = CONFIG.BLOOM;
     const C = CONFIG.CRT;
@@ -341,7 +375,7 @@ export class GLPipeline {
     // bright/emit pass: lit scene -> bloomA (half res)
     this.beginPass(this.bloomA, this.bright);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
     gl.uniform1i(gl.getUniformLocation(this.bright, "uScene"), 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.lightRT.tex);
@@ -374,7 +408,7 @@ export class GLPipeline {
     // final composite: scene + bloom + overlays -> canvas
     this.beginPass(null, this.post);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
     gl.uniform1i(gl.getUniformLocation(this.post, "uScene"), 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.bloomA.tex);

@@ -33,6 +33,8 @@ export type Harness = {
   leaveShop: () => void;
   setCurseTab: (v: boolean) => void;
   forceEnd: (mode: EndMode) => void;
+  /** tiles-batch probe: mean luminance of the last sceneRT tile flush (0 unless ?glbatch=probe) */
+  glSceneRTMean: () => number;
   state: () => {
     tick: number;
     hitStop: number;
@@ -145,6 +147,7 @@ export function installHarness(deps: HarnessDeps): void {
       if (mode === "won") world.runStats.roomsCleared = world.roomTotal;
       world.pendingEnd = mode;
     },
+    glSceneRTMean: () => renderer.glSceneRTMean(),
     state: () => ({
       tick: world.tickCount,
       hitStop: world.hitStopTicks,
