@@ -130,6 +130,7 @@ export class Renderer {
   private gl: GLPipeline | null = null;
   /** ?glbatch=probe: route world tiles through the GPU SpriteBatch into sceneRT */
   private glBatch = false;
+  private glComposite = false;
   private tileBatchCount = 0;
   private probeTilesMean = 0;
   /** per-frame CPU 2D drawImage blits (tiles path only) — the number batching removes */
@@ -160,7 +161,9 @@ export class Renderer {
     const rendererParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("renderer") : null;
     this.glMode = rendererParam !== "2d";
     const glBatchParam = typeof location !== "undefined" ? new URLSearchParams(location.search).get("glbatch") : null;
-    this.glBatch = glBatchParam === "probe";
+    // "probe": batch tiles for measurement, still presentScene. "1": full composite present path.
+    this.glBatch = glBatchParam === "probe" || glBatchParam === "1";
+    this.glComposite = glBatchParam === "1";
     if (this.glMode) {
       this.sceneCanvas = document.createElement("canvas");
       this.sceneCanvas.width = iw;
@@ -357,16 +360,35 @@ export class Renderer {
     const ox = this.origin.x;
     const oy = this.origin.y;
 
-    g.fillStyle = this.world.currentBiome.palette.outside;
-    g.fillRect(0, 0, VIEW_W, VIEW_H);
-    this.drawParallax(g);
+    // Per-frame present mode. Composite (?glbatch=1) runs only for the flat biomes that do not
+    // need the 2D full-frame slice warp (applyBiomeDistortion); forge/caverns/void keep presentScene.
+    const biomeId = w.currentBiome.id;
+    const distortion = biomeId !== "dungeon" && biomeId !== "town";
+    const composite = this.glComposite && !distortion && this.gl !== null;
+    // Tile batching is wanted for probe always, and for composite only on the flat biomes.
+    const wantBatch = this.glBatch && (this.glComposite ? !distortion : true);
+    if (this.gl) this.gl.batchTiles = wantBatch;
+
+    if (composite) {
+      // Transparent overlay base: the opaque outside color and tiles come from sceneRT (GPU),
+      // not this canvas. Clear the whole device surface, then restore the scaled base transform.
+      const dev = g.canvas;
+      g.save();
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, dev.width, dev.height);
+      g.restore();
+    } else {
+      g.fillStyle = this.world.currentBiome.palette.outside;
+      g.fillRect(0, 0, VIEW_W, VIEW_H);
+      this.drawParallax(g);
+    }
 
     // Apply the kill-cam to the complete canvas scene before GL post-processing.
     const iw = VIEW_W;
     const ih = VIEW_H;
     const impactFlash = this.impactTicks === CONFIG.FEEL.IMPACT_TICKS;
     g.save();
-    if (this.impactTicks > 0) {
+    if (this.impactTicks > 0 && !composite) {
       if (impactFlash) g.filter = `saturate(${CONFIG.FEEL.IMPACT_SATURATE})`;
       g.translate(iw / 2, ih / 2);
       g.scale(CONFIG.FEEL.IMPACT_ZOOM, CONFIG.FEEL.IMPACT_ZOOM);
@@ -432,12 +454,15 @@ export class Renderer {
     this.fx.drawTexts(g, ox, oy);
     this.drawAmbient(g, ox, oy);
     this.drawFog(g, dtReal);
-    g.save();
-    g.globalCompositeOperation = "color";
-    g.globalAlpha = 0.15;
-    g.fillStyle = w.currentBiome.palette.grade;
-    g.fillRect(0, 0, iw, ih);
-    g.restore();
+    if (!composite) {
+      // Biome colour grade via the 2D "color" op — the composite path folds it into POST_FS instead.
+      g.save();
+      g.globalCompositeOperation = "color";
+      g.globalAlpha = 0.15;
+      g.fillStyle = w.currentBiome.palette.grade;
+      g.fillRect(0, 0, iw, ih);
+      g.restore();
+    }
 
     g.restore();
     g.filter = "none";
@@ -454,7 +479,8 @@ export class Renderer {
 
     // Probe-only: flush the GPU tile batch into sceneRT and read it back BEFORE presentScene
     // re-uploads the 2D canvas over sceneRT, so glSceneRTMean() reports the batched tiles.
-    if (this.gl?.batchTiles) {
+    // (Composite mode flushes tiles inside the present step below instead.)
+    if (this.gl?.batchTiles && !composite) {
       this.gl.flushTileBatch();
       const buf = this.gl.exportSceneRT();
       if (buf !== null) {
@@ -464,8 +490,8 @@ export class Renderer {
       }
     }
 
-    // Cheap overlay-dirty signal for the future skip-empty-upload law: the CPU overlay is
-    // everything drawn on top of the tiles, so it is clean only when nothing alive is present.
+    // Cheap overlay-dirty signal for the skip-empty-upload law: the CPU overlay is everything
+    // drawn on top of the tiles, so it is clean only when nothing alive is present.
     this.overlayDirty =
       w.enemies.length > 0 || w.projectiles.length > 0 || w.particles.alive > 0 || this.transTicks > 0;
 
@@ -486,7 +512,19 @@ export class Renderer {
         lightCount: count,
         ambient: 1 + (base - 1) * lit,
       };
-      this.gl.presentScene(this.sceneCanvas, params);
+      if (composite) {
+        this.gl.flushTileBatch(); // GPU tiles -> sceneRT (opaque)
+        this.gl.presentComposited(this.sceneCanvas, {
+          ...params,
+          grade: rgbTuple(w.currentBiome.palette.grade),
+          gradeAmt: 0.15, // matches the 2D "color" grade alpha this path replaces
+          saturate: impactFlash ? CONFIG.FEEL.IMPACT_SATURATE : 1,
+          zoom: this.impactTicks > 0 ? CONFIG.FEEL.IMPACT_ZOOM : 1,
+          overlayDirty: this.overlayDirty,
+        });
+      } else {
+        this.gl.presentScene(this.sceneCanvas, params);
+      }
       this.presentUploads++;
     }
   }

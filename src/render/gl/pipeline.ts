@@ -26,7 +26,14 @@ export type PresentParams = {
   cols: Float32Array;
   lightCount: number;
   ambient: number;
+  /** optional grade/saturate: when the 2D path already baked them (presentScene) leave undefined → no-op */
+  grade?: readonly [number, number, number];
+  gradeAmt?: number;
+  saturate?: number;
 };
+
+/** presentComposited extras: the same params plus the kill-cam geometric zoom for the composite. */
+export type PresentCompositedParams = PresentParams & { zoom: number; overlayDirty?: boolean };
 
 const FULLSCREEN_VS = `#version 300 es
 out vec2 vUv;
@@ -115,6 +122,9 @@ uniform float uHazeSpeed;
 uniform float uHazeFreq;
 uniform float uHazeAmp;
 uniform float uHazeNoise;
+uniform vec3 uGrade;      // biome "color" grade tint (0..1)
+uniform float uGradeAmt;  // grade strength (0 = no-op, presentScene bakes it in 2D instead)
+uniform float uSaturate;  // kill-cam saturate factor (1 = no-op)
 out vec4 fragColor;
 
 float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -177,8 +187,36 @@ void main() {
   // hurt: red push with a soft radial bias
   color = mix(color, vec3(0.62, 0.07, 0.11) * color.r * 2.2 + vec3(0.25, 0.0, 0.0), uHurt * (0.55 + 0.45 * rd));
 
+  // kill-cam desaturation (replaces the 2D g.filter saturate for the composited path)
+  float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+  color = mix(vec3(lum), color, uSaturate);
+  // biome "color" grade: keep luminance, tint chroma toward uGrade (replaces the 2D source-over "color" op)
+  if (uGradeAmt > 0.001) {
+    float gLum = dot(uGrade, vec3(0.2126, 0.7152, 0.0722));
+    vec3 gcol = vec3(lum) + (uGrade - vec3(gLum));
+    color = mix(color, mix(vec3(lum), gcol, 0.7), uGradeAmt);
+  }
+
   color *= uBrightness * inside; // black rounded tube edge + haze-outside
   fragColor = vec4(color, 1.0);
+}`;
+
+// composite for the batched-tiles path: opaque sceneRT (GPU tiles + outside) UNDER a
+// transparent overTex (2D entity/fx/text passes), source-over. uZoom applies the kill-cam
+// geometric zoom to BOTH layers at once so neither double-zooms (the 2D overlay is NOT
+// transform-scaled in this path — that is the whole point of folding zoom here).
+const COMPOSITE_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uOver;
+uniform float uZoom;
+out vec4 fragColor;
+void main() {
+  vec2 uv = (vUv - 0.5) / uZoom + 0.5;
+  vec4 s = texture(uScene, uv);
+  vec4 o = texture(uOver, uv);
+  fragColor = vec4(mix(s.rgb, o.rgb, o.a), 1.0);
 }`;
 
 function makeProgram(gl: WebGL2RenderingContext, vs: string, fs: string): WebGLProgram {
@@ -212,6 +250,9 @@ export class GLPipeline {
   private readonly blur: WebGLProgram;
   private readonly post: WebGLProgram;
   private readonly fxTex: WebGLTexture;
+  private readonly compRT: RT;
+  private readonly overTex: WebGLTexture;
+  private readonly composite: WebGLProgram;
 
   /** true while the batched-tiles path is active (?glbatch=probe); the renderer reads this */
   batchTiles = false;
@@ -243,6 +284,9 @@ export class GLPipeline {
     this.post = makeProgram(gl, FULLSCREEN_VS, POST_FS);
 
     this.fxTex = this.makeOverlayTexture();
+    this.compRT = this.makeRT(iw, ih, gl.NEAREST);
+    this.overTex = this.makeOverlayTexture();
+    this.composite = makeProgram(gl, FULLSCREEN_VS, COMPOSITE_FS);
   }
 
   private makeRT(w: number, h: number, filter: number): RT {
@@ -356,6 +400,39 @@ export class GLPipeline {
     this.runPostFrom(this.sceneRT, params);
   }
 
+  /**
+   * Batched-tiles present: the renderer has already flushed the GPU tile batch into sceneRT
+   * (opaque). Upload the transparent 2D overlay once, composite sceneRT UNDER overTex into
+   * compRT (applying the kill-cam geometric zoom to both layers at once), then run the existing
+   * bloom/CRT chain reading compRT as the scene. An empty overlay skips the canvas upload.
+   */
+  presentComposited(over: HTMLCanvasElement, params: PresentCompositedParams): void {
+    const gl = this.gl;
+    if (params.overlayDirty === false) {
+      this.uploadOverlay(this.overTex, null); // transparent, no CPU→GPU canvas read
+    } else {
+      // FLIP_Y=true so the 2D canvas top row lands at texel row 0, matching the batch-drawn sceneRT.
+      gl.bindTexture(gl.TEXTURE_2D, this.overTex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, over);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+
+    this.beginPass(this.compRT, this.composite);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
+    gl.uniform1i(gl.getUniformLocation(this.composite, "uScene"), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.overTex);
+    gl.uniform1i(gl.getUniformLocation(this.composite, "uOver"), 1);
+    gl.uniform1f(gl.getUniformLocation(this.composite, "uZoom"), params.zoom);
+    this.endPass();
+
+    this.uploadOverlay(this.fxTex, null);
+    this.runPostFrom(this.compRT, params);
+  }
+
   /** threshold -> horizontal blur -> vertical blur -> CRT/haze composite of `scene` to the canvas. */
   private runPostFrom(scene: RT, params: PresentParams): void {
     const gl = this.gl;
@@ -434,6 +511,10 @@ export class GLPipeline {
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeFreq"), H.FREQ);
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeAmp"), H.AMP);
     gl.uniform1f(gl.getUniformLocation(this.post, "uHazeNoise"), H.NOISE);
+    const g3 = params.grade ?? [0, 0, 0];
+    gl.uniform3f(gl.getUniformLocation(this.post, "uGrade"), g3[0], g3[1], g3[2]);
+    gl.uniform1f(gl.getUniformLocation(this.post, "uGradeAmt"), params.gradeAmt ?? 0);
+    gl.uniform1f(gl.getUniformLocation(this.post, "uSaturate"), params.saturate ?? 1);
     this.endPass();
   }
 }
