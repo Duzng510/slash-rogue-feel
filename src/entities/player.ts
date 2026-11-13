@@ -177,7 +177,8 @@ export class Player implements Unit {
     } else {
       this.reprisalTicks = 0;
     }
-    this.iframeTicks = p.IFRAMES;
+    // +1 because tick() decrements at its start; otherwise the frame that reaches 0 is already vulnerable
+    this.iframeTicks = p.IFRAMES + 1;
     this.hurtTicks = p.HURT_TICKS;
     this.setState(PLAYER_STATE.HURT);
     src.queue.push({ t: "hurtVignette", strength: CONFIG.READABILITY.VIGNETTE_MAX });
@@ -369,7 +370,7 @@ export class Player implements Unit {
       sfx(src.queue, "teleport", 0.7, 1.1);
     } else {
       this.dashTicks = d.TICKS;
-      this.dashIframeTicks = d.IFRAME_TICKS;
+      this.dashIframeTicks = d.IFRAME_TICKS + 1;
       sfx(src.queue, "dash");
       src.particles.puffDust(this.x, this.y, CONFIG.FEEL.DASH_DUST, src.rng);
     }

@@ -184,6 +184,7 @@ export class Enemy implements Unit {
     const e = this.def;
     if (this.dead) return false;
     if (this.kind === "king" && this.kingInvulnTicks > 0) {
+      sw.dealt = 0;
       artifactText(src.queue, this.x, this.y - 16, "IMMUNE", "#e9d6ff");
       sfx(src.queue, "shock_hit", 0.4, 0.7);
       return false;
@@ -208,6 +209,7 @@ export class Enemy implements Unit {
     }
     if (playerHit && this.wetTicks > 0 && src.artifacts.has("corrode")) dmg *= 1.25;
     if (playerHit && src.artifacts.has("executioner") && this.hp < this.maxHp * 0.2) dmg = this.hp;
+    sw.dealt = dmg;
     this.takeDamage(dmg, src, playerHit);
     if (crit) {
       src.runStats.critHits++;
@@ -224,6 +226,8 @@ export class Enemy implements Unit {
   }
 
   private takeDamage(dmg: number, src: Sim, playerOwned = true): void {
+    // a corpse must never re-enter the kill path (double bounty / enemiesKilled)
+    if (this.dead) return;
     this.hp = Math.max(0, this.hp - dmg);
     if (this.hp === 0) {
       this.die();
@@ -292,11 +296,11 @@ export class Enemy implements Unit {
       src.particles.burstSpark(this.x, this.y - 5, 6, src.rng);
       dmgNumber(src.queue, this.x, this.y - 10, 2);
     } else if (status === "burn") {
-      if (this.burnTicks === 0) this.burnPulse = 60;
+      if (this.burnTicks === 0) this.burnPulse = CONFIG.STATUS.FIRST_PULSE_TICKS;
       this.burnTicks = 120;
     } else if (status === "wet") this.wetTicks = src.artifacts.has("corrode") ? 300 : 180;
     else if (status === "poison") {
-      if (this.poisonTicks === 0) this.poisonPulse = 60;
+      if (this.poisonTicks === 0) this.poisonPulse = CONFIG.STATUS.FIRST_PULSE_TICKS;
       this.poisonTicks = 240;
     } else if (status === "freeze") {
       if (this.freezeTicks === 0) {
@@ -379,7 +383,7 @@ export class Enemy implements Unit {
     if (this.burnTicks > 0) {
       this.burnTicks--;
       if (--this.burnPulse === 0) {
-        this.burnPulse = 60;
+        this.burnPulse = CONFIG.STATUS.PULSE_TICKS;
         this.takeDamage(1, src);
         src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
         for (let i = 0; i < 3; i++) {
@@ -394,7 +398,7 @@ export class Enemy implements Unit {
     if (this.poisonTicks > 0) {
       this.poisonTicks--;
       if (--this.poisonPulse === 0) {
-        this.poisonPulse = 60;
+        this.poisonPulse = CONFIG.STATUS.PULSE_TICKS;
         const dmg = this.burnTicks > 0 ? 2 : 1;
         this.takeDamage(dmg, src);
         src.particles.burstSpark(this.x, this.y - 5, 2, src.rng);
@@ -403,17 +407,6 @@ export class Enemy implements Unit {
         dmgNumber(src.queue, this.x, this.y - 10, dmg, "element", CONFIG.PALETTE.ELEMENT.poison);
         if (this.dead) return;
       }
-    }
-    if (e.HEAL_INTERVAL > 0 && ++this.healTicks >= e.HEAL_INTERVAL) {
-      this.healTicks = 0;
-      for (const other of src.enemies) {
-        if (other === this || other.dead || other.hp >= other.maxHp) continue;
-        if (dist(this.x, this.y, other.x, other.y) > e.HEAL_RADIUS) continue;
-        other.hp = Math.min(other.maxHp, other.hp + e.HEAL_AMOUNT);
-        src.particles.emit("spark", other.x, other.y - 6, 0, -30, "#58ff8a");
-        dmgNumber(src.queue, other.x, other.y - 10, e.HEAL_AMOUNT, "heal");
-      }
-      sfx(src.queue, "pursuit_proc", 0.3, 1.4);
     }
     const speedScale = (this.wetTicks > 0 ? 0.7 : 1) * CONFIG.ASCENSION.enemySpeedMultiplier;
     if (this.wetTicks > 0) this.wetTicks--;
@@ -430,6 +423,18 @@ export class Enemy implements Unit {
     if (stunned) {
       this.vx = this.vy = 0;
       return;
+    }
+    // healing is an action: a stunned/frozen healer cannot pulse while it is locked down
+    if (e.HEAL_INTERVAL > 0 && ++this.healTicks >= e.HEAL_INTERVAL) {
+      this.healTicks = 0;
+      for (const other of src.enemies) {
+        if (other === this || other.dead || other.hp >= other.maxHp) continue;
+        if (dist(this.x, this.y, other.x, other.y) > e.HEAL_RADIUS) continue;
+        other.hp = Math.min(other.maxHp, other.hp + e.HEAL_AMOUNT);
+        src.particles.emit("spark", other.x, other.y - 6, 0, -30, "#58ff8a");
+        dmgNumber(src.queue, other.x, other.y - 10, e.HEAL_AMOUNT, "heal");
+      }
+      sfx(src.queue, "pursuit_proc", 0.3, 1.4);
     }
     if (this.restTicks > 0) this.restTicks--;
 
@@ -724,13 +729,23 @@ export class Enemy implements Unit {
 
   private fireBeam(src: Sim): void {
     const dir = this.telegraphDir;
-    const len = Math.hypot(src.room.widthPx, src.room.heightPx);
+    const fullLen = Math.hypot(src.room.widthPx, src.room.heightPx);
     const ox = this.x;
     const oy = this.y - this.def.BODY_H * 0.5;
+    // raycast in 4px steps so a wall/crate between the shooter and the hero eats the beam
+    let len = fullLen;
+    const cos = Math.cos(dir);
+    const sin = Math.sin(dir);
+    for (let d = 4; d <= fullLen; d += 4) {
+      if (src.room.solidAtPx(ox + cos * d, oy + sin * d)) {
+        len = d;
+        break;
+      }
+    }
     const px = src.player.x - ox;
     const py = src.player.y - oy;
-    const along = px * Math.cos(dir) + py * Math.sin(dir);
-    const perp = Math.abs(-px * Math.sin(dir) + py * Math.cos(dir));
+    const along = px * cos + py * sin;
+    const perp = Math.abs(-px * sin + py * cos);
     if (src.player.canBeHit() && along >= 0 && along <= len && perp <= 4) {
       src.player.onHit({ side: "enemy", kind: this.kind, dmg: 3 * this.dmgScale, dir } as unknown as Swing, src.player.x, src.player.y, src);
     }

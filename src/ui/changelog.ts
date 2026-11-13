@@ -5,11 +5,20 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.47.0";
+export const APP_VERSION = "v0.48.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.48.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Số sát thương thật:</b> số nổi giờ lấy damage sau crit/khiên/trạng thái/passive thay vì damage gốc của đòn chém.",
+      "<b>Curse & Ascension:</b> gỡ curse hoàn lại Max HP cho Yếu ớt; restart/continue giữ độ Ascension người chơi đã chọn thay vì nhảy về mức cao nhất.",
+      "<b>Combat:</b> beam bị tường/thùng chặn, i-frame đủ trọn khung, burn/poison tick sớm sau 0,2 giây, healer không hồi máu khi bị choáng, quái triệu hồi không tick ngay trong cùng nhịp và quái đã chết không cộng kill lần hai.",
+    ],
+  },
   {
     version: "v0.47.0",
     date: "2026-11-14",

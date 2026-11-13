@@ -49,11 +49,15 @@ export class SpriteBatch {
   private readonly program: WebGLProgram;
   private readonly vao: WebGLVertexArrayObject;
   private readonly cornerBuf: WebGLBuffer;
-  private readonly dataBuf: WebGLBuffer;
+  private readonly normalBuf: WebGLBuffer;
+  private readonly additiveBuf: WebGLBuffer;
+  /** separate arrays per blend list: a normal sprite never has to shift the additive tail */
   private data: Float32Array;
+  private additiveData: Float32Array;
   private normalCount = 0;
   private additiveCount = 0;
   private capacity: number;
+  private additiveCapacity: number;
   private readonly invAtlas: [number, number];
   private readonly atlas: Atlas;
 
@@ -61,21 +65,26 @@ export class SpriteBatch {
     this.gl = gl;
     this.atlas = atlas;
     this.capacity = 1024;
+    this.additiveCapacity = 1024;
     this.data = new Float32Array(this.capacity * FLOATS);
+    this.additiveData = new Float32Array(this.additiveCapacity * FLOATS);
     this.invAtlas = [1 / atlas.width, 1 / atlas.height];
     this.program = this.build();
 
     this.vao = gl.createVertexArray()!;
     this.cornerBuf = gl.createBuffer()!;
-    this.dataBuf = gl.createBuffer()!;
+    this.normalBuf = gl.createBuffer()!;
+    this.additiveBuf = gl.createBuffer()!;
 
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.cornerBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.dataBuf);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuf);
     gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.additiveBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, this.additiveData.byteLength, gl.DYNAMIC_DRAW);
     const attribs: Array<[number, number, number]> = [
       [1, 4, 0],
       [2, 4, 4],
@@ -131,9 +140,10 @@ export class SpriteBatch {
 
   /** Queue a pixel-aligned solid rectangle without requiring an atlas entry. */
   drawSolidRect(x: number, y: number, w: number, h: number, tint: readonly [number, number, number, number], additive = false, rot = 0): void {
-    const n = this.reserveIndex(additive);
-    const i = n * FLOATS;
-    const a = this.data;
+    const count = additive ? this.additiveCount : this.normalCount;
+    this.ensureCapacity(additive, count + 1);
+    const i = count * FLOATS;
+    const a = additive ? this.additiveData : this.data;
     a[i] = x; a[i + 1] = y; a[i + 2] = w; a[i + 3] = h;
     a[i + 4] = 0; a[i + 5] = 0; a[i + 6] = 0; a[i + 7] = 0;
     a[i + 8] = tint[0]; a[i + 9] = tint[1]; a[i + 10] = tint[2]; a[i + 11] = tint[3];
@@ -153,9 +163,10 @@ export class SpriteBatch {
     additive: boolean,
     flipX = false,
   ): void {
-    const n = this.reserveIndex(additive);
-    const i = n * FLOATS;
-    const a = this.data;
+    const count = additive ? this.additiveCount : this.normalCount;
+    this.ensureCapacity(additive, count + 1);
+    const i = count * FLOATS;
+    const a = additive ? this.additiveData : this.data;
     a[i] = x; a[i + 1] = y; a[i + 2] = w; a[i + 3] = h;
     a[i + 4] = (flipX ? rect.x + rect.w : rect.x) * this.invAtlas[0];
     a[i + 5] = rect.y * this.invAtlas[1];
@@ -166,44 +177,37 @@ export class SpriteBatch {
     if (additive) this.additiveCount++; else this.normalCount++;
   }
 
-  private reserveIndex(additive: boolean): number {
-    const total = this.normalCount + this.additiveCount;
-    this.ensureCapacity(total + 1);
-    if (additive) return total;
-    if (this.additiveCount > 0) {
-      this.data.copyWithin(
-        (this.normalCount + 1) * FLOATS,
-        this.normalCount * FLOATS,
-        total * FLOATS,
-      );
+  private ensureCapacity(additive: boolean, required: number): void {
+    if (additive) {
+      if (required <= this.additiveCapacity) return;
+      while (this.additiveCapacity < required) this.additiveCapacity *= 2;
+      const next = new Float32Array(this.additiveCapacity * FLOATS);
+      next.set(this.additiveData);
+      this.additiveData = next;
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.additiveBuf);
+      this.gl.bufferData(this.gl.ARRAY_BUFFER, next.byteLength, this.gl.DYNAMIC_DRAW);
+      return;
     }
-    return this.normalCount;
-  }
-
-  private ensureCapacity(required: number): void {
     if (required <= this.capacity) return;
     while (this.capacity < required) this.capacity *= 2;
     const next = new Float32Array(this.capacity * FLOATS);
     next.set(this.data);
     this.data = next;
-    const gl = this.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.dataBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.normalBuf);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, next.byteLength, this.gl.DYNAMIC_DRAW);
   }
 
-  private flushRange(start: number, count: number, additive: boolean): void {
+  private flushRange(data: Float32Array, count: number, additive: boolean): void {
     if (count === 0) return;
     const gl = this.gl;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.dataBuf);
-    const firstByte = start * STRIDE;
-    gl.bufferSubData(gl.ARRAY_BUFFER, firstByte, this.data, start * FLOATS, count * FLOATS);
-    // point the instance attributes at this subrange's base so drawArraysInstanced reads
-    // only [start, start+count) instances (WebGL2 has no base-instance draw parameter).
-    const base = start * STRIDE;
-    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, STRIDE, base);
-    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, STRIDE, base + 16);
-    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, STRIDE, base + 32);
-    gl.vertexAttribPointer(4, 2, gl.FLOAT, false, STRIDE, base + 48);
+    const buf = additive ? this.additiveBuf : this.normalBuf;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, count * FLOATS);
+    // point the instance attributes at the buffer base (each blend list owns its buffer)
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, STRIDE, 0);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, STRIDE, 16);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, STRIDE, 32);
+    gl.vertexAttribPointer(4, 2, gl.FLOAT, false, STRIDE, 48);
     if (additive) gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
     else gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
@@ -231,8 +235,8 @@ export class SpriteBatch {
     gl.bindTexture(gl.TEXTURE_2D, this.atlas.texture);
     gl.uniform1i(gl.getUniformLocation(this.program, "uAtlas"), 0);
     gl.uniform2f(gl.getUniformLocation(this.program, "uInv"), 1 / vw, 1 / vh);
-    this.flushRange(0, this.normalCount, false);
-    this.flushRange(this.normalCount, this.additiveCount, true);
+    this.flushRange(this.data, this.normalCount, false);
+    this.flushRange(this.additiveData, this.additiveCount, true);
     gl.bindVertexArray(null);
     if (target) target.unbind();
   }

@@ -45,7 +45,9 @@ export type Harness = {
     player: { x: number; y: number; hp: number; state: string; swing: string | null; invuln: boolean };
     roomIndex: number;
     character: string;
+    weapon: string;
     characterChoices: CharacterId[];
+    weaponChoices: WeaponId[] | null;
     artifacts: ArtifactId[];
     artifactChoices: ArtifactId[];
     curseOffer: string[] | null;

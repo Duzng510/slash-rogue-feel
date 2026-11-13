@@ -27,6 +27,7 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private noiseBuf: AudioBuffer | null = null;
   private lastPlayTime: Partial<Record<SfxName, number>> = {};
+  private voices = 0;
 
   /** browsers refuse audio until a gesture; call from a click/keydown */
   unlock(): void {
@@ -67,6 +68,11 @@ export class Sfx {
     }
 
     const r = RECIPES[name];
+    if (this.voices >= CONFIG.AUDIO.MAX_VOICES) return;
+    this.voices++;
+    const releaseVoice = (): void => {
+      this.voices = Math.max(0, this.voices - 1);
+    };
     const out = ctx.createGain();
     out.gain.setValueAtTime(r.gain * gainMul * vol * CONFIG.AUDIO.MASTER * 2, t);
     out.gain.exponentialRampToValueAtTime(0.0001, t + r.dur);
@@ -76,6 +82,7 @@ export class Sfx {
       const src = ctx.createBufferSource();
       src.buffer = this.noiseBuf;
       src.playbackRate.value = pitchMul;
+      src.onended = releaseVoice;
       const bp = ctx.createBiquadFilter();
       bp.type = "bandpass";
       bp.Q.value = 0.9;
@@ -96,6 +103,7 @@ export class Sfx {
     } else {
       const osc = ctx.createOscillator();
       osc.type = "triangle";
+      osc.onended = releaseVoice;
       osc.frequency.setValueAtTime(r.f0 * pitchMul, t);
       osc.frequency.exponentialRampToValueAtTime(Math.max(20, r.f1 * pitchMul), t + r.dur);
       osc.connect(out);
