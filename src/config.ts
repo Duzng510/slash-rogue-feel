@@ -556,6 +556,12 @@ export const CONFIG = {
     DMG: 1,
   },
 
+  /** damage-over-time cadence: the first tick lands quickly so burn/poison read on application */
+  STATUS: {
+    FIRST_PULSE_TICKS: 12,
+    PULSE_TICKS: 60,
+  },
+
   /** mage normal attack: the equipped weapon's arc/reach are reinterpreted as a ranged volley */
   MAGE_SHOT: {
     SPEED: 240, // bolt travel, px/s
@@ -681,6 +687,8 @@ export const CONFIG = {
 
   AUDIO: {
     MASTER: 0.35,
+    /** concurrent voices; each voice allocates a few AudioNodes, so cap the burst instead of flooding the GC */
+    MAX_VOICES: 16,
   },
 
   /** dynamic light map (GL only): per-biome ambient floor + radial emitters, scaled by SLIDERS.lighting */

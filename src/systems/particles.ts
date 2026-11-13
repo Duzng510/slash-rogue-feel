@@ -58,11 +58,15 @@ export class ParticlePool {
   private liveCount = 0;
   private nonce = 0x1f2e3d4c;
   readonly cap: number;
+  /** free-list stack: emit is O(1) instead of scanning all slots for a dead one */
+  private free: number[] = [];
 
   constructor(cap: number = CONFIG.READABILITY.PARTICLE_CAP) {
     this.cap = cap;
     this.slots = [];
     for (let i = 0; i < cap; i++) this.slots.push(makeSlot());
+    // push in reverse so the first emitted particle still lands in slot 0 (stable draw order)
+    for (let i = cap - 1; i >= 0; i--) this.free.push(i);
   }
 
   get alive(): number {
@@ -84,16 +88,12 @@ export class ParticlePool {
     const spec = SPECS[kind];
     if (load >= rd.TIER3_OFF_AT && spec.tier >= 3) return false;
 
-    let slot: Slot | null = null;
-    for (let i = 0; i < this.cap; i++) {
-      const c = (this.cursor + i) % this.cap;
-      if (!this.slots[c].live) {
-        slot = this.slots[c];
-        this.cursor = (c + 1) % this.cap;
-        break;
-      }
-    }
-    if (slot === null) {
+    let slot: Slot;
+    const freeIdx = this.free.pop();
+    if (freeIdx !== undefined) {
+      slot = this.slots[freeIdx];
+    } else {
+      // full: evict the stalest slot at the cursor (newest impact wins over stale spray)
       slot = this.slots[this.cursor];
       this.cursor = (this.cursor + 1) % this.cap;
     }
@@ -209,12 +209,14 @@ export class ParticlePool {
   }
 
   update(dt: number): void {
-    for (const s of this.slots) {
+    for (let i = 0; i < this.slots.length; i++) {
+      const s = this.slots[i]!;
       if (!s.live) continue;
       s.life -= dt;
       if (s.life <= 0) {
         s.live = false;
         this.liveCount--;
+        this.free.push(i);
         continue;
       }
       s.vy += s.gravity * dt;
@@ -230,6 +232,8 @@ export class ParticlePool {
     for (const s of this.slots) s.live = false;
     this.cursor = 0;
     this.liveCount = 0;
+    this.free.length = 0;
+    for (let i = this.cap - 1; i >= 0; i--) this.free.push(i);
   }
 
   visit(fn: (s: Readonly<Slot>) => void): void {

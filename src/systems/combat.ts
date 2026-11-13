@@ -246,7 +246,9 @@ const ELEMENT_FX: Record<NonNullable<Swing["status"]>, { color: string; burst?: 
 export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
-    if (sw.side === "player") src.runStats.damageDealt += sw.dmg;
+    // onHit caches the post-modifier number; fall back to base for callers that skip onHit
+    const dealt = sw.dealt ?? sw.dmg;
+    if (sw.side === "player") src.runStats.damageDealt += dealt;
     /** only a landed melee swing feeds the swordsman's combo counter */
     if (sw.side === "player" && sw.reach > 0) src.player.registerHit();
     const dir = sw.dir;
@@ -267,7 +269,7 @@ export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: n
     const style = killed && sw.side === "player" ? "crit" as const
       : sw.status !== undefined ? "element" as const : "normal" as const;
     const damageType = sw.status === "burn" || sw.status === "shock" || sw.status === "freeze" || sw.status === "poison" || sw.status === "bleed" ? sw.status : "physical";
-    dmgNumber(src.queue, cx, cy - 8, sw.dmg, style, fx?.color, damageType);
+    dmgNumber(src.queue, cx, cy - 8, dealt, style, fx?.color, damageType);
     shake(src.queue, cx, cy, dir, killed ? f.SHAKE_KILL_MULT : 1);
     addDecal(src, cx, cy, killed);
     if (killed && sw.side === "player") src.queue.push({ t: "hitImpact" });

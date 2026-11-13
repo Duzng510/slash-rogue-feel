@@ -27,6 +27,8 @@ export type Swing = {
   reach: number;
   deg: number;
   dmg: number;
+  /** final damage after crit/shield/status/passives, cached by the target's onHit for feedback */
+  dealt?: number;
   knockback: number;
   /** per-swing-instance: a swing can never hit the same unit twice, whatever hit-stop does */
   seen: Set<number>;

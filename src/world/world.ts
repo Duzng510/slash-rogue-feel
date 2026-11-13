@@ -78,6 +78,8 @@ export class World implements Sim {
   readonly roomTotal = TEMPLATES.length;
   currentBiome: Biome = biomeForRoom(0);
   ascensionLevel: AscensionLevel = 0;
+  /** what the player last picked; restart keeps this instead of jumping back to ascensionMax */
+  lastChosenAscension: AscensionLevel = 0;
   bannerTicks = 0;
   bannerDuration = 96;
   bannerText = "";
@@ -130,6 +132,7 @@ export class World implements Sim {
     this.artifactRng = makeRng(seed ^ 0xb001);
     this.achievements = achievements;
     this.ascensionLevel = normalizeAscensionLevel(achievements.ascensionMax);
+    this.lastChosenAscension = this.ascensionLevel;
     applyAscension(CONFIG, this.ascensionLevel);
     this.enterTown();
     this.characterChoices = [...CHARACTER_LIST];
@@ -159,6 +162,7 @@ export class World implements Sim {
       return false;
     }
     this.ascensionLevel = next;
+    this.lastChosenAscension = next;
     applyAscension(CONFIG, next);
     return true;
   }
@@ -291,6 +295,8 @@ export class World implements Sim {
   /** zero per-run stats and achievement-delta bookkeeping, keeping object identities alive */
   private resetRun(): void {
     resetStats(this.runStats);
+    // a fresh run starts its periodic phases (heartbeat/bot cadence) from zero, not wherever the last run ended
+    this.tickCount = 0;
     this.runAchievements = [];
     this.lastKills = 0;
     this.lastRooms = 0;
@@ -304,7 +310,7 @@ export class World implements Sim {
   /** full run reset from the end screen: fresh stats, no artifacts, back to town */
   restart(): void {
     this.resetRun();
-    this.setAscensionLevel(this.achievements.ascensionMax);
+    this.setAscensionLevel(this.lastChosenAscension);
     this.artifacts.clear();
     this.curses.clear();
     this.player.maxHp = CHARACTERS[this.player.character].baseHp;
@@ -319,7 +325,7 @@ export class World implements Sim {
   /** after a win, keep the artifacts and start the next run from room 0 with fresh stats */
   continueAfterWin(): void {
     this.resetRun();
-    this.setAscensionLevel(this.achievements.ascensionMax);
+    this.setAscensionLevel(this.lastChosenAscension);
     this.rewardedRooms.clear();
     this.characterChoices = [...CHARACTER_LIST];
     this.weaponChoices = null;
@@ -596,7 +602,7 @@ export class World implements Sim {
       this.player.hp = Math.min(this.player.maxHp, this.player.hp + CONFIG.ASCENSION.playerHealMultiplier);
     } else {
       const first = [...this.curses][0];
-      if (first !== undefined) this.curses.delete(first);
+      if (first !== undefined) this.removeCurse(first);
     }
     this.shopOffers!.splice(i, 1);
     if (this.shopOffers!.length === 0) this.shopOffers = null;
@@ -670,6 +676,14 @@ export class World implements Sim {
     sfx(this.queue, "door");
     this.banner(`${CURSES.find(c => c.id === id)!.name} — cửa mở`);
     return true;
+  }
+
+  /** undo a curse's one-time stat change; live-read curses (speed/startup) clear with the id */
+  private removeCurse(id: CurseId): void {
+    if (!this.curses.delete(id)) return;
+    if (id === "frail") {
+      this.player.maxHp += CONFIG.CURSES.FRAIL_HP;
+    }
   }
 
   /** mark ids earned (dedup) and queue a toast per new one; the composition root persists */
@@ -823,7 +837,8 @@ export class World implements Sim {
       this.introLine = INTRO_LINES[this.player.character];
       this.introLineTicks = 180;
     }
-    if (!intro) for (const e of this.enemies) e.tick(this, this.grid);
+    // snapshot: a summon/split must not tick inside the same iteration that spawned it
+    if (!intro) for (const e of this.enemies.slice()) e.tick(this, this.grid);
     this.enemies = this.enemies.filter((e) => !e.removed);
     this.syncUnits();
     this.grid.clear();

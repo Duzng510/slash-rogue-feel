@@ -12,8 +12,9 @@ export class SpatialGrid {
   private cells = new Map<number, Unit[]>();
   private scratch: Unit[] = [];
 
+  /** keep the bucket arrays alive: dropping them every tick hands the GC a fresh set of small arrays */
   clear(): void {
-    this.cells.clear();
+    for (const b of this.cells.values()) b.length = 0;
   }
 
   insert(u: Unit): void {

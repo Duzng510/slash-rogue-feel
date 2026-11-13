@@ -49,6 +49,31 @@ function colorTuple(hex: string, alpha = 1): [number, number, number, number] {
 }
 
 type VerletPoint = { x: number; y: number; px: number; py: number };
+
+/** depth-sort list entries: pooled structs, drawn by a switch (no per-item closures) */
+const SORT_KIND = { prop: 0, enemy: 1, npc: 2, player: 3, projectile: 4, particle: 5, wall: 6 } as const;
+type SortItem = {
+  y: number;
+  kind: number;
+  ref: unknown;
+  sp: Sprite | null;
+  face: Sprite | null;
+  x: number;
+  sy: number;
+};
+
+/** per-sprite-key art resolved once instead of string lookups per enemy per frame */
+type EnemyArt = {
+  base: Sprite;
+  white: HTMLCanvasElement;
+  shadow: HTMLCanvasElement;
+  status: HTMLCanvasElement[] | undefined;
+  elite: HTMLCanvasElement | undefined;
+  idle: SpriteSet | undefined;
+  attack: SpriteSet | undefined;
+  spawn: SpriteSet | undefined;
+  death: SpriteSet | undefined;
+};
 const WEAPON_GRIPS: Record<WeaponId, { x: number; y: number; scale: number }> = {
   katana: { x: 3, y: 13, scale: 0.85 },
   greatsword: { x: 8, y: 13, scale: 0.9 },
@@ -119,6 +144,48 @@ export class Renderer {
   private anims: Record<string, SpriteSet> = buildAnimSets();
   /** lazily mirrored single sprites for the right-facing direction */
   private mirrorCache: Record<string, Sprite> = {};
+  private enemyArtCache = new Map<string, EnemyArt>();
+  /** pooled depth-sort entries + the reused list that orders them */
+  private sortPool: SortItem[] = [];
+  private sortList: SortItem[] = [];
+  private sortCount = 0;
+
+  private artFor(key: string): EnemyArt {
+    let art = this.enemyArtCache.get(key);
+    if (art !== undefined) return art;
+    art = {
+      base: this.sprites[key] ?? this.sprites.enemy,
+      white: this.white[key] ?? this.white.enemy,
+      shadow: this.shadowSprites[key] ?? this.shadowSprites.enemy,
+      status: this.statusSprites[key],
+      elite: this.eliteSprites[key],
+      idle: this.anims[key] ?? this.anims.enemy,
+      attack: this.anims[`${key}_attack`],
+      spawn: this.anims[`${key}_spawn`],
+      death: this.anims[`${key}_death`],
+    };
+    this.enemyArtCache.set(key, art);
+    return art;
+  }
+
+  private nextSortItem(): SortItem {
+    let it = this.sortPool[this.sortCount];
+    if (it === undefined) {
+      it = { y: 0, kind: 0, ref: null, sp: null, face: null, x: 0, sy: 0 };
+      this.sortPool[this.sortCount] = it;
+    }
+    this.sortCount++;
+    this.sortList.push(it);
+    return it;
+  }
+
+  private readonly collectParticle = (s: Readonly<Slot>): void => {
+    if (!s.live) return;
+    const it = this.nextSortItem();
+    it.y = s.y;
+    it.kind = SORT_KIND.particle;
+    it.ref = s;
+  };
   private mirrored(sp: Sprite, key: string): Sprite {
     const hit = this.mirrorCache[key];
     if (hit) return hit;
@@ -1527,9 +1594,10 @@ export class Renderer {
     for (const en of this.world.enemies) {
       if (en.removed) continue;
       if (en.state === ENEMY_STATE.VANISH) continue;
-      const sp = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
+      const art = this.artFor(en.def.SPRITE_KEY);
+      const sp = art.base;
       const sc = en.isElite ? 1.3 : 1;
-      const shadow = this.shadowSprites[en.def.SPRITE_KEY] ?? this.shadowSprites.enemy;
+      const shadow = art.shadow;
       const x = Math.round(en.x - sp.ax * sc - ox);
       const y = Math.round(en.y - sp.ay * sc - oy);
       const w = Math.round(sp.w * sc);
@@ -1565,29 +1633,39 @@ export class Renderer {
   /** depth sort: enemies, player, projectiles and particles in one y-sorted draw list.
    *  Floor indicators (telegraphs, arcs, beams) stay below; damage numbers stay above. */
   private drawSortedWorld(g: CanvasRenderingContext2D, ox: number, oy: number): void {
-    type Item = { y: number; draw: () => void };
-    const items: Item[] = [];
+    this.sortCount = 0;
+    this.sortList.length = 0;
     for (const prop of this.world.townProps) {
-      items.push({ y: prop.y, draw: () => this.drawOneProp(g, prop, ox, oy) });
+      const it = this.nextSortItem();
+      it.y = prop.y;
+      it.kind = SORT_KIND.prop;
+      it.ref = prop;
     }
     for (const en of this.world.enemies) {
       if (en.removed) continue;
-      items.push({ y: en.y, draw: () => this.drawOneEnemy(g, en, ox, oy) });
+      const it = this.nextSortItem();
+      it.y = en.y;
+      it.kind = SORT_KIND.enemy;
+      it.ref = en;
     }
     for (const npc of this.world.npcList) {
-      items.push({ y: npc.y, draw: () => this.drawOneNpc(g, npc, ox, oy) });
+      const it = this.nextSortItem();
+      it.y = npc.y;
+      it.kind = SORT_KIND.npc;
+      it.ref = npc;
     }
-    items.push({ y: this.world.player.y, draw: () => this.drawPlayer(g, ox, oy) });
+    {
+      const it = this.nextSortItem();
+      it.y = this.world.player.y;
+      it.kind = SORT_KIND.player;
+    }
     for (const p of this.world.projectiles) {
-      items.push({ y: p.y, draw: () => this.drawOneProjectile(g, p, ox, oy, false) });
+      const it = this.nextSortItem();
+      it.y = p.y;
+      it.kind = SORT_KIND.projectile;
+      it.ref = p;
     }
-    const density = CONFIG.SLIDERS.particles;
-    if (density > 0.01) {
-      this.world.particles.visit((s) => {
-        if (!s.live) return;
-        items.push({ y: s.y, draw: () => this.drawOneParticle(g, s, ox, oy, density) });
-      });
-    }
+    if (CONFIG.SLIDERS.particles > 0.01) this.world.particles.visit(this.collectParticle);
     // standing walls/doors occlude entities north of them; face rides along so the redraw doesn't erase it
     const T = CONFIG.WORLD.TILE;
     const room = this.world.room;
@@ -1604,46 +1682,74 @@ export class Renderer {
         const below = room.at(tx, ty + 1);
         if (below === TILE.WALL || below === TILE.CRATE) continue;
         const sp = biomeTiles[t] ?? this.tileOf[t];
-        const x = Math.round(tx * T - ox);
-        const y = Math.round(ty * T - oy);
-        items.push({
-          y: (ty + 1) * T - 1,
-          draw: () => {
-            if (this.glWorldBatch) {
-              this.queueSprite(sp, x, y, sp.w, sp.h);
-              if (face !== undefined) this.queueSprite(face, x, y + T - face.h, face.w, face.h);
-              return;
-            }
-            g.drawImage(sp.c, x, y, sp.w, sp.h);
-            if (face !== undefined) g.drawImage(face.c, x, y + T - face.h, face.w, face.h);
-          },
-        });
+        const it = this.nextSortItem();
+        it.y = (ty + 1) * T - 1;
+        it.kind = SORT_KIND.wall;
+        it.sp = sp;
+        it.face = face ?? null;
+        it.x = Math.round(tx * T - ox);
+        it.sy = Math.round(ty * T - oy);
       }
     }
-    items.sort((a, b) => a.y - b.y);
-    for (const it of items) it.draw();
+    const list = this.sortList;
+    list.sort((a, b) => a.y - b.y);
+    for (let i = 0; i < list.length; i++) {
+      const it = list[i]!;
+      switch (it.kind) {
+        case SORT_KIND.prop:
+          this.drawOneProp(g, it.ref as TownProp, ox, oy);
+          break;
+        case SORT_KIND.enemy:
+          this.drawOneEnemy(g, it.ref as Enemy, ox, oy);
+          break;
+        case SORT_KIND.npc:
+          this.drawOneNpc(g, it.ref as Npc, ox, oy);
+          break;
+        case SORT_KIND.player:
+          this.drawPlayer(g, ox, oy);
+          break;
+        case SORT_KIND.projectile:
+          this.drawOneProjectile(g, it.ref as Projectile, ox, oy, false);
+          break;
+        case SORT_KIND.particle:
+          this.drawOneParticle(g, it.ref as Slot, ox, oy, CONFIG.SLIDERS.particles);
+          break;
+        case SORT_KIND.wall: {
+          const sp = it.sp!;
+          const wallFace = it.face;
+          if (this.glWorldBatch) {
+            this.queueSprite(sp, it.x, it.sy, sp.w, sp.h);
+            if (wallFace !== null) this.queueSprite(wallFace, it.x, it.sy + T - wallFace.h, wallFace.w, wallFace.h);
+          } else {
+            g.drawImage(sp.c, it.x, it.sy, sp.w, sp.h);
+            if (wallFace !== null) g.drawImage(wallFace.c, it.x, it.sy + T - wallFace.h, wallFace.w, wallFace.h);
+          }
+          break;
+        }
+      }
+    }
   }
 
   private drawOneEnemy(g: CanvasRenderingContext2D, en: Enemy, ox: number, oy: number): void {
     const target = this.world.player.autoTargetId;
     if (en.removed) return;
-    const baseSprite = this.sprites[en.def.SPRITE_KEY] ?? this.sprites.enemy;
-    const white = this.white[en.def.SPRITE_KEY] ?? this.white.enemy;
+    const art = this.artFor(en.def.SPRITE_KEY);
+    const baseSprite = art.base;
+    const white = art.white;
     const sc = en.isElite ? 1.3 : 1;
 
     // --- multi-frame anim + state clips, right-facing mirror ---
-    const key = en.def.SPRITE_KEY;
-    let set = this.anims[key] ?? this.anims.enemy;
+    let set = art.idle;
     let phaseFrame: number | null = null;
     let flipX = false;
     if (en.state === ENEMY_STATE.TELEGRAPH) {
-      const windup = this.anims[`${key}_attack`];
+      const windup = art.attack;
       if (windup) { set = windup; phaseFrame = 0; }
     } else if (en.state === ENEMY_STATE.ATTACK && en.swing !== null) {
-      const atk = this.anims[`${key}_attack`];
+      const atk = art.attack;
       if (atk) { set = atk; phaseFrame = en.swing.phase === "active" ? 1 : 2; }
     } else if (en.state === ENEMY_STATE.APPEAR) {
-      const spawn = this.anims[`${key}_spawn`];
+      const spawn = art.spawn;
       if (spawn) set = spawn;
     }
 
@@ -1661,7 +1767,7 @@ export class Renderer {
     }
     // death clip: crumble frames advance as the corpse fades out
     if (en.dead) {
-      const death = this.anims[`${key}_death`];
+      const death = art.death;
       if (death) {
         const total = en.def.CORPSE_TICKS;
         const fi = Math.min(death.frames.length - 1, Math.floor((1 - en.corpseTicks / total) * death.frames.length));
@@ -1777,11 +1883,11 @@ export class Renderer {
       const status = en.shockTicks > 0 ? 2 : en.wetTicks > 0 ? 1 : en.burnTicks > 0 ? 0 : -1;
       if (status >= 0) {
         g.globalAlpha = 0.55 * fade;
-        g.drawImage(this.statusSprites[en.def.SPRITE_KEY][status], x, y, w, h);
+        g.drawImage(art.status![status]!, x, y, w, h);
         g.globalAlpha = 1;
       }
       if (en.isElite) {
-        const elite = this.eliteSprites[en.def.SPRITE_KEY];
+        const elite = art.elite;
         if (elite !== undefined) {
           g.globalAlpha = 0.22 * fade;
           g.drawImage(elite, x, y, w, h);

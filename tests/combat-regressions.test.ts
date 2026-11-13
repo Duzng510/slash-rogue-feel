@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CONFIG } from "../src/config.ts";
 import { World } from "../src/world/world.ts";
-import { Room, TEMPLATES } from "../src/world/rooms.ts";
+import { Room, TEMPLATES, TILE } from "../src/world/rooms.ts";
 import { createSwing, hitFeedback, hitboxOf, playerSwingInit, resolveHits } from "../src/systems/combat.ts";
 import { makeEnemy, ENEMY_STATE } from "../src/entities/enemy.ts";
 import { resolveProjectiles } from "../src/systems/projectiles.ts";
@@ -411,7 +411,9 @@ test("clearing the last room ends the run with victory", () => {
   assert.equal(w.pendingEnd, null);
   assert.equal(w.roomIndex, 0);
   assert.equal(w.victory, false);
-  assert.equal(w.ascensionLevel, 1);
+  // a win unlocks the next tier, but continue keeps the player's own choice (was 0)
+  assert.equal(w.achievements.ascensionMax, 1);
+  assert.equal(w.ascensionLevel, 0);
   assert.ok(w.artifacts.size > 0);
   assert.equal(w.runStats.roomsCleared, 0);
 
@@ -631,13 +633,13 @@ test("status burn ticks without interrupting, expires and steam consumes both or
   const e = makeEnemy(175, 103, "boss");
   e.restTicks = 1000;
   e.applyStatus("burn", w);
-  for (let i = 0; i < 59; i++) e.tick(w, w.grid);
+  for (let i = 0; i < CONFIG.STATUS.FIRST_PULSE_TICKS - 1; i++) e.tick(w, w.grid);
   assert.equal(e.hp, 24);
-  e.tick(w, w.grid);
+  e.tick(w, w.grid); // first burn pulse must land fast, not a full second later
   assert.equal(e.hp, 23);
   assert.equal(e.state, "idle");
   assert.equal(w.hitStopTicks, 0);
-  for (let i = 0; i < 60; i++) e.tick(w, w.grid);
+  for (let i = CONFIG.STATUS.FIRST_PULSE_TICKS; i < 120; i++) e.tick(w, w.grid);
   assert.deepEqual([e.hp, e.burnTicks], [22, 0]);
   for (const order of [["burn", "wet"], ["wet", "burn"]] as const) {
     const hp: number = e.hp;
@@ -1366,4 +1368,122 @@ test("drop 8 achievements fire on their win, kill, room and artifact signals", (
   assert.ok(checkAchievements({ ...emptyStats(), roomsCleared: 1 }, "room").includes("pacifist_room"));
   assert.ok(!checkAchievements({ ...emptyStats(), roomsCleared: 1, roomKills: 2 }, "room").includes("pacifist_room"));
   assert.ok(checkAchievements({ ...emptyStats(), artifactsTaken: 10 }, "artifact").includes("collector_10"));
+});
+
+test("damage number shows the post-modifier hit, not the base swing", () => {
+  const w = sandbox();
+  w.artifacts.add("executioner");
+  const e = makeEnemy(160, 100, "boss");
+  e.hp = 3; // below 20% maxHp, so executioner turns the 1-dmg swing into 3
+  const sw = jab(w, 1);
+  e.onHit(sw, e.x, e.y, w);
+  hitFeedback(w, e, sw, e.x, e.y, true, false);
+  const shown = w.queue.drain().find((ev) => ev.t === "dmgNumber");
+  assert.equal(shown?.t === "dmgNumber" ? shown.value : null, 3);
+});
+
+test("buying curse removal restores frail's max HP and clears the curse", () => {
+  const w = sandbox();
+  const base = w.player.maxHp;
+  w.curses.add("frail");
+  w.player.maxHp = base - CONFIG.CURSES.FRAIL_HP;
+  w.shopOffers = [{ kind: "curse", price: 0 }];
+  assert.ok(w.chooseShop(0));
+  assert.equal(w.player.maxHp, base);
+  assert.ok(!w.curses.has("frail"));
+});
+
+test("restart and continue keep the player's chosen ascension, not the unlocked max", () => {
+  const ach = emptyAchievements();
+  ach.ascensionMax = 8;
+  const w = new World(CONFIG.SEED, ach);
+  try {
+    assert.ok(w.setAscensionLevel(2));
+    w.restart();
+    assert.equal(w.ascensionLevel, 2);
+    w.setAscensionLevel(3);
+    w.continueAfterWin();
+    assert.equal(w.ascensionLevel, 3);
+  } finally {
+    w.setAscensionLevel(0);
+  }
+});
+
+test("a beam is stopped by a wall instead of hitting through it", () => {
+  const w = sandbox();
+  const room = new Room({ name: "beam-wall", rows: [".........", "..O......", "........."] }, 0);
+  w.room = room;
+  w.player.x = (6 + 0.5) * CONFIG.WORLD.TILE;
+  w.player.y = (2 + 0.5) * CONFIG.WORLD.TILE;
+  w.player.iframeTicks = 0;
+  const e = makeEnemy((1 + 0.5) * CONFIG.WORLD.TILE, w.player.y, "sniper");
+  const arm = () => {
+    e.setState(ENEMY_STATE.IDLE);
+    e.telegraphDir = 0;
+    e.telegraphTotal = 10;
+    e.telegraphTicksLeft = 1;
+    e.setState(ENEMY_STATE.TELEGRAPH);
+    e.tick(w, w.grid);
+    w.queue.drain();
+  };
+  const hp = w.player.hp;
+  arm();
+  assert.equal(w.player.hp, hp, "the crate should eat the beam");
+  room.setTile(3, 2, TILE.FLOOR);
+  arm();
+  assert.equal(w.player.hp, hp - 3, "with the line clear the beam lands");
+});
+
+test("the full i-frame window is invulnerable, including its final tick", () => {
+  const w = sandbox();
+  w.player.onHit(jab(w, 1, "enemy"), w.player.x, w.player.y, w);
+  let protectedTicks = 0;
+  for (let i = 0; i < 100; i++) {
+    w.player.tick(idle, w);
+    if (w.player.canBeHit()) break;
+    protectedTicks++;
+  }
+  assert.equal(protectedTicks, CONFIG.PLAYER.IFRAMES);
+});
+
+test("a stunned healer cannot pulse hp to its allies", () => {
+  const w = sandbox();
+  const healer = makeEnemy(160, 100, "healer");
+  const ally = makeEnemy(168, 100, "chaser");
+  ally.hp = ally.maxHp - 1;
+  w.enemies = [healer, ally];
+  w.syncUnits();
+  (healer as unknown as { healTicks: number }).healTicks = healer.def.HEAL_INTERVAL - 1;
+  healer.applyStatus("shock", w);
+  const hp = ally.hp;
+  for (let i = 0; i < 10; i++) healer.tick(w, w.grid);
+  assert.equal(ally.hp, hp);
+  assert.equal((healer as unknown as { healTicks: number }).healTicks, healer.def.HEAL_INTERVAL - 1);
+});
+
+test("minions summoned mid-tick do not also tick in that same tick", () => {
+  const w = sandbox();
+  const warden = makeEnemy(160, 100, "warden");
+  warden.pattern = "summon";
+  warden.telegraphDir = 0;
+  warden.telegraphTotal = 10;
+  warden.telegraphTicksLeft = 1;
+  warden.setState(ENEMY_STATE.TELEGRAPH);
+  w.enemies = [warden];
+  w.syncUnits();
+  w.tick(idle);
+  const summoned = w.enemies.filter((e) => e.kind === "small");
+  assert.equal(summoned.length, 3);
+  assert.ok(summoned.every((e) => e.ticksInState === 0));
+});
+
+test("damage on an already-dead enemy never counts a second kill", () => {
+  const w = sandbox();
+  const e = makeEnemy(160, 100, "chaser");
+  e.hp = 1;
+  e.onHit(jab(w, 5), e.x, e.y, w);
+  const kills = w.runStats.enemiesKilled;
+  assert.equal(e.dead, true);
+  (e as unknown as { takeDamage(dmg: number, src: World): void }).takeDamage(1, w);
+  assert.equal(w.runStats.enemiesKilled, kills);
 });
