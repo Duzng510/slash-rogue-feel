@@ -35,6 +35,10 @@ export type Harness = {
   forceEnd: (mode: EndMode) => void;
   /** tiles-batch probe: mean luminance of the last sceneRT tile flush (0 unless ?glbatch=probe) */
   glSceneRTMean: () => number;
+  /** last frame's render counters: CPU drawImage blits vs GPU tile-batch quads */
+  stats: () => { drawImage: number; tileBatch: number; uploads: number; overlayDirty: boolean };
+  /** re-render the current frame n times to average CPU draw cost (no sim advance) */
+  profileFrames: (n: number) => { cpuMsPerFrame: number; drawImagePerFrame: number; tileBatchPerFrame: number; uploadsPerFrame: number };
   state: () => {
     tick: number;
     hitStop: number;
@@ -148,6 +152,8 @@ export function installHarness(deps: HarnessDeps): void {
       world.pendingEnd = mode;
     },
     glSceneRTMean: () => renderer.glSceneRTMean(),
+    stats: () => renderer.stats(),
+    profileFrames: (n) => renderer.profileFrames(n),
     state: () => ({
       tick: world.tickCount,
       hitStop: world.hitStopTicks,

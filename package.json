@@ -11,6 +11,7 @@
     "test:laws": "node tests/laws.test.ts",
     "test:combat": "node --test tests/combat-regressions.test.ts",
     "test:inv": "node --test tests/invariants.test.ts",
+    "measure": "node tools/measure-render.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {

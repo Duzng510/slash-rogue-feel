@@ -729,6 +729,10 @@ export const CONFIG = {
     MAX_PROJECTILES: 160,
     FUZZ_BUDGET: 240,
     FUZZ_TRIALS: 80,
+    /** stage-1 upload-discipline law: the composite present must skip the overlay upload on a clean frame */
+    SKIP_EMPTY_OVERLAY: true,
+    /** headroom cap: per-frame tile quads pushed into the GPU batch must stay under this (screen is ~2100 cells) */
+    MAX_TILE_BATCH: 4000,
   },
 
   PALETTE,

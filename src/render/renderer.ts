@@ -132,6 +132,14 @@ export class Renderer {
   private glBatch = false;
   private tileBatchCount = 0;
   private probeTilesMean = 0;
+  /** per-frame CPU 2D drawImage blits (tiles path only) — the number batching removes */
+  private drawImageCount = 0;
+  /** per-frame scene uploads to the GPU in the present step */
+  private presentUploads = 0;
+  /** whether the CPU overlay had content this frame (the future skip-empty-overlay signal) */
+  private overlayDirty = false;
+  /** last draw's debug flags, reused by profileFrames so it renders identically */
+  private lastFlags: DrawFlags = { boxes: false, fps: false, hitStop: false };
 
   constructor(
     private readonly game: HTMLCanvasElement,
@@ -338,6 +346,10 @@ export class Renderer {
   }
 
   draw(dtReal: number, flags: DrawFlags): void {
+    this.lastFlags = flags;
+    this.drawImageCount = 0;
+    this.tileBatchCount = 0;
+    this.presentUploads = 0;
     this.stepVisual(dtReal);
     const g = this.g;
     const w = this.world;
@@ -452,6 +464,11 @@ export class Renderer {
       }
     }
 
+    // Cheap overlay-dirty signal for the future skip-empty-upload law: the CPU overlay is
+    // everything drawn on top of the tiles, so it is clean only when nothing alive is present.
+    this.overlayDirty =
+      w.enemies.length > 0 || w.projectiles.length > 0 || w.particles.alive > 0 || this.transTicks > 0;
+
     if (this.gl && this.sceneCanvas) {
       const { lights, cols, count } = this.gatherLights(ox, oy);
       const lit = CONFIG.SLIDERS.lighting;
@@ -470,6 +487,7 @@ export class Renderer {
         ambient: 1 + (base - 1) * lit,
       };
       this.gl.presentScene(this.sceneCanvas, params);
+      this.presentUploads++;
     }
   }
 
@@ -794,12 +812,41 @@ export class Renderer {
     g.globalAlpha = 1;
   }
 
-  /** radial emitters for the GL light map: torches, player, fire projectiles, burning enemies */
   /** tiles-batch probe: mean luminance of the last sceneRT tile flush (0 outside probe mode) */
   glSceneRTMean(): number {
     return this.probeTilesMean;
   }
 
+  /** last frame's render counters, for the measurement harness (drawImage vs tile-batch) */
+  stats(): { drawImage: number; tileBatch: number; uploads: number; overlayDirty: boolean } {
+    return {
+      drawImage: this.drawImageCount,
+      tileBatch: this.tileBatchCount,
+      uploads: this.presentUploads,
+      overlayDirty: this.overlayDirty,
+    };
+  }
+
+  /** Re-render the current frame n times (no sim advance) to average CPU draw cost. */
+  profileFrames(n: number): { cpuMsPerFrame: number; drawImagePerFrame: number; tileBatchPerFrame: number; uploadsPerFrame: number } {
+    let diSum = 0, tbSum = 0, upSum = 0;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      this.draw(1 / 60, this.lastFlags);
+      diSum += this.drawImageCount;
+      tbSum += this.tileBatchCount;
+      upSum += this.presentUploads;
+    }
+    const cpuMsPerFrame = (performance.now() - t0) / n;
+    return {
+      cpuMsPerFrame,
+      drawImagePerFrame: diSum / n,
+      tileBatchPerFrame: tbSum / n,
+      uploadsPerFrame: upSum / n,
+    };
+  }
+
+  /** radial emitters for the GL light map: torches, player, fire projectiles, burning enemies */
   private gatherLights(ox: number, oy: number): { lights: Float32Array; cols: Float32Array; count: number } {
     const L = CONFIG.LIGHTING;
     const lit = CONFIG.SLIDERS.lighting;
@@ -899,6 +946,7 @@ export class Renderer {
           this.tileBatchCount++;
         } else {
           g.drawImage(s.c, lx, ly, s.w, s.h);
+          this.drawImageCount++;
         }
       }
     }
@@ -921,6 +969,7 @@ export class Renderer {
             this.tileBatchCount++;
           } else {
             g.drawImage(face.c, fx, fy, face.w, face.h);
+            this.drawImageCount++;
           }
         }
       }

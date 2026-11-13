@@ -1631,6 +1631,10 @@ heading("Biomes and Ascension");
   saved.ascensionMax = 8;
   ok("Ascension unlock progress survives save serialization", parseAchievements(stringifyAchievements(saved)).ascensionMax === 8);
   ok("legacy saves start with Ascension 0 unlocked", parseAchievements('{"earned":[],"best":null,"totalGold":5}').ascensionMax === 0);
+
+  // Stage-1 GL migration laws (renderer encodes these; GPU work is checked headless, not here).
+  ok("empty-overlay skip rule is enabled in CONFIG", CONFIG.LAWS.SKIP_EMPTY_OVERLAY === true);
+  ok("tile-batch headroom cap covers the full screen with margin", CONFIG.LAWS.MAX_TILE_BATCH >= 2100 && CONFIG.LAWS.MAX_TILE_BATCH <= 8000);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
