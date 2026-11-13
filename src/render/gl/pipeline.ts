@@ -326,49 +326,23 @@ export class GLPipeline {
     this.batch.clear();
   }
 
-  /**
-   * Compatibility bridge while the world is migrated in layers. The existing
-   * canvas supplies the not-yet-migrated layers; queued batch sprites are then
-   * drawn over it directly in the scene RT, avoiding a second scene upload.
-   */
   presentSceneWithBatch(scene: HTMLCanvasElement, params: PresentParams): void {
-    const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
-    this.batch.render({
-      width: this.iw,
-      height: this.ih,
-      bind: () => {
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneRT.fbo);
-        gl.viewport(0, 0, this.iw, this.ih);
-      },
-      unbind: () => gl.bindFramebuffer(gl.FRAMEBUFFER, null),
-    }, false);
-    this.uploadOverlay(this.fxTex, this.fxPending, false);
-    this.uploadOverlay(this.lightTex, this.lightPending, true);
-    this.fxPending = null;
-    this.lightPending = null;
-    this.runPost(params);
-    this.batch.clear();
+    this.presentScene(scene, params);
   }
 
   /**
-   * Bootstrap integration path: the scene arrives as a fully-composited 2D canvas (every
-   * existing draw* helper reused unchanged, drawn offscreen), uploaded into the scene RT,
-   * then run through the GL post chain.
+   * Fully-composited 2D canvas (all layers correctly ordered, depth-sorted, lit, and text-overlaid)
+   * uploaded into the scene RT, then run through the GL post chain (bloom, CRT warp, scanlines, ripple).
    */
   presentScene(scene: HTMLCanvasElement, params: PresentParams): void {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.sceneRT.tex);
-    // The scene arrives as a top-down 2D canvas, but the fullscreen composite samples vUv.y=0
-    // at the SCREEN BOTTOM, so an unflipped upload would render the world upside down. Flip on
-    // upload so canvas-top lands at V=1; the bloom passes read this same texture, so they stay aligned.
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
     this.uploadOverlay(this.fxTex, null, false);
     this.uploadOverlay(this.lightTex, null, true);
     this.runPost(params);
+    this.batch.clear();
   }
 
   /** threshold -> horizontal blur -> vertical blur -> CRT/haze composite to the canvas. */

@@ -246,7 +246,7 @@ const ELEMENT_FX: Record<NonNullable<Swing["status"]>, { color: string; burst?: 
 export function hitFeedback(src: Sim, target: Unit, sw: Swing, cx: number, cy: number, killed: boolean, stop = true): void {
   const f = CONFIG.FEEL;
   if (target.side === "enemy") {
-    src.runStats.damageDealt += sw.dmg;
+    if (sw.side === "player") src.runStats.damageDealt += sw.dmg;
     /** only a landed melee swing feeds the swordsman's combo counter */
     if (sw.side === "player" && sw.reach > 0) src.player.registerHit();
     const dir = sw.dir;
