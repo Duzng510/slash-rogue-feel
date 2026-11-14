@@ -1,6 +1,9 @@
+import type { EnemyKind } from "../config.ts";
+
 export type RunStats = {
   roomsCleared: number;
   enemiesKilled: number;
+  killsByKind: Record<EnemyKind, number>;
   damageDealt: number;
   damageTaken: number;
   artifactsTaken: number;
@@ -33,6 +36,23 @@ export function emptyStats(): RunStats {
   return {
     roomsCleared: 0,
     enemiesKilled: 0,
+    killsByKind: {
+      chaser: 0,
+      charger: 0,
+      splitter: 0,
+      small: 0,
+      boss: 0,
+      ranged: 0,
+      teleporter: 0,
+      healer: 0,
+      exploder: 0,
+      shielder: 0,
+      sniper: 0,
+      jumper: 0,
+      warden: 0,
+      golem: 0,
+      king: 0,
+    },
     damageDealt: 0,
     damageTaken: 0,
     artifactsTaken: 0,

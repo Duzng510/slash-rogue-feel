@@ -5,11 +5,52 @@
  * `items` are authored release notes (trusted) and may contain inline <b> markup.
  */
 
-export const APP_VERSION = "v0.49.0";
+export const APP_VERSION = "v0.54.0";
 
 export type ChangelogEntry = { version: string; date: string; items: string[] };
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: "v0.54.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Humanity:</b> lời nguyền làm xói mòn chỉ số; hạ boss và nhặt mảnh ký ức giúp hồi phục nhẹ, có giới hạn trong mỗi run.",
+      "<b>Ảnh hưởng:</b> âm thanh đổi tông liên tục theo Humanity, hạt ký ức chuyển sắc/cường độ; Humanity thấp mở nhánh lựa chọn thoại khác cho NPC.",
+    ],
+  },
+  {
+    version: "v0.53.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Lore Stones:</b> thêm một đá ký ức ở mỗi ACT; tương tác sau khi dọn phòng để nghe hồi ức và thu thập mảnh.",
+      "<b>Codex:</b> mảnh ký ức mở phần Nguồn gốc cho archetype tương ứng; tiến độ giới hạn một mảnh mỗi ACT và được làm mới khi bắt đầu run mới.",
+    ],
+  },
+  {
+    version: "v0.52.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Codex:</b> thêm hồ sơ ba phần cho toàn bộ 15 archetype; ghi chép sinh học/thực địa mở sau 3 lần hạ, nguồn gốc chờ Mảnh Ký Ức.",
+      "<b>Tiến độ:</b> đếm hạ gục theo từng loại trong run; Codex mở bằng C hoặc nút ở thị trấn và không ghi vào Sim.",
+    ],
+  },
+  {
+    version: "v0.51.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Truyện:</b> thêm hồi ức ngắn khi bước vào mỗi biome, lời thoại lore cho ba NPC và một số cổ vật.",
+      "<b>Gameplay:</b> hồi ức biome/cổ vật không chặn chiến đấu; người chơi vẫn có thể đóng bằng tương tác.",
+    ],
+  },
+  {
+    version: "v0.50.0",
+    date: "2026-11-14",
+    items: [
+      "<b>Hoạt hình:</b> cả 15 loại quái có keyframe tư thế thật cho gió vào – ra đòn – hồi đòn, thay vì tịnh tiến cả sprite.",
+      "<b>Kỹ thuật:</b> pose là dữ liệu thuần (danh sách op) nên luật kiểm tra khung và chống “chỉ dịch sprite” chạy được trên Node; bakePose từ chối box lệch với sprite gốc.",
+      "<b>Tài nguyên:</b> tools/export-sprites.mjs xuất assets/sprites/*.png kèm atlas JSON và dải pose xem trước cho từng loại.",
+    ],
+  },
   {
     version: "v0.49.0",
     date: "2026-11-14",

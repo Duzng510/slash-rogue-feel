@@ -1,5 +1,5 @@
 export type DialogueOptionBounds = { x: number; y: number; width: number; height: number };
-export type ModalKind = "p" | "w" | "a" | "c" | "s" | "t" | "q" | "e" | "d";
+export type ModalKind = "p" | "w" | "a" | "c" | "s" | "t" | "q" | "e" | "d" | "x";
 export type ModalKey = `${ModalKind}:${string}` | "restart" | "continue";
 
 export interface Clickable {

@@ -102,7 +102,7 @@ const walk = (dx, dy, ticks) => `
 
 await shot(
   "kinds",
-  `g.gotoRoom(11); ${walk(1, 0, 55)} g.addEnemies(3, ["charger", "splitter", "small"]);`,
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(4, ["boss", "charger", "splitter", "small"]);`,
   `near("boss") && near("charger") && near("splitter") && near("small") && s.enemies.every(e => e.state !== "attack" && e.state !== "dead")`
 );
 
@@ -115,13 +115,13 @@ await shot(
 
 await shot(
   "boss-ring",
-  `g.gotoRoom(11);`,
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["boss"]);`,
   `tele("boss", 4, 14) && !s.enemies.some(e => e.kind === "boss" && e.enraged)`
 );
 
 await shot(
   "boss-enraged",
-  `g.gotoRoom(11); const b = g.state().enemies.find(e => e.kind === "boss"); for (let i = 0; i < 13; i++) g.damageEnemy(b.id, 1);`,
+  `g.gotoRoom(0); g.clearEnemies(); g.addEnemies(1, ["boss"]); const b = g.state().enemies.find(e => e.kind === "boss"); for (let i = 0; i < 13; i++) g.damageEnemy(b.id, 1);`,
   `s.enemies.some(e => e.kind === "boss" && e.enraged) && tele("boss", 4, 12)`
 );
 
@@ -204,6 +204,21 @@ await shot(
   400
 );
 
+// room 16 "Sàn nghi thức" and room 7 are the scripted king/golem rooms
+await shot(
+  "king-ring",
+  `g.gotoRoom(16);`,
+  `tele("king", 4, 14)`,
+  400
+);
+
+await shot(
+  "golem-slam",
+  `g.gotoRoom(7);`,
+  `tele("golem", 4, 14)`,
+  400
+);
+
 await shot(
   "room-traps",
   `g.gotoRoom(9); ${walk(1, 0, 30)}`,
@@ -211,10 +226,13 @@ await shot(
   40
 );
 
+// the shop hit-test works in HUD columns, and prices come from CONFIG, so read the real heal price
+const HEAL_PRICE = await evalJs(`(async () => (await import("/src/config.ts")).CONFIG.SHOP.HEAL)()`);
+
 await shot(
   "shop",
   `g.gotoRoom(0); g.addEnemies(8); for (const e of g.state().enemies) g.damageEnemy(e.id, 99); g.gotoRoom(10);`,
-  `s.shopOffers === 3 && s.runStats.gold >= 8`,
+  `s.shopOffers === 3 && s.runStats.gold >= ${HEAL_PRICE}`,
   30
 );
 
@@ -231,9 +249,10 @@ const clickAt = async (ux, uy) => {
     await send("Input.dispatchMouseEvent", { type, x: pt.x, y: pt.y, button: "left", clickCount: 1 });
   }
 };
-await clickAt(160, 40 + healIdx * 43 + 19);
+// modal.ts hit-tests shop cards as three columns centred at x 58/160/262, y band 38..158
+await clickAt(58 + healIdx * 102, 98);
 const bought = await evalJs(`(() => { const g = window.__game; g.advance(1 / 60); return g.state(); })()`);
-if (bought.runStats.gold !== shopBefore.runStats.gold - 8 || bought.shopOffers !== 2) {
+if (bought.runStats.gold !== shopBefore.runStats.gold - HEAL_PRICE || bought.shopOffers !== 2) {
   throw new Error(`shop buy click failed: ${JSON.stringify({ before: shopBefore.runStats.gold, after: bought.runStats.gold, offers: bought.shopOffers })}`);
 }
 const boughtImg = await send("Page.captureScreenshot", { format: "png" });
@@ -246,9 +265,9 @@ console.log("shop leave click ok");
 
 await shot(
   "curse-modal",
-  `g.gotoRoom(0); g.clearEnemies();`,
+  `g.gotoRoom(8);`,
   `s.curseOffer !== null && s.artifactChoices.length === 3`,
-  30
+  60
 );
 
 await shot(
@@ -259,11 +278,12 @@ await shot(
 );
 
 // screenshots prove rendering, not tapping: click curse card 0 with a real mouse event
-// and require the bundle (offer consumed + exactly 2 artifacts) to prove the pointer wiring
+// and require the bundle (offer consumed + exactly 2 artifacts) to prove the pointer wiring.
+// a treasure offer carries one curse, drawn in the first HUD column (x band 12..104).
 const before = await evalJs(`window.__game.state().artifacts.length`);
 const pt = await evalJs(`(() => {
   const r = document.getElementById("overlay").getBoundingClientRect();
-  return { x: r.left + (160 / 320) * r.width, y: r.top + (59 / 180) * r.height };
+  return { x: r.left + (58 / 320) * r.width, y: r.top + (59 / 180) * r.height };
 })()`);
 for (const type of ["mousePressed", "mouseReleased"]) {
   await send("Input.dispatchMouseEvent", { type, x: pt.x, y: pt.y, button: "left", clickCount: 1 });

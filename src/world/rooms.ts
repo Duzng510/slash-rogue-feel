@@ -1,5 +1,6 @@
 import { CONFIG } from "../config.ts";
 import { clamp, makeRng } from "../mathx.ts";
+import { buildTownRows } from "./town.ts";
 import type { EnemyKind } from "../config.ts";
 
 export const TILE = {
@@ -11,6 +12,11 @@ export const TILE = {
   DOOR_OPEN: 5,
   TRAP: 6,
   TRAP_ARMED: 7,
+  GRASS: 8,
+  ROAD: 9,
+  FLOOR_WOOD: 10,
+  DOOR_TOWN: 11,
+  FENCE: 12,
 } as const;
 
 export type Tile = (typeof TILE)[keyof typeof TILE];
@@ -47,23 +53,14 @@ export type Template = {
 
 const FLOOR_ROW = ".".repeat(22);
 
+/**
+ * The town grid is generated from HOUSES (see world/town.ts) rather than typed, so the map and the
+ * house data cannot drift apart: one source describes a wall ring, an interior and a door.
+ */
 export const TOWN_TEMPLATE: Template = {
   name: "Thị trấn",
   kind: "town",
-  rows: [
-    "......................",
-    "......................",
-    "......................",
-    "......................",
-    "......................",
-    "S.....................",
-    "......................",
-    "......................",
-    "......................",
-    "......................",
-    "......................",
-    "......................",
-  ],
+  rows: buildTownRows(),
 };
 
 export const TEMPLATES: Template[] = [
@@ -402,6 +399,12 @@ export class Room {
           const ch = line[tx - 1];
           if (ch === "O") t = TILE.CRATE;
           else if (ch === "^") t = TILE.TRAP;
+          else if (ch === ",") t = TILE.ROAD;
+          else if (ch === "#") t = TILE.WALL;
+          else if (ch === "=") t = TILE.FLOOR_WOOD;
+          else if (ch === "d") t = TILE.DOOR_TOWN;
+          else if (ch === "f") t = TILE.FENCE;
+          else if (template.kind === "town") t = TILE.GRASS;
           else if (rng.next() < 0.14) t = TILE.ACCENT;
           const cx = tx * CONFIG.WORLD.TILE;
           const cy = ty * CONFIG.WORLD.TILE;
@@ -417,14 +420,15 @@ export class Room {
       }
     }
 
-    // torches: scan wall faces (wall with a walkable tile below) and place one every ~8 tiles
+    // torches: scan wall faces (wall with a walkable tile below) and place one every ~8 tiles.
+    // town is skipped: its wall rings are house walls, and the lantern props carry its light.
     const torchRng = makeRng(0x51ee + index * 104729);
     let sinceLast = 8;
-    for (let ty = 1; ty < this.h; ty++) {
+    for (let ty = this.kind === "town" ? this.h : 1; ty < this.h; ty++) {
       for (let tx = 0; tx < this.w; tx++) {
         if (this.tiles[ty * this.w + tx] !== TILE.WALL) continue;
         const below = ty + 1 < this.h ? this.tiles[(ty + 1) * this.w + tx] : TILE.WALL;
-        if (below === TILE.WALL || below === TILE.CRATE) continue;
+        if (below === TILE.WALL || below === TILE.CRATE || below === TILE.FENCE) continue;
         if (++sinceLast < 8 || torchRng.next() < 0.25) continue;
         sinceLast = 0;
         this.torches.push({
@@ -475,7 +479,7 @@ export class Room {
 
   isSolid(tx: number, ty: number): boolean {
     const t = this.at(tx, ty);
-    return t === TILE.WALL || t === TILE.CRATE || t === TILE.DOOR;
+    return t === TILE.WALL || t === TILE.CRATE || t === TILE.DOOR || t === TILE.FENCE;
   }
 
   solidAtPx(px: number, py: number): boolean {

@@ -4,13 +4,14 @@ import { CONFIG, ENEMY_KINDS, Settings, enemyDef, isScripted } from "../src/conf
 import type { EnemyKind } from "../src/config.ts";
 import { IntentSource } from "../src/input/intent.ts";
 import { World } from "../src/world/world.ts";
-import { TEMPLATES, MARKER_KIND, Room, TILE, type Template } from "../src/world/rooms.ts";
+import { TEMPLATES, MARKER_KIND, Room, TILE, TOWN_TEMPLATE, type Template } from "../src/world/rooms.ts";
+import { HOUSES, TOWN, TOWN_LEGEND, buildInteriorProps, buildTownProps, buildTownRows, doorCell, houseAt, interiorRect, npcAnchor } from "../src/world/town.ts";
 import { makeEnemy, ENEMY_STATE, ENEMY_TRANSITIONS, canGoEnemy, type Enemy } from "../src/entities/enemy.ts";
 import { createSwing, hitFeedback, playerSwingInit } from "../src/systems/combat.ts";
 import { CHARACTERS, COMBO_HITS } from "../src/systems/characters.ts";
 import { WEAPONS, WEAPON_LIST, type WeaponId } from "../src/systems/weapons.ts";
 import { ARTIFACTS, ARTIFACT_COLORS, ARTIFACT_UNLOCKS, CURSES } from "../src/systems/artifacts.ts";
-import { formatRunTime, emptyStats } from "../src/systems/runStats.ts";
+import { formatRunTime, emptyStats, resetStats } from "../src/systems/runStats.ts";
 import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchievements } from "../src/systems/unlocks.ts";
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import { Player, PLAYER_STATE } from "../src/entities/player.ts";
@@ -21,8 +22,14 @@ import { fitAxes, rotateVec, tryImmersive } from "../src/ui/immersive.ts";
 import { stalled } from "../src/ui/diag.ts";
 import { GameLoop } from "../src/loop.ts";
 import type { Intent } from "../src/sim/types.ts";
-import { biomeForRoom } from "../src/systems/biomes.ts";
+import { BIOMES, biomeForRoom } from "../src/systems/biomes.ts";
+import { ARTIFACT_LORE_DIALOGUES, BIOME_INTROS, GUARD_DIALOGUE, NPC_DIALOGUES } from "../src/systems/dialogue.ts";
+import { CODEX_ENTRIES, codexVisibility } from "../src/data/codex.ts";
+import { LORE_ACTS, LORE_ACT_ROOM_RANGES, LORE_STONES } from "../src/data/loreStones.ts";
+import { humanityAudioPitch, humanityErosion } from "../src/systems/humanity.ts";
 import { slashFrame, slashRamp, residueDotPositions } from "../src/render/pixelart.ts";
+import { POSES } from "../src/render/art/index.ts";
+import type { Op, Pose } from "../src/render/art/kit.ts";
 import { applyAscension } from "../src/systems/ascension.ts";
 import { APP_VERSION, CHANGELOG } from "../src/ui/changelog.ts";
 
@@ -140,14 +147,16 @@ heading("Run stats");
   const w = sandbox();
   ok(
     "runStats starts hurtFree with zeroed counters",
-    w.runStats.hurtFree && w.runStats.enemiesKilled === 0 && w.runStats.damageDealt === 0 && w.runStats.roomsCleared === 0
+    w.runStats.hurtFree && w.runStats.enemiesKilled === 0 && w.runStats.damageDealt === 0 && w.runStats.roomsCleared === 0 &&
+      Object.values(w.runStats.killsByKind).every((count) => count === 0)
   );
 
   const kill = sandbox();
   const e = makeEnemy(kill.player.x + 20, kill.player.y);
   withEnemy(kill, e);
   e.onHit(jab(kill, 999), e.x, e.y, kill);
-  ok("a lethal enemy hit counts one kill", kill.runStats.enemiesKilled === 1, `k=${kill.runStats.enemiesKilled}`);
+  ok("a lethal enemy hit counts one kill", kill.runStats.enemiesKilled === 1 &&
+    kill.runStats.killsByKind[e.kind] === 1, `k=${kill.runStats.enemiesKilled}`);
 
   const dd = sandbox();
   duel(dd);
@@ -171,6 +180,11 @@ heading("Run stats");
   art.artifactChoices = ARTIFACTS.slice(0, 3);
   const picked = art.artifactChoices[0].id;
   ok("picking an artifact counts it", art.chooseArtifact(picked) && art.runStats.artifactsTaken === 1);
+
+  const reset = emptyStats();
+  reset.killsByKind.chaser = 2;
+  resetStats(reset);
+  ok("per-kind kill counts reset with the run", reset.killsByKind.chaser === 0);
 
   const exit = sandbox();
   const T = CONFIG.WORLD.TILE;
@@ -495,6 +509,144 @@ heading("Archetype readability");
   ok("the charger lane outranges a chaser swing", enemyDef("charger").ATTACK_REACH > enemyDef("chaser").ATTACK_REACH);
   ok("the charger commits: it moves only while the swing is active", enemyDef("charger").LUNGE_SPEED > 0);
   ok("the splitter is the only archetype that splits", ENEMY_KINDS.filter((k) => enemyDef(k).SPLIT_INTO !== null).join() === "splitter");
+}
+
+heading("Authored pose keyframes");
+{
+  const range = CONFIG.LAWS.POSE_SHIFT_PROOF_RANGE;
+  const key = (o: Op) => `${o.x},${o.y},${o.w},${o.h},${o.c}`;
+  const shape = (pose: Pose) => pose.map(key).sort().join("|");
+  const moved = (pose: Pose, dx: number, dy: number) =>
+    pose.map((o) => key({ ...o, x: o.x + dx, y: o.y + dy })).sort().join("|");
+
+  const outOfBox: string[] = [];
+  const translated: string[] = [];
+  const emptySlot: string[] = [];
+  for (const [spriteKey, table] of Object.entries(POSES)) {
+    for (const pose of [...(table.idle ?? []), table.windup, table.strike, table.recover]) {
+      if (pose.length === 0) emptySlot.push(spriteKey);
+      for (const o of pose) {
+        const inside = Number.isInteger(o.x) && Number.isInteger(o.y) && o.x >= 0 && o.y >= 0
+          && o.x + o.w <= table.box.w && o.y + o.h <= table.box.h;
+        if (!inside) outOfBox.push(`${spriteKey}: ${key(o)}`);
+      }
+    }
+    let isJustAShift = false;
+    for (let dx = -range; dx <= range; dx++) {
+      for (let dy = -range; dy <= range; dy++) {
+        if (shape(table.windup) === moved(table.strike, dx, dy)) isJustAShift = true;
+      }
+    }
+    if (isJustAShift) translated.push(spriteKey);
+  }
+
+  ok("every authored pose stays inside its base box", outOfBox.length === 0, outOfBox.join(" "));
+  ok("a windup is never the strike moved a few pixels", translated.length === 0, translated.join(" "));
+  ok("every pose-backed archetype fills all three attack slots", emptySlot.length === 0, emptySlot.join(" "));
+
+  const anim = readFileSync("src/render/pixelart.ts", "utf8");
+  ok("unauthored archetypes keep the derived offset clip", anim.includes("POSES[key]") && anim.includes("shiftX(base, 1)"));
+}
+
+heading("Town map");
+{
+  const T = CONFIG.WORLD.TILE;
+  const rows = buildTownRows();
+  const widths = new Set(rows.map((line) => line.length));
+  const legend = new Set<string>(TOWN_LEGEND);
+  const at = (x: number, y: number) => rows[y]?.[x] ?? "?";
+
+  ok("the town grid is the declared size", rows.length === TOWN.h && widths.size === 1 && widths.has(TOWN.w),
+    `${rows.length}x${[...widths].join("/")}`);
+  ok("every town char is in the legend", rows.every((line) => [...line].every((c) => legend.has(c))));
+  ok("the town declares exactly one start", rows.join("").split("").filter((c) => c === "S").length === 1);
+
+  const malformed: string[] = [];
+  const shared: string[] = [];
+  const owner = new Map<string, string>();
+  for (const h of HOUSES) {
+    if (h.x < 0 || h.y < 0 || h.x + h.w > TOWN.w || h.y + h.h > TOWN.h) malformed.push(`${h.id} leaves the grid`);
+    const inner = interiorRect(h);
+    const door = doorCell(h);
+    for (let y = h.y; y < h.y + h.h; y++) {
+      for (let x = h.x; x < h.x + h.w; x++) {
+        const cell = `${x},${y}`;
+        if (owner.has(cell)) shared.push(`${cell} (${owner.get(cell)} vs ${h.id})`);
+        owner.set(cell, h.id);
+        const inside = x >= inner.x && x < inner.x + inner.w && y >= inner.y && y < inner.y + inner.h;
+        const want = inside ? "=" : x === door.x && y === door.y ? "d" : "#";
+        if (at(x, y) !== want) malformed.push(`${h.id}@${cell}=${at(x, y)} want ${want}`);
+      }
+    }
+  }
+  ok("each house is a wall ring, one door and a full wood floor", malformed.length === 0, malformed.slice(0, 3).join(" "));
+  ok("no two houses share a cell", shared.length === 0, shared.slice(0, 3).join(" "));
+
+  const peeledCells: string[] = [];
+  const ambiguous: string[] = [];
+  for (let ty = 0; ty < TOWN.h; ty++) {
+    for (let tx = 0; tx < TOWN.w; tx++) {
+      const px = (tx + 1.5) * T;
+      const py = (ty + 1.75) * T;
+      const hits = HOUSES.filter((h) => houseAt(px, py)?.id === h.id);
+      if (hits.length > 1) ambiguous.push(`${tx},${ty}`);
+      if (hits.length === 1) peeledCells.push(`${tx},${ty}`);
+    }
+  }
+  const expectedCells = HOUSES.reduce((n, h) => {
+    const inner = interiorRect(h);
+    return n + inner.w * inner.h + 1;
+  }, 0);
+  ok("a tile is under at most one roof", ambiguous.length === 0, ambiguous.slice(0, 3).join(" "));
+  ok("roof peel covers exactly the interiors and their doorways", peeledCells.length === expectedCells,
+    `got ${peeledCells.length} want ${expectedCells}`);
+  ok("standing on grass peels no roof", houseAt(1.5 * T, 2.75 * T) === null);
+
+  const room = new Room(TOWN_TEMPLATE, -1);
+  const gate: number[] = [];
+  for (let i = 0; i < room.tiles.length; i++) if (room.tiles[i] === TILE.DOOR) gate.push(i);
+  ok("the town has one gate and it sits on the east edge",
+    gate.length === 2 && gate.every((i) => i % room.w === room.w - 1), gate.join(" "));
+  ok("the town lights no dungeon torches", room.torches.length === 0, `${room.torches.length}`);
+  ok("the town spawns no enemies", room.spawns.length === 0, `${room.spawns.length}`);
+
+  const master = HOUSES[0];
+  const inner = interiorRect(master);
+  const door = doorCell(master);
+  ok("house floors and doorways are walkable",
+    !room.isSolid(inner.x + 2, inner.y + 2) && !room.isSolid(door.x + 1, door.y + 1));
+  ok("house walls and garden fences block",
+    room.isSolid(master.x + 1, master.y + 1) && room.isSolid(3, 17));
+  ok("the town start is walkable", !room.isSolid(Math.floor(room.start.x / T), Math.floor(room.start.y / T)));
+
+  // The renderer hides everything under a closed roof, so a prop or NPC typed outside its house
+  // would simply vanish from the market. The data has to place it, and these laws read the data.
+  const indoor: string[] = [];
+  for (const p of buildInteriorProps()) {
+    const h = houseAt(p.x, p.y);
+    if (h === null) { indoor.push(`${p.sprite} outside any house`); continue; }
+    const fx = Math.floor(p.x / T) - 1;
+    const fy = Math.floor(p.y / T) - 1;
+    const i = interiorRect(h);
+    if (fx < i.x || fx >= i.x + i.w || fy < i.y || fy >= i.y + i.h) indoor.push(`${p.sprite} on ${h.id}'s wall`);
+    const at = npcAnchor(h);
+    if (at !== null && Math.floor(at.x / T) === fx + 1 && Math.floor(at.y / T) === fy + 1) indoor.push(`${p.sprite} on ${h.id}'s npc cell`);
+  }
+  ok("indoor props sit on their house floor, off the NPC cell", indoor.length === 0, indoor.slice(0, 3).join(" "));
+  const furnished = new Set(buildInteriorProps().map((p) => houseAt(p.x, p.y)?.id));
+  ok("every house is furnished", furnished.size === HOUSES.length, `${furnished.size}/${HOUSES.length}`);
+  const outdoor: string[] = [];
+  for (const p of buildTownProps()) {
+    if (houseAt(p.x, p.y) !== null) outdoor.push(`${p.sprite} under a roof`);
+    else if (room.isSolid(Math.floor(p.x / T), Math.floor(p.y / T))) outdoor.push(`${p.sprite} inside a wall`);
+  }
+  ok("street props stand in the open", outdoor.length === 0, outdoor.slice(0, 3).join(" "));
+  const npcCells: string[] = [];
+  for (const h of HOUSES) {
+    const at = npcAnchor(h);
+    if (at !== null && houseAt(at.x, at.y)?.id !== h.id) npcCells.push(at.kind);
+  }
+  ok("every NPC stands inside its own house", npcCells.length === 0, npcCells.join(","));
 }
 
 heading("Crowding cap");
@@ -1054,6 +1206,254 @@ heading("Changelog popup: version stays in sync");
   ok("the start screen offers a changelog button and modal", html.includes('id="btn-changelog"') && html.includes('id="changelog-modal"'));
   ok("the inline changelog box is gone from the start screen", !html.includes("changelog-box"));
   ok("the changelog modal lives inside the rotated wrapper", inside.includes('id="changelog-modal"'));
+}
+
+heading("Lore: L1 dialogue coverage and non-blocking story");
+{
+  const biomeIds = Object.keys(BIOMES) as (keyof typeof BIOMES)[];
+  const missingBiomes = biomeIds.filter((id) => BIOME_INTROS[id] === undefined);
+  const missingNpcs = (["merchant", "guard", "character_master"] as const)
+    .filter((kind) => NPC_DIALOGUES[kind] === undefined);
+  const invalidDialogue = (dialogues: Record<string, { nodes: Record<string, { text: string }> }>) =>
+    Object.entries(dialogues).filter(([, dialogue]) =>
+      Object.keys(dialogue.nodes).length === 0 || Object.values(dialogue.nodes).some((node) => node.text.trim().length === 0))
+      .map(([id]) => id);
+
+  ok("every biome has a lore intro", missingBiomes.length === 0, missingBiomes.join(", "));
+  ok("every town NPC has a lore dialogue", missingNpcs.length === 0, missingNpcs.join(", "));
+  ok("every authored lore dialogue has text", invalidDialogue(BIOME_INTROS).length === 0 &&
+    invalidDialogue(NPC_DIALOGUES).length === 0 && invalidDialogue(ARTIFACT_LORE_DIALOGUES).length === 0);
+
+  const w = new World(CONFIG.SEED);
+  w.characterChoices = [];
+  for (const id of ["dungeon", "caverns", "forge", "void"] as const) {
+    w.currentBiome = BIOMES.town;
+    w.loadRoom(BIOMES[id].roomStart);
+    ok(`entering ${id} opens its non-blocking intro`,
+      w.dialogue?.source === BIOME_INTROS[id] && w.dialogue.blocking === false);
+  }
+
+  const tick = w.tickCount;
+  w.tick(intent());
+  ok("story dialogue does not pause the simulation", w.tickCount === tick + 1, `${w.tickCount} vs ${tick + 1}`);
+  w.tick(intent({ interact: true }));
+  ok("interact dismisses non-blocking story dialogue", w.dialogue === null);
+  const inputSource = readFileSync("src/main.ts", "utf8");
+  const inputBlock = inputSource.slice(inputSource.indexOf("blocked: () =>"), inputSource.indexOf("onHotkey:", inputSource.indexOf("blocked: () =>")));
+  ok("non-blocking story dialogue leaves desktop input active",
+    inputBlock.includes("world.dialogue?.blocking === true") && !inputBlock.includes("world.dialogue !== null"));
+
+  w.enterTown();
+  for (const kind of ["merchant", "guard", "character_master"] as const) {
+    const npc = w.npcList.find((entry) => entry.kind === kind)!;
+    w.player.x = npc.x;
+    w.player.y = npc.y;
+    w.tick(intent({ interact: true }));
+    ok(`${kind} opens its lore dialogue`, w.dialogue?.source === NPC_DIALOGUES[kind]);
+    w.closeDialogue();
+  }
+
+  const water = ARTIFACTS.find((artifact) => artifact.id === "water")!;
+  w.enterDungeon(false);
+  w.artifactChoices = [water];
+  ok("artifact pickup opens its optional lore",
+    w.chooseArtifact(water.id) && w.dialogue?.source === ARTIFACT_LORE_DIALOGUES.water && w.dialogue?.blocking === false);
+}
+
+heading("Codex: archetype coverage, unlocks and read-only UI");
+{
+  const kinds = Object.keys(CODEX_ENTRIES);
+  const missing = ENEMY_KINDS.filter((kind) => CODEX_ENTRIES[kind] === undefined);
+  const enemyKinds = new Set<string>(ENEMY_KINDS);
+  const extra = kinds.filter((kind) => !enemyKinds.has(kind));
+  ok("Codex and enemy archetypes match exactly", missing.length === 0 && extra.length === 0,
+    `missing ${missing.join(",")} extra ${extra.join(",")}`);
+  ok("every Codex entry has all three sections", ENEMY_KINDS.every((kind) => {
+    const entry = CODEX_ENTRIES[kind];
+    return entry.name.length > 0 && entry.sinhHoc.length > 0 &&
+      entry.ghiChepThucDia.length > 0 && entry.nguonGoc.length > 0;
+  }));
+
+  const threshold = CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK;
+  const short = codexVisibility(threshold - 1, threshold, false);
+  const ready = codexVisibility(threshold, threshold, false);
+  const remembered = codexVisibility(0, threshold, true);
+  ok("biology and field notes unlock at the configured kill threshold",
+    !short.sinhHoc && !short.ghiChepThucDia && ready.sinhHoc && ready.ghiChepThucDia);
+  ok("origin stays locked until a Lore Stone is found",
+    !ready.nguonGoc && remembered.nguonGoc && !remembered.sinhHoc);
+
+  const hudSource = readFileSync("src/ui/hud.ts", "utf8");
+  const mainSource = readFileSync("src/main.ts", "utf8");
+  const controlsStart = hudSource.indexOf("  openCodex():");
+  const controlsEnd = hudSource.indexOf("  /** queue the top-right unlock/achievement toast", controlsStart);
+  const drawStart = hudSource.indexOf("  private drawCodex(");
+  const drawEnd = hudSource.indexOf("  drawArtifacts(", drawStart);
+  const codexUi = `${hudSource.slice(controlsStart, controlsEnd)}\n${hudSource.slice(drawStart, drawEnd)}`;
+  ok("Codex UI state is held by HUD, not World",
+    hudSource.includes("private codexOpen = false") && mainSource.includes("hud.isCodexOpen"));
+  ok("Codex controls and rendering do not assign Sim fields",
+    controlsStart >= 0 && controlsEnd > controlsStart && drawStart >= 0 && drawEnd > drawStart &&
+      !/this\.world\.[\w.]+\s*=(?!=)/.test(codexUi));
+  ok("Codex opens with C and the town HUD button",
+    mainSource.includes('e.code === "KeyC"') && hudSource.includes('"x:open"') &&
+      hudSource.includes('"[C] HỒ SƠ"'));
+}
+
+heading("Lore Stones: ACT coverage, collection and Codex origins");
+{
+  const actsCovered = new Set(LORE_STONES.map((stone) => stone.act));
+  ok("each ACT has exactly one authored Lore Stone",
+    LORE_STONES.length === LORE_ACTS.length && actsCovered.size === LORE_ACTS.length &&
+      new Set(LORE_STONES.map((stone) => stone.id)).size === LORE_STONES.length &&
+      new Set(LORE_STONES.map((stone) => stone.roomIndex)).size === LORE_STONES.length);
+
+  const placementsValid = LORE_STONES.every((stone) => {
+    const template = TEMPLATES[stone.roomIndex];
+    if (template === undefined) return false;
+    const room = new Room(template, stone.roomIndex);
+    const tileSize = CONFIG.WORLD.TILE;
+    const x = (stone.tileX + 1.5) * tileSize;
+    const y = (stone.tileY + 1.75) * tileSize;
+    const actRange = LORE_ACT_ROOM_RANGES[stone.act];
+    return stone.roomIndex >= actRange.start && stone.roomIndex <= actRange.end &&
+      !room.isSolid(Math.floor(x / tileSize), Math.floor(y / tileSize)) &&
+      room.spawns.every((spawn) => Math.hypot(spawn.x - x, spawn.y - y) > CONFIG.LORE_STONE.INTERACT_RADIUS);
+  });
+  ok("every Lore Stone is on a walkable tile in its ACT and clear of spawns", placementsValid);
+  ok("the Act IV stone is placed in the authored event room",
+    LORE_STONES.some((stone) => stone.act === "IV" && TEMPLATES[stone.roomIndex]?.kind === "event"));
+
+  const world = new World(CONFIG.SEED);
+  world.enterDungeon(false);
+  world.characterChoices = [];
+  world.adjustHumanity(-20);
+  const fragmentCount = (): number => world.fragmentsCollected;
+  let collectedAll = true;
+  for (const [index, authoredStone] of LORE_STONES.entries()) {
+    world.closeDialogue();
+    world.loadRoom(authoredStone.roomIndex, false);
+    world.clearEnemies();
+    world.rewardedRooms.add(authoredStone.roomIndex);
+    world.room.openDoors();
+    world.closeDialogue();
+    const stone = world.activeLoreStone;
+    if (stone === null) {
+      collectedAll = false;
+      continue;
+    }
+    let openedExpectedDialogue = false;
+    for (let tick = 0; tick < 100 && (tick === 0 || world.hitStopTicks > 0); tick++) {
+      world.tick(intent());
+    }
+    world.player.reset(stone.x, stone.y);
+    if (index === 0) {
+      world.player.x += CONFIG.LORE_STONE.INTERACT_RADIUS + 1;
+      world.tick(intent({ interact: true }));
+      const blockedOutsideRadius = fragmentCount() === 0;
+      world.player.reset(stone.x + CONFIG.LORE_STONE.INTERACT_RADIUS, stone.y);
+      const humanityBeforeFragment = world.humanity;
+      world.tick(intent({ interact: true }));
+      openedExpectedDialogue = world.dialogue?.source === authoredStone.dialogue;
+      ok("a Lore Stone requires proximity and is collectable at the configured radius",
+        blockedOutsideRadius && fragmentCount() === 1 && openedExpectedDialogue);
+      ok("collecting a Lore Stone restores a small amount of humanity",
+        world.humanity === Math.min(CONFIG.LAWS.HUMANITY_MAX, humanityBeforeFragment + CONFIG.LAWS.HUMANITY_FRAGMENT_RECOVERY));
+      world.closeDialogue();
+      world.tick(intent({ interact: true }));
+      ok("a collected ACT stone cannot be collected twice", fragmentCount() === 1);
+    } else {
+      world.tick(intent({ interact: true }));
+      openedExpectedDialogue = world.dialogue?.source === authoredStone.dialogue;
+    }
+    collectedAll = collectedAll && world.fragmentsCollected === index + 1 &&
+      world.loreOriginsUnlocked.has(authoredStone.origin) &&
+      codexVisibility(
+        world.runStats.killsByKind[authoredStone.origin],
+        CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK,
+        world.loreOriginsUnlocked.has(authoredStone.origin),
+      ).nguonGoc &&
+      openedExpectedDialogue;
+    world.closeDialogue();
+  }
+  ok("collecting each stone increments one fragment and unlocks its Codex origin", collectedAll);
+  ok("the run fragment count never exceeds the number of ACTs",
+    world.fragmentsCollected === LORE_ACTS.length && world.fragmentsCollected <= LORE_ACTS.length);
+  world.restart();
+  ok("starting a fresh run clears Lore Stone progress",
+    world.fragmentsCollected === 0 && world.loreOriginsUnlocked.size === 0 &&
+      world.humanity === CONFIG.LAWS.HUMANITY_MAX);
+}
+
+heading("Humanity: bounded erosion, recovery and dialogue branches");
+{
+  const max = CONFIG.LAWS.HUMANITY_MAX;
+  ok("humanity thresholds, recovery steps and effect scales are valid",
+    Number.isInteger(max) && max > 0 &&
+      Number.isInteger(CONFIG.LAWS.HUMANITY_CURSE_LOSS) && CONFIG.LAWS.HUMANITY_CURSE_LOSS > 0 &&
+      Number.isInteger(CONFIG.LAWS.HUMANITY_BOSS_RECOVERY) && CONFIG.LAWS.HUMANITY_BOSS_RECOVERY > 0 &&
+      Number.isInteger(CONFIG.LAWS.HUMANITY_FRAGMENT_RECOVERY) && CONFIG.LAWS.HUMANITY_FRAGMENT_RECOVERY > 0 &&
+      CONFIG.LAWS.HUMANITY_LOW_THRESHOLD >= 0 && CONFIG.LAWS.HUMANITY_LOW_THRESHOLD < max &&
+      CONFIG.LAWS.HUMANITY_AUDIO_PITCH_SHIFT >= 0 && CONFIG.LAWS.HUMANITY_AUDIO_PITCH_SHIFT < 1 &&
+      Number.isInteger(CONFIG.LAWS.HUMANITY_PARTICLE_MIN) && CONFIG.LAWS.HUMANITY_PARTICLE_MIN > 0 &&
+      Number.isInteger(CONFIG.LAWS.HUMANITY_PARTICLE_MAX) &&
+      CONFIG.LAWS.HUMANITY_PARTICLE_MAX >= CONFIG.LAWS.HUMANITY_PARTICLE_MIN);
+  const cursed = new World(CONFIG.SEED);
+  const levels = [cursed.humanity];
+  for (const curse of CURSES.slice(0, 3)) {
+    cursed.curseOffer = { artifacts: [], curses: [curse] };
+    cursed.chooseCurse(curse.id);
+    levels.push(cursed.humanity);
+  }
+  ok("each accepted curse lowers humanity monotonically",
+    levels.length === 4 && levels.every((value, index) => index === 0 || value < levels[index - 1]!));
+  ok("humanity erosion and audio tone are graduated",
+    humanityErosion(max) === 0 && humanityErosion(0) === 1 &&
+      humanityAudioPitch(max, 1) === 1 &&
+      humanityAudioPitch(max / 2, 1) > humanityAudioPitch(0, 1));
+
+  const world = new World(CONFIG.SEED);
+  world.adjustHumanity(-20);
+  const regular = makeEnemy(160, 100, "chaser");
+  regular.hp = 1;
+  regular.onHit(jab(world, 99), regular.x, regular.y, world);
+  const afterRegularKill = world.humanity;
+  const boss = makeEnemy(160, 100, "golem");
+  boss.hp = 1;
+  boss.onHit(jab(world, 99), boss.x, boss.y, world);
+  ok("ordinary kills do not restore humanity; boss kills do",
+    afterRegularKill === max - 20 &&
+      world.humanity === Math.min(max, afterRegularKill + CONFIG.LAWS.HUMANITY_BOSS_RECOVERY));
+
+  world.adjustHumanity(-max);
+  const lowerBound = world.humanity;
+  world.adjustHumanity(-1);
+  const stayedAtLowerBound = world.humanity === 0;
+  world.adjustHumanity(max * 2);
+  const shifts = world.queue.drain().filter((queued) => queued.t === "humanityShift");
+  ok("humanity clamps to integer bounds and emits no invalid overflow",
+    lowerBound === 0 && stayedAtLowerBound && Number.isInteger(world.humanity) && world.humanity === max &&
+      shifts.every((shift) => Number.isInteger(shift.humanity) && shift.humanity >= 0 &&
+        shift.humanity <= max && Number.isInteger(shift.delta) && shift.delta !== 0));
+
+  const dialogueWorld = new World(CONFIG.SEED);
+  dialogueWorld.openDialogue(GUARD_DIALOGUE);
+  const normalOption = dialogueWorld.dialogue?.source.nodes.greet?.options[0]?.label;
+  dialogueWorld.closeDialogue();
+  dialogueWorld.adjustHumanity(CONFIG.LAWS.HUMANITY_LOW_THRESHOLD - max);
+  dialogueWorld.openDialogue(GUARD_DIALOGUE);
+  const lowOption = dialogueWorld.dialogue?.source.nodes.greet?.options[0]?.label;
+  ok("low humanity selects a different NPC dialogue node and choice",
+    normalOption === "Hỏi thêm" && lowOption === "Hỏi về tiếng gọi");
+
+  const event = dialogueWorld.queue.drain().find((queued) => queued.t === "humanityShift");
+  const rendererSource = readFileSync("src/render/renderer.ts", "utf8");
+  const mainSource = readFileSync("src/main.ts", "utf8");
+  ok("humanity changes travel through the visual event queue",
+    event?.t === "humanityShift" && event.humanity === CONFIG.LAWS.HUMANITY_LOW_THRESHOLD &&
+      rendererSource.includes('e.t === "humanityShift"') && rendererSource.includes("burstBubble"));
+  ok("audio pitch responds to humanity outside the simulation",
+    mainSource.includes("humanityAudioPitch(world.humanity, e.pitch)"));
 }
 
 heading("Hurt lockout: no input may throw the sim");

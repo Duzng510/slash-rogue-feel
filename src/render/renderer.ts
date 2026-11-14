@@ -1,10 +1,12 @@
 import { CONFIG, enemyDef } from "../config.ts";
 import type { VisualEvent } from "../events.ts";
+import { humanityErosion } from "../systems/humanity.ts";
 import { ENEMY_STATE, type Enemy } from "../entities/enemy.ts";
 import type { Npc } from "../entities/npc.ts";
 import { PLAYER_STATE } from "../entities/player.ts";
 import { angleLerp } from "../mathx.ts";
 import { TILE } from "../world/rooms.ts";
+import { HOUSES } from "../world/town.ts";
 import { fitAxes, isRotated } from "../ui/immersive.ts";
 import { buildAnimSets, facingOffsets, flipH, type Sprite, type SpriteSet } from "./pixelart.ts";
 import { playerRigPose, type RigPart, type RigTransform } from "./playerRig.ts";
@@ -22,6 +24,22 @@ const VIEW_W = CONFIG.WORLD.INTERNAL_W / PIXEL_SCALE;
 const VIEW_H = CONFIG.WORLD.INTERNAL_H / PIXEL_SCALE;
 
 const TINT_OPAQUE: readonly [number, number, number, number] = [1, 1, 1, 1];
+
+/** house footprints in room-tile coords (Room's border shifts the inner grid by one) */
+const TOWN_FOOTPRINTS = HOUSES.map((h) => ({
+  id: h.id,
+  tx0: h.x + 1,
+  ty0: h.y + 1,
+  tx1: h.x + h.w,
+  ty1: h.y + h.h,
+}));
+
+function townFootprintAt(tx: number, ty: number): (typeof TOWN_FOOTPRINTS)[number] | null {
+  for (const fp of TOWN_FOOTPRINTS) {
+    if (tx >= fp.tx0 && tx <= fp.tx1 && ty >= fp.ty0 && ty <= fp.ty1) return fp;
+  }
+  return null;
+}
 
 /** parse "#rrggbb" → normalized rgb tuple for the GPU tile-batch clear color */
 function rgbTuple(hex: string): [number, number, number] {
@@ -342,6 +360,11 @@ export class Renderer {
     this.tileOf[TILE.DOOR_OPEN] = sprites.door_open;
     this.tileOf[TILE.TRAP] = sprites.trap;
     this.tileOf[TILE.TRAP_ARMED] = sprites.trap_spent;
+    this.tileOf[TILE.GRASS] = sprites.grass;
+    this.tileOf[TILE.ROAD] = sprites.road;
+    this.tileOf[TILE.FLOOR_WOOD] = sprites.floor_wood;
+    this.tileOf[TILE.DOOR_TOWN] = sprites.door_wood;
+    this.tileOf[TILE.FENCE] = sprites.fence;
     for (const id of ["dungeon", "caverns", "forge", "void"] as const) {
       this.biomeTileOf[id] = {
         ...this.tileOf,
@@ -350,6 +373,8 @@ export class Renderer {
         [TILE.WALL]: sprites[`wall_${id}`] ?? sprites.wall,
       };
     }
+    /** the market keeps its own plaster walls; the town biome id has no dungeon tile art behind it */
+    this.biomeTileOf["town"] = { ...this.tileOf, [TILE.WALL]: sprites.wall_town };
 
     if (this.glMode) {
       // acquiring WebGL2 on `game` is only safe here: in 2D mode `game` holds a 2D context,
@@ -411,6 +436,15 @@ export class Renderer {
         this.bossCineX = e.x;
         this.bossCineY = e.y;
         this.cam.focus(e.x, e.y, 90);
+      }
+      else if (e.t === "humanityShift") {
+        const erosion = humanityErosion(e.humanity);
+        const count = Math.round(
+          CONFIG.LAWS.HUMANITY_PARTICLE_MIN +
+          erosion * (CONFIG.LAWS.HUMANITY_PARTICLE_MAX - CONFIG.LAWS.HUMANITY_PARTICLE_MIN),
+        );
+        const color = e.humanity <= CONFIG.LAWS.HUMANITY_LOW_THRESHOLD ? "#8f63ae" : "#8fe8ff";
+        this.world.particles.burstBubble(e.x, e.y - 8, count, color);
       }
       else if (e.t === "hitImpact") this.impactTicks = CONFIG.FEEL.IMPACT_TICKS;
     }
@@ -1249,6 +1283,14 @@ export class Renderer {
     this.drawWeather(g);
   }
 
+  /** furniture and NPCs inside a house stay under its roof until the player peels it by approaching */
+  private coveredByRoof(px: number, py: number): boolean {
+    if (this.world.room.kind !== "town") return false;
+    const T = CONFIG.WORLD.TILE;
+    const fp = townFootprintAt(Math.floor(px / T), Math.floor(py / T));
+    return fp !== null && fp.id !== (this.world.activeHouse?.id ?? null);
+  }
+
   private drawTiles(g: CanvasRenderingContext2D, ox: number, oy: number): void {
     const T = CONFIG.WORLD.TILE;
     const room = this.world.room;
@@ -1259,8 +1301,15 @@ export class Renderer {
     const biomeTiles = this.biomeTileOf[this.world.currentBiome.id] ?? this.tileOf;
     const gl = this.gl;
     const batching = gl !== null && gl.batchTiles;
+    const town = room.kind === "town";
+    const activeId = this.world.activeHouse?.id ?? null;
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
+        /** a roofed-over house draws nothing here: the roof quad below replaces the whole footprint */
+        if (town) {
+          const fp = townFootprintAt(tx, ty);
+          if (fp !== null && fp.id !== activeId) continue;
+        }
         const s = biomeTiles[room.at(tx, ty)] ?? biomeTiles[TILE.FLOOR] ?? this.tileOf[TILE.FLOOR];
         const lx = Math.round(tx * T - ox), ly = Math.round(ty * T - oy);
         if (batching && gl !== null) {
@@ -1269,6 +1318,24 @@ export class Renderer {
           this.tileBatchCount++;
         } else {
           g.drawImage(s.c, lx, ly, s.w, s.h);
+          this.drawImageCount++;
+        }
+      }
+    }
+
+    if (town) {
+      for (const fp of TOWN_FOOTPRINTS) {
+        if (fp.id === activeId) continue;
+        const s = this.sprites[`roof_${fp.id}`];
+        if (s === undefined) continue;
+        const rx = Math.round(fp.tx0 * T - ox), ry = Math.round(fp.ty0 * T - oy);
+        if (rx > VIEW_W || ry > VIEW_H || rx + s.w < 0 || ry + s.h < 0) continue;
+        if (batching && gl !== null) {
+          gl.batch.drawSprite(s.c, Math.round(rx * PIXEL_SCALE), Math.round(ry * PIXEL_SCALE),
+            Math.round(s.w * PIXEL_SCALE), Math.round(s.h * PIXEL_SCALE), TINT_OPAQUE);
+          this.tileBatchCount++;
+        } else {
+          g.drawImage(s.c, rx, ry, s.w, s.h);
           this.drawImageCount++;
         }
       }
@@ -1636,6 +1703,7 @@ export class Renderer {
     this.sortCount = 0;
     this.sortList.length = 0;
     for (const prop of this.world.townProps) {
+      if (this.coveredByRoof(prop.x, prop.y)) continue;
       const it = this.nextSortItem();
       it.y = prop.y;
       it.kind = SORT_KIND.prop;
@@ -1649,6 +1717,7 @@ export class Renderer {
       it.ref = en;
     }
     for (const npc of this.world.npcList) {
+      if (this.coveredByRoof(npc.x, npc.y)) continue;
       const it = this.nextSortItem();
       it.y = npc.y;
       it.kind = SORT_KIND.npc;

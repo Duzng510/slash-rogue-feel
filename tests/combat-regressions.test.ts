@@ -16,6 +16,7 @@ import { checkAchievements, emptyAchievements, parseAchievements, stringifyAchie
 import type { Achievements, AchievementId } from "../src/systems/unlocks.ts";
 import type { Intent } from "../src/sim/types.ts";
 import { dialogueOptionAt, roomChoiceAt } from "../src/ui/dialogueLayout.ts";
+import { buildInteriorProps, buildTownProps } from "../src/world/town.ts";
 
 function dialogueNodeId(world: World): string | null {
   return world.dialogue?.nodeId ?? null;
@@ -892,6 +893,7 @@ test("exploder detonates for 3 dmg within 50px, spares outsiders, and counts as 
   assert.ok(e.dead);
   assert.equal(w.player.hp, hp - 3);
   assert.equal(w.runStats.enemiesKilled, 1);
+  assert.equal(w.runStats.killsByKind.exploder, 1);
 
   const w2 = sandbox();
   const f = makeEnemy(w2.player.x + 90, w2.player.y, "exploder");
@@ -904,6 +906,7 @@ test("exploder detonates for 3 dmg within 50px, spares outsiders, and counts as 
   w2.syncUnits();
   f.tick(w2, w2.grid);
   assert.ok(f.dead);
+  assert.equal(w2.runStats.killsByKind.exploder, 1);
   assert.equal(w2.player.hp, CONFIG.PLAYER.HP);
 });
 
@@ -1011,19 +1014,23 @@ test("town NPCs target nearby interactions and lock character changes after a ki
   w.characterChoices = [];
   w.weaponChoices = null;
   const nearbyKind = () => w.nearbyNpc?.kind ?? null;
+  /** the town map is data, so the test walks to the NPC's own anchor instead of typed pixels */
+  const standAt = (kind: string, dx = 0, dy = 0) => {
+    const n = w.npcList.find((npc) => npc.kind === kind)!;
+    w.player.x = n.x + dx;
+    w.player.y = n.y + dy;
+  };
 
-  w.player.x = 136 + 25;
-  w.player.y = 76;
+  standAt("merchant", 25);
   w.tick({ ...idle, interact: true });
   assert.equal(nearbyKind(), null);
   assert.equal(w.shopOffers, null);
 
-  w.player.x = 136 + 24;
+  standAt("merchant", 24);
   w.tick(idle);
   assert.equal(nearbyKind(), "merchant");
 
-  w.player.x = 136;
-  w.player.y = 76;
+  standAt("merchant");
   w.tick({ ...idle, attack: true, interact: true });
   assert.equal(nearbyKind(), "merchant");
   assert.equal(dialogueNodeId(w), "greet");
@@ -1034,8 +1041,7 @@ test("town NPCs target nearby interactions and lock character changes after a ki
   assert.equal(w.dialogue, null);
   assert.equal(w.shopOffers, null);
 
-  w.player.x = 264;
-  w.player.y = 124;
+  standAt("guard");
   w.tick({ ...idle, interact: true });
   assert.equal(nearbyKind(), "guard");
   assert.equal(w.bannerText, "Hầm ngục ở phía đông — chúc may mắn.");
@@ -1043,8 +1049,7 @@ test("town NPCs target nearby interactions and lock character changes after a ki
   w.tick({ ...idle, interact: true });
   assert.equal(w.dialogue, null);
 
-  w.player.x = 40;
-  w.player.y = 60;
+  standAt("character_master");
   w.tick({ ...idle, interact: true });
   assert.equal(dialogueNodeId(w), "greet");
   assert.equal(w.characterChoices.length, 0);
@@ -1057,8 +1062,7 @@ test("town NPCs target nearby interactions and lock character changes after a ki
   w.runStats.enemiesKilled = 1;
   w.enterTown();
   w.characterChoices = [];
-  w.player.x = 40;
-  w.player.y = 60;
+  standAt("character_master");
   w.tick({ ...idle, interact: true });
   assert.equal(w.characterChoices.length, 0);
   assert.equal(w.bannerText, "Đã vào hầm ngục, không thể đổi nữa.");
@@ -1070,14 +1074,7 @@ test("town NPCs target nearby interactions and lock character changes after a ki
 
 test("town props are scoped to town and dialogue text must finish before an option runs", () => {
   const w = new World(CONFIG.SEED, allUnlocks());
-  assert.deepEqual(w.townProps.map((prop) => prop.sprite), [
-    "prop_well",
-    "prop_tree",
-    "prop_tree",
-    "prop_signpost",
-    "prop_lantern",
-    "prop_lantern",
-  ]);
+  assert.deepEqual(w.townProps.map((prop) => prop.sprite), [...buildTownProps(), ...buildInteriorProps()].map((prop) => prop.sprite));
   w.enterDungeon(false);
   assert.deepEqual(w.townProps, []);
   w.enterTown();

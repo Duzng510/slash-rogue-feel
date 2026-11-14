@@ -21,12 +21,16 @@ export type Harness = {
   pressSkill: () => void;
   pickCharacter: (id: CharacterId) => boolean;
   setMove: (x: number, y: number) => void;
+  /** jump the player to a walkable spot: the town is too big to cross on foot frame by frame */
+  placePlayer: (x: number, y: number) => void;
   setAim: (x: number, y: number) => void;
   addEnemies: (n: number, kinds?: EnemyKind[], elite?: boolean) => void;
   clearEnemies: () => void;
   damageEnemy: (id: number, dmg: number) => boolean;
   applyStatus: (id: number, status: "burn" | "wet" | "shock" | "poison" | "freeze" | "bleed") => boolean;
   gotoRoom: (i: number) => void;
+  /** town scene for the capture harnesses: loadTown is private and gotoRoom wraps modulo */
+  enterTown: () => void;
   chooseArtifact: (id: ArtifactId) => boolean;
   chooseWeapon: (id: WeaponId) => boolean;
   buyShop: (i: number) => boolean;
@@ -105,6 +109,11 @@ export function installHarness(deps: HarnessDeps): void {
     setAim: (x, y) => {
       intent.aim = { x, y };
     },
+    placePlayer: (x, y) => {
+      world.player.x = x;
+      world.player.y = y;
+      world.activeHouse = null;
+    },
     addEnemies: (n, kinds, elite) => world.addEnemies(n, kinds, elite),
     clearEnemies: () => world.clearEnemies(),
     damageEnemy: (id, dmg) => {
@@ -136,6 +145,7 @@ export function installHarness(deps: HarnessDeps): void {
       return true;
     },
     gotoRoom: (i) => { world.characterChoices = []; world.weaponChoices = null; world.loadRoom(i); syncArtifactModal(); },
+    enterTown: () => { world.characterChoices = []; world.weaponChoices = null; world.enterTown(); syncArtifactModal(); },
     chooseArtifact,
     chooseWeapon: (id: WeaponId) => {
       const picked = world.pickWeapon(id);
@@ -168,6 +178,7 @@ export function installHarness(deps: HarnessDeps): void {
         invuln: !world.player.canBeHit(),
       },
       roomIndex: world.roomIndex,
+      activeHouse: world.activeHouse?.id ?? null,
       character: world.player.character,
       weapon: world.player.weapon,
       characterChoices: [...world.characterChoices],

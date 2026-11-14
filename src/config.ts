@@ -62,6 +62,21 @@ const PALETTE = {
   SLASH_ORANGE_DEEP: "#ff5522",
   HP_FULL: "#4da3ff",
   HP_EMPTY: "#232838",
+  /** town: golden-noon market — warm cobbles, plaster walls, terracotta roofs that peel off */
+  GRASS_A: "#2f5d33",
+  GRASS_B: "#3d7a41",
+  GRASS_HI: "#6fae5f",
+  ROAD_A: "#6b5a3e",
+  ROAD_B: "#8a7550",
+  ROAD_HI: "#b39a6b",
+  WALL_TOWN: "#8c7a5e",
+  WALL_TOWN_TOP: "#c9b28a",
+  ROOF_A: "#7a3b2e",
+  ROOF_B: "#9c4f38",
+  ROOF_HI: "#d17a52",
+  FLOOR_WOOD: "#5a3d28",
+  DOOR_WOOD: "#7a5230",
+  FENCE_WOOD: "#4a3524",
   TARGET_RIM: "#d8f0ff",
   TEXT: "#d7dbe4",
   DBG_HITBOX: "#ff5fb0",
@@ -482,6 +497,10 @@ export const CONFIG = {
     CHARS_PER_SECOND: 40,
   },
 
+  LORE_STONE: {
+    INTERACT_RADIUS: 24,
+  },
+
   WORLD: {
     TILE: 16,
     INTERNAL_W: 480,
@@ -728,7 +747,7 @@ export const CONFIG = {
   },
 
   LAWS: {
-    /** test-harness limits and authored-balance assertions; runtime systems do not read these. */
+    /** test-harness limits and authored-balance assertions; Codex progression thresholds are also used by the HUD. */
     MIN_TELEGRAPH_S: 0.3,
     MAX_CHARGER_ARC_DEG: 60,
     /** ceilings asserted by the fuzz + determinism invariants; MAX_ENEMIES sits above the biggest authored wave */
@@ -740,6 +759,17 @@ export const CONFIG = {
     SKIP_EMPTY_OVERLAY: true,
     /** headroom cap: per-frame tile quads pushed into the GPU batch must stay under this (screen is ~2100 cells) */
     MAX_TILE_BATCH: 4000,
+    /** how far a pose may be nudged and still count as "the same drawing" in the keyframe law */
+    POSE_SHIFT_PROOF_RANGE: 3,
+    CODEX_KILLS_TO_UNLOCK: 3,
+    HUMANITY_MAX: 100,
+    HUMANITY_CURSE_LOSS: 20,
+    HUMANITY_BOSS_RECOVERY: 8,
+    HUMANITY_FRAGMENT_RECOVERY: 4,
+    HUMANITY_LOW_THRESHOLD: 35,
+    HUMANITY_AUDIO_PITCH_SHIFT: 0.18,
+    HUMANITY_PARTICLE_MIN: 2,
+    HUMANITY_PARTICLE_MAX: 8,
   },
 
   PALETTE,

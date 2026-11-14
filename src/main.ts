@@ -22,6 +22,7 @@ import type { CharacterId } from "./systems/characters.ts";
 import type { WeaponId } from "./systems/weapons.ts";
 import type { EndAction } from "./systems/runStats.ts";
 import { parseAchievements, stringifyAchievements, emptyAchievements } from "./systems/unlocks.ts";
+import { humanityAudioPitch } from "./systems/humanity.ts";
 import type { Achievements } from "./systems/unlocks.ts";
 import { initChangelog } from "./ui/changelogModal.ts";
 import { installHarness } from "./harness.ts";
@@ -86,7 +87,7 @@ const flags: DebugFlags = {
 };
 
 function applyHotkey(k: Hotkey): void {
-  if (world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || world.roomChoices !== null || world.dialogue !== null) return;
+  if (hud.isCodexOpen || world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || world.roomChoices !== null || world.dialogue !== null) return;
   switch (k) {
     case "panel":
       panel.classList.toggle("on");
@@ -123,7 +124,7 @@ function applyHotkey(k: Hotkey): void {
 
 const desk = new DesktopInput(intent, {
   tick: () => world.tickCount,
-  blocked: () => world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || world.roomChoices !== null || world.dialogue !== null || endScreen.isOpen(),
+  blocked: () => hud.isCodexOpen || world.artifactChoices.length > 0 || world.characterChoices.length > 0 || world.weaponChoices !== null || world.roomChoices !== null || world.dialogue?.blocking === true || endScreen.isOpen(),
   onHotkey: applyHotkey,
   aimFromClient: (x, y) => renderer.aimFromClient(x, y),
 });
@@ -156,7 +157,7 @@ function resetInput(): void {
   touch?.reset();
 }
 /** the start screen sits above the canvas, so its clicks must not be swallowed by the modal blocker */
-const modalActive = (): boolean => startScreen.hidden && (world.characterChoices.length > 0 || world.weaponChoices !== null || world.artifactChoices.length > 0 || world.shopOffers !== null || world.roomChoices !== null || world.dialogue !== null);
+const modalActive = (): boolean => startScreen.hidden && (hud.isCodexOpen || world.characterChoices.length > 0 || world.weaponChoices !== null || world.artifactChoices.length > 0 || world.shopOffers !== null || world.roomChoices !== null || world.dialogue?.blocking === true);
 function syncArtifactModal(): boolean {
   const open = modalActive();
   if (open !== modalOpen) {
@@ -191,6 +192,15 @@ function hitTestFromClient(clickables: readonly Clickable[], x: number, y: numbe
   return null;
 }
 function applyModal(key: string, from: ModalKind): void {
+  if (from === "x") {
+    if (key === "x:open") hud.openCodex();
+    else if (key === "x:close") hud.closeCodex();
+    else if (key === "x:prev") hud.stepCodex(-1);
+    else if (key === "x:next") hud.stepCodex(1);
+    else if (key.startsWith("x:select:")) hud.selectCodex(Number(key.slice("x:select:".length)));
+    syncArtifactModal();
+    return;
+  }
   if (from === "q") {
     if (key === "q:-") world.setAscensionLevel(world.ascensionLevel - 1);
     else if (key === "q:+") world.setAscensionLevel(world.ascensionLevel + 1);
@@ -258,7 +268,8 @@ const modalClickables: readonly Clickable[] = [weaponSelect, hud];
 let suppressModalClick = false;
 window.addEventListener("pointerdown", (e) => {
   const end = endScreen.isOpen();
-  suppressModalClick = end || modalActive();
+  const pointerKey = e.button === 0 ? hitTestFromClient(modalClickables, e.clientX, e.clientY) : null;
+  suppressModalClick = end || modalActive() || pointerKey === "x:open";
   if (!suppressModalClick) return;
   e.preventDefault();
   e.stopImmediatePropagation();
@@ -268,7 +279,7 @@ window.addEventListener("pointerdown", (e) => {
     return;
   }
   syncArtifactModal();
-  modalPointers.set(e.pointerId, e.button === 0 ? modalKind(hitTestFromClient(modalClickables, e.clientX, e.clientY)) : null);
+  modalPointers.set(e.pointerId, modalKind(pointerKey));
 }, { capture: true });
 for (const type of ["pointerup", "pointercancel"] as const) {
   window.addEventListener(type, (e) => {
@@ -300,6 +311,20 @@ for (const type of ["pointerup", "pointercancel"] as const) {
 }
 // Keyboard selection shortcuts for character screen [1]-[3] and weapon screen [1]-[5]
 window.addEventListener("keydown", (e) => {
+  if (hud.isCodexOpen) {
+    if (e.code === "Escape" || e.code === "KeyC") hud.closeCodex();
+    else if (e.code === "ArrowLeft") hud.stepCodex(-1);
+    else if (e.code === "ArrowRight") hud.stepCodex(1);
+    else return;
+    e.preventDefault();
+    syncArtifactModal();
+    return;
+  }
+  if (e.code === "KeyC" && startScreen.hidden && !modalActive() && hud.openCodex()) {
+    e.preventDefault();
+    syncArtifactModal();
+    return;
+  }
   if (e.code === "Escape" && world.dialogue !== null) {
     e.preventDefault();
     world.closeDialogueByUser();
@@ -471,7 +496,7 @@ function frame(dtReal: number): void {
   renderer.consume(events);
   let earned = false;
   for (const e of events) {
-    if (e.t === "sfx") sfx.play(e.name, e.gain, e.pitch);
+    if (e.t === "sfx") sfx.play(e.name, e.gain, humanityAudioPitch(world.humanity, e.pitch));
     else if (e.t === "achievement") {
       hud.pushAchievement(e.id);
       earned = true;

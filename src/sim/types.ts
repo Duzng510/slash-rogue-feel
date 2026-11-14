@@ -7,7 +7,9 @@ import type { ParticlePool } from "../systems/particles.ts";
 import type { Enemy } from "../entities/enemy.ts";
 import type { Player } from "../entities/player.ts";
 import type { Room } from "../world/rooms.ts";
+import type { House } from "../world/town.ts";
 import type { EnemyKind, FrameData } from "../config.ts";
+import type { LoreAct } from "../data/loreStones.ts";
 
 export type Side = "player" | "enemy";
 
@@ -124,11 +126,18 @@ export type Sim = {
   particles: ParticlePool;
   rng: Rng;
   hitStopTicks: number;
+  humanity: number;
+  fragmentsCollected: number;
+  loreActsCollected: Set<LoreAct>;
+  loreOriginsUnlocked: Set<EnemyKind>;
+  adjustHumanity(delta: number): void;
   nextSwingId(): number;
   spawnEnemy(x: number, y: number, kind?: EnemyKind, elite?: boolean): void;
   loadRoom(index: number, respawnAtDoor: boolean): void;
   roomIndex: number;
   roomTotal: number;
+  /** the house whose roof is peeled this tick (town only); the renderer reads it, the sim owns it */
+  activeHouse: House | null;
   bannerTicks: number;
   bannerText: string;
   introLine: string;

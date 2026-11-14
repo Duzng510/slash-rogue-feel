@@ -1,0 +1,21 @@
+{
+  "source": "src/render/pixelart.ts (buildSprites + buildAnimSets)",
+  "pixelScale": 1.5,
+  "note": "x/y/w/h are pixels inside the PNG; lw/lh are the logical art size before bake scaled by pixelScale; ax/ay are anchor offsets in lw/lh units.",
+  "groups": {
+    "static": {
+      "entries": 116,
+      "size": {
+        "w": 2046,
+        "h": 1388
+      }
+    },
+    "anims": {
+      "entries": 450,
+      "size": {
+        "w": 2044,
+        "h": 144
+      }
+    }
+  }
+}

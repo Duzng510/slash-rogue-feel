@@ -1,5 +1,5 @@
 import { CONFIG, isScripted, type EnemyKind } from "../config.ts";
-import { dist, makeRng, shuffle } from "../mathx.ts";
+import { clamp, dist, makeRng, shuffle } from "../mathx.ts";
 import { EventQueue, sfx } from "../events.ts";
 import { ParticlePool } from "../systems/particles.ts";
 import { resolveHits, resolveFire, hitFeedback, instantSwing } from "../systems/combat.ts";
@@ -20,13 +20,17 @@ import { WEAPON_LIST, type WeaponId } from "../systems/weapons.ts";
 import { Enemy, makeEnemy, resetEnemyIds } from "../entities/enemy.ts";
 import { Npc } from "../entities/npc.ts";
 import { Room, TOWN_TEMPLATE, TEMPLATES, TILE } from "../world/rooms.ts";
+import { HOUSES, buildInteriorProps, buildTownProps, houseAt, npcAnchor, type House } from "./town.ts";
 import { SpatialGrid } from "./grid.ts";
 import { selectWaveSpawns } from "./spawning.ts";
 import { progressWorld } from "./progress.ts";
 import { applyAscension, normalizeAscensionLevel, type AscensionLevel } from "../systems/ascension.ts";
 import { BIOMES, biomeForRoom, type Biome } from "../systems/biomes.ts";
+import { loreStoneForRoom, type LoreAct, type LoreStone } from "../data/loreStones.ts";
 import {
   type ActiveDialogue,
+  ARTIFACT_LORE_DIALOGUES,
+  BIOME_INTROS,
   GATE_DIALOGUE,
   GUARD_DIALOGUE,
   MASTER_DIALOGUE,
@@ -73,6 +77,9 @@ export class World implements Sim {
   npcList: Npc[] = [];
   townProps: TownProp[] = [];
   nearbyNpc: Npc | null = null;
+  activeLoreStone: (LoreStone & { x: number; y: number }) | null = null;
+  nearbyLoreStone: (LoreStone & { x: number; y: number }) | null = null;
+  activeHouse: House | null = null;
   room!: Room;
   /** Seeded sim stream: combat rolls, wave/spawn choices, and ordinary particle bursts. */
   rng = makeRng(CONFIG.SEED);
@@ -98,10 +105,20 @@ export class World implements Sim {
   runStats: RunStats = emptyStats();
   pendingEnd: EndMode | null = null;
   achievements: Achievements = emptyAchievements();
+  private humanityValue = CONFIG.LAWS.HUMANITY_MAX;
+  get humanity(): number {
+    return this.humanityValue;
+  }
   /** achievements first earned during the current run; shown on the end screen */
   runAchievements: AchievementId[] = [];
 
   readonly artifacts = new Set<ArtifactId>();
+  readonly loreActsCollected = new Set<LoreAct>();
+  readonly loreOriginsUnlocked = new Set<EnemyKind>();
+  get fragmentsCollected(): number {
+    return this.loreActsCollected.size;
+  }
+
   artifactChoices: Artifact[] = [];
   /** open build choice while non-empty; the composition root owns the modal */
   characterChoices: CharacterId[] = [];
@@ -193,6 +210,22 @@ export class World implements Sim {
     return this.swingSeq++;
   }
 
+  adjustHumanity(delta: number): void {
+    if (!Number.isInteger(delta)) throw new RangeError("humanity delta must be an integer");
+    const previous = this.humanityValue;
+    const next = clamp(this.humanityValue + delta, 0, CONFIG.LAWS.HUMANITY_MAX);
+    if (next === previous) return;
+    this.humanityValue = next;
+    this.queue.push({
+      t: "humanityShift",
+      x: this.player.x,
+      y: this.player.y,
+      humanity: next,
+      delta: next - previous,
+    });
+    sfx(this.queue, "teleport", 0.45, next < previous ? 0.75 : 1.15);
+  }
+
   hitUnit(target: Unit, carrier: DamageCarrier, cx: number, cy: number): boolean {
     return target.onHit(carrier, cx, cy, this);
   }
@@ -207,6 +240,8 @@ export class World implements Sim {
     this.npcList = [];
     this.townProps = [];
     this.nearbyNpc = null;
+    this.nearbyLoreStone = null;
+    this.activeHouse = null;
     // iris-wipe transition centred on where the player stood at the door
     this.queue.push({ t: "roomTransition", x: this.player.x, y: this.player.y });
     const previousBiome = this.currentBiome.id;
@@ -214,6 +249,14 @@ export class World implements Sim {
     this.currentBiome = biomeForRoom(this.roomIndex);
     const biomeChanged = previousBiome !== this.currentBiome.id;
     this.room = new Room(TEMPLATES[this.roomIndex], this.roomIndex);
+    const loreStone = loreStoneForRoom(this.roomIndex);
+    this.activeLoreStone = loreStone !== null && !this.loreActsCollected.has(loreStone.act)
+      ? {
+          ...loreStone,
+          x: (loreStone.tileX + 1.5) * CONFIG.WORLD.TILE,
+          y: (loreStone.tileY + 1.75) * CONFIG.WORLD.TILE,
+        }
+      : null;
     resetEnemyIds();
     this.enemies = [];
     this.decals = [];
@@ -243,6 +286,7 @@ export class World implements Sim {
     this.banner(this.room.kind === "elite" ? "TINH ANH" :
       biomeChanged ? `VÀO ${this.currentBiome.name.toLocaleUpperCase("vi-VN")}` : `${this.roomIndex + 1}/${this.roomTotal}  ${this.room.name}`,
     biomeChanged && this.room.kind !== "elite" ? 60 : 96);
+    if (biomeChanged) this.openDialogue(BIOME_INTROS[this.currentBiome.id], false);
   }
 
   banner(text: string, duration = 96): void {
@@ -263,6 +307,11 @@ export class World implements Sim {
   /** zero per-run stats and achievement-delta bookkeeping, keeping object identities alive */
   private resetRun(): void {
     resetStats(this.runStats);
+    this.humanityValue = CONFIG.LAWS.HUMANITY_MAX;
+    this.loreActsCollected.clear();
+    this.loreOriginsUnlocked.clear();
+    this.activeLoreStone = null;
+    this.nearbyLoreStone = null;
     // a fresh run starts its periodic phases (heartbeat/bot cadence) from zero, not wherever the last run ended
     this.tickCount = 0;
     this.runAchievements = [];
@@ -336,20 +385,14 @@ export class World implements Sim {
     this.townBellCd = 240;
     this.syncUnits();
     this.player.reset(this.room.start.x, this.room.start.y);
-    this.npcList = [
-      new Npc(40, 60, "character_master"),
-      new Npc(136, 76, "merchant"),
-      new Npc(264, 124, "guard"),
-    ];
-    this.townProps = [
-      { x: 120, y: 92, sprite: "prop_well" },
-      { x: 60, y: 140, sprite: "prop_tree" },
-      { x: 240, y: 60, sprite: "prop_tree" },
-      { x: 344, y: 108, sprite: "prop_signpost" },
-      { x: 24, y: 56, sprite: "prop_lantern" },
-      { x: 296, y: 56, sprite: "prop_lantern" },
-    ];
+    this.npcList = HOUSES.flatMap((h) => {
+      const at = npcAnchor(h);
+      return at === null ? [] : [new Npc(at.x, at.y, at.kind)];
+    });
+    this.townProps = [...buildTownProps(), ...buildInteriorProps()].map((p) => ({ x: p.x, y: p.y, sprite: p.sprite }));
     this.nearbyNpc = null;
+    this.activeLoreStone = null;
+    this.nearbyLoreStone = null;
     this.victory = false;
     this.banner("Thị trấn", 96);
   }
@@ -384,6 +427,7 @@ export class World implements Sim {
     this.room.openDoors();
     sfx(this.queue, "door");
     this.banner(`${ARTIFACTS.find(b => b.id === id)!.name} — cửa mở`);
+    this.showArtifactLore(id);
     return true;
   }
 
@@ -452,8 +496,16 @@ export class World implements Sim {
     return true;
   }
 
-  openDialogue(source: Dialogue): void {
-    this.dialogue = { source, nodeId: source.start, charIndex: 0 };
+  openDialogue(source: Dialogue, blocking = true): void {
+    const dialogue = this.humanity <= CONFIG.LAWS.HUMANITY_LOW_THRESHOLD && source.lowHumanity !== undefined
+      ? source.lowHumanity
+      : source;
+    this.dialogue = { source: dialogue, nodeId: dialogue.start, charIndex: 0, blocking };
+  }
+
+  private showArtifactLore(id: ArtifactId): void {
+    const dialogue = ARTIFACT_LORE_DIALOGUES[id];
+    if (dialogue !== undefined) this.openDialogue(dialogue, false);
   }
 
   dialogueFullyShown(): boolean {
@@ -552,6 +604,7 @@ export class World implements Sim {
     this.artifacts.add(artifact.id);
     if (artifact.id === "glasscannon") this.applyGlasscannon();
     this.runStats.artifactsTaken++;
+    this.showArtifactLore(artifact.id);
   }
 
   /** buy one shop offer; rejects when the offer is gone or gold is short */
@@ -627,6 +680,7 @@ export class World implements Sim {
     if (offer === null || !offer.curses.some(c => c.id === id)) return false;
     this.curses.add(id);
     this.runStats.cursesTaken++;
+    this.adjustHumanity(-CONFIG.LAWS.HUMANITY_CURSE_LOSS);
     if (id === "frail") {
       this.player.maxHp = Math.max(1, this.player.maxHp - CONFIG.CURSES.FRAIL_HP);
       this.player.hp = Math.min(this.player.hp, this.player.maxHp);
@@ -692,7 +746,11 @@ export class World implements Sim {
       if (node) {
         this.dialogue.charIndex = Math.min(node.text.length, this.dialogue.charIndex + CONFIG.DIALOGUE.CHARS_PER_SECOND * CONFIG.TIME.TICK);
       }
-      if (!input.interact) return;
+      if (this.dialogue.blocking) {
+        if (!input.interact) return;
+      } else if (input.interact) {
+        this.closeDialogue();
+      }
     }
 
     if (this.mode === "dungeon" && this.bossIntroPending) {
@@ -724,6 +782,7 @@ export class World implements Sim {
 
   private tickTown(input: Intent): void {
     this.player.tick({ ...input, attack: false, skill: false }, this);
+    this.activeHouse = houseAt(this.player.x, this.player.y);
 
     const radius = CONFIG.TOWN.NPC_INTERACT_RADIUS;
     let nearest: Npc | null = null;
@@ -799,6 +858,12 @@ export class World implements Sim {
       walkingIn ? { moveX: this.introDx, moveY: this.introDy, aimX: NaN, aimY: NaN, attack: false, dash: false, skill: false, interact: false } : input,
       this,
     );
+    const stone = this.activeLoreStone;
+    this.nearbyLoreStone = !intro && this.room.doorOpen && stone !== null &&
+      dist(this.player.x, this.player.y, stone.x, stone.y) <= CONFIG.LORE_STONE.INTERACT_RADIUS
+      ? stone
+      : null;
+    if (this.nearbyLoreStone !== null && input.interact) this.collectLoreStone(this.nearbyLoreStone);
     if (intro && !walkingIn) {
       this.introTicks = 0;
       this.player.reset(this.room.start.x, this.room.start.y);
@@ -818,6 +883,17 @@ export class World implements Sim {
     this.resolveTraps();
     progressWorld(this);
     this.detectAchievements();
+  }
+
+  private collectLoreStone(stone: LoreStone & { x: number; y: number }): void {
+    if (this.loreActsCollected.has(stone.act)) return;
+    this.loreActsCollected.add(stone.act);
+    this.loreOriginsUnlocked.add(stone.origin);
+    this.adjustHumanity(CONFIG.LAWS.HUMANITY_FRAGMENT_RECOVERY);
+    this.activeLoreStone = null;
+    this.nearbyLoreStone = null;
+    this.openDialogue(stone.dialogue);
+    this.banner(`MẢNH KÝ ỨC ACT ${stone.act}`);
   }
 
   /** spikes hurt both sides once, then stay spent; i-frames and dash still dodge them */

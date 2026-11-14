@@ -236,7 +236,11 @@ export class Enemy implements Unit {
       this.die();
       this.split(src);
       src.runStats.enemiesKilled++;
+      src.runStats.killsByKind[this.kind]++;
       src.runStats.killStreak++;
+      if (this.kind === "boss" || this.kind === "warden" || this.kind === "golem" || this.kind === "king") {
+        src.adjustHumanity(CONFIG.LAWS.HUMANITY_BOSS_RECOVERY);
+      }
       const baseBounty = this.isElite
         ? src.room.kind === "elite" ? 6 : 3
         : this.kind === "boss" ? 20 : 1;
@@ -610,6 +614,7 @@ export class Enemy implements Unit {
       sfx(src.queue, "aftershock_boom", 1, 1.1);
       this.die();
       src.runStats.enemiesKilled++;
+      src.runStats.killsByKind[this.kind]++;
       return;
     }
     if (this.kind === "warden") {

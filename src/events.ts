@@ -35,6 +35,7 @@ export type VisualEvent =
   | { t: "beam"; x: number; y: number; dir: number; len: number }
   | { t: "kingPhase"; phase: 1 | 2 | 3 }
   | { t: "bossIntro"; name: string; x: number; y: number }
+  | { t: "humanityShift"; x: number; y: number; humanity: number; delta: number }
   | { t: "achievement"; id: AchievementId }
   | { t: "hitImpact" };
 

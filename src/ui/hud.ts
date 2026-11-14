@@ -1,4 +1,5 @@
-import { CONFIG } from "../config.ts";
+import { CONFIG, ENEMY_KINDS } from "../config.ts";
+import { CODEX_ENTRIES, codexVisibility } from "../data/codex.ts";
 import type { World } from "../world/world.ts";
 import type { Sprite } from "../render/pixelart.ts";
 import { ARTIFACT_COLORS, unlockArtifactFor } from "../systems/artifacts.ts";
@@ -16,11 +17,37 @@ const P = CONFIG.PALETTE;
 export class Hud implements Clickable {
   private toastText = "";
   private toastUntil = 0;
+  private codexOpen = false;
+  private codexIndex = 0;
 
   constructor(
     private readonly world: World,
     private readonly sprites: Record<string, Sprite>
   ) {}
+
+  get isCodexOpen(): boolean {
+    return this.codexOpen;
+  }
+
+  openCodex(): boolean {
+    if (this.codexOpen || !this.canOpenCodex()) return false;
+    this.codexOpen = true;
+    return true;
+  }
+
+  closeCodex(): void {
+    this.codexOpen = false;
+  }
+
+  stepCodex(delta: number): void {
+    this.codexIndex = (this.codexIndex + delta + ENEMY_KINDS.length) % ENEMY_KINDS.length;
+  }
+
+  selectCodex(index: number): boolean {
+    if (!Number.isInteger(index) || index < 0 || index >= ENEMY_KINDS.length) return false;
+    this.codexIndex = index;
+    return true;
+  }
 
   /** queue the top-right unlock/achievement toast for ~2s with a fade-out tail */
   pushAchievement(id: AchievementId): void {
@@ -51,8 +78,7 @@ export class Hud implements Clickable {
   }
 
   drawInteractPrompt(o: CanvasRenderingContext2D, scale: number, origin: { x: number; y: number }): void {
-    const npc = this.world.nearbyNpc;
-    if (npc === null || this.world.mode !== "town" || this.world.dialogue !== null) return;
+    if (this.codexOpen || this.world.dialogue !== null) return;
     if (
       this.world.characterChoices.length > 0 ||
       this.world.weaponChoices !== null ||
@@ -61,21 +87,53 @@ export class Hud implements Clickable {
       this.world.roomChoices !== null
     ) return;
 
-    const wx = Math.round(npc.x - origin.x);
-    const wy = Math.round(npc.y - npc.bodyH - 14 - origin.y);
+    const stone = this.world.activeLoreStone;
+    const nearbyStone = this.world.mode === "dungeon" ? this.world.nearbyLoreStone : null;
+    const npc = this.world.mode === "town" ? this.world.nearbyNpc : null;
+    if (stone !== null && this.world.mode === "dungeon") {
+      const sx = Math.round(stone.x - origin.x);
+      const sy = Math.round(stone.y - 5 - origin.y);
+      o.save();
+      o.scale(scale, scale);
+      o.fillStyle = "#6b4c9a";
+      o.fillRect(sx - 3, sy - 3, 6, 6);
+      o.fillStyle = "#d6b7ff";
+      o.fillRect(sx - 1, sy - 2, 2, 4);
+      o.fillStyle = "#fff1bd";
+      o.fillRect(sx, sy - 1, 1, 2);
+      o.restore();
+    }
+    if (nearbyStone === null && npc === null) return;
+
+    let wx: number;
+    let wy: number;
+    let text: string;
+    let promptColor: string;
+    if (nearbyStone !== null) {
+      wx = Math.round(nearbyStone.x - origin.x);
+      wy = Math.round(nearbyStone.y - 16 - origin.y);
+      text = "[F] MẢNH KÝ ỨC";
+      promptColor = "#d6b7ff";
+    } else if (npc !== null) {
+      wx = Math.round(npc.x - origin.x);
+      wy = Math.round(npc.y - npc.bodyH - 14 - origin.y);
+      text = npc.prompt;
+      promptColor = "#7fd1ff";
+    } else {
+      return;
+    }
 
     o.save();
     o.scale(scale, scale);
     o.font = "bold 6px ui-monospace, monospace";
     o.textAlign = "center";
     o.textBaseline = "middle";
-    const text = npc.prompt;
     const tw = o.measureText(text).width;
     const bgW = Math.ceil(tw) + 8;
     const bgH = 10;
     o.fillStyle = "rgba(5, 7, 11, 0.9)";
     o.fillRect(wx - bgW / 2, wy - bgH / 2, bgW, bgH);
-    o.strokeStyle = "#7fd1ff";
+    o.strokeStyle = promptColor;
     o.lineWidth = 1;
     o.strokeRect(wx - bgW / 2 + 0.5, wy - bgH / 2 + 0.5, bgW - 1, bgH - 1);
     o.fillStyle = "#d8f0ff";
@@ -86,7 +144,132 @@ export class Hud implements Clickable {
   }
 
   hitTest(x: number, y: number): ModalKey | null {
+    if (this.codexOpen) {
+      if (x >= 286 && y >= 4 && y <= 20) return "x:close";
+      if (y >= 32 && y < 152 && x >= 8 && x <= 107) {
+        return `x:select:${Math.floor((y - 32) / 8)}`;
+      }
+      if (x >= 112 && x <= 158 && y >= 160 && y <= 176) return "x:prev";
+      if (x >= 162 && x <= 208 && y >= 160 && y <= 176) return "x:next";
+      if (x >= 238 && x <= 312 && y >= 160 && y <= 176) return "x:close";
+      return null;
+    }
+    if (this.canOpenCodex() && this.world.mode === "town" &&
+      x >= 246 && x <= 312 && y >= 28 && y <= 43) return "x:open";
     return hitTestHudModal(this.world, x, y);
+  }
+
+  private canOpenCodex(): boolean {
+    const w = this.world;
+    return w.pendingEnd === null && w.characterChoices.length === 0 && w.weaponChoices === null &&
+      w.artifactChoices.length === 0 && w.shopOffers === null && w.roomChoices === null && w.dialogue === null;
+  }
+
+  private drawCodexButton(o: CanvasRenderingContext2D, scale: number): void {
+    o.save();
+    o.scale(scale, scale);
+    o.fillStyle = "rgba(8, 9, 13, 0.82)";
+    o.fillRect(246, 28, 66, 15);
+    o.strokeStyle = "#7fd1ff";
+    o.strokeRect(246.5, 28.5, 65, 14);
+    o.fillStyle = "#d8f0ff";
+    o.font = "bold 6px ui-monospace, monospace";
+    o.textAlign = "center";
+    o.textBaseline = "top";
+    o.fillText("[C] HỒ SƠ", 279, 32);
+    o.restore();
+  }
+
+  private drawCodex(o: CanvasRenderingContext2D, scale: number): void {
+    const kind = ENEMY_KINDS[this.codexIndex]!;
+    const entry = CODEX_ENTRIES[kind];
+    const kills = this.world.runStats.killsByKind[kind];
+    const visibility = codexVisibility(
+      kills,
+      CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK,
+      this.world.loreOriginsUnlocked.has(kind),
+    );
+    const unlocked = ENEMY_KINDS.filter((id) =>
+      codexVisibility(this.world.runStats.killsByKind[id], CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK, false).sinhHoc
+    ).length;
+
+    o.save();
+    o.scale(scale, scale);
+    o.fillStyle = "rgba(6, 9, 15, 0.97)";
+    o.fillRect(0, 0, 320, 180);
+    o.fillStyle = "#111a28";
+    o.fillRect(7, 27, 101, 128);
+    o.fillRect(114, 27, 199, 128);
+    o.strokeStyle = "#54708f";
+    o.strokeRect(7.5, 27.5, 100, 127);
+    o.strokeRect(114.5, 27.5, 198, 127);
+    o.textBaseline = "top";
+    o.textAlign = "left";
+    o.fillStyle = "#e4ebf7";
+    o.font = "bold 10px sans-serif";
+    o.fillText("HỒ SƠ CÕI HOANG", 10, 7);
+    o.fillStyle = "#9db0cc";
+    o.font = "7px sans-serif";
+    o.fillText(`Đã nhận diện ${unlocked}/${ENEMY_KINDS.length}`, 190, 11);
+
+    ENEMY_KINDS.forEach((id, index) => {
+      const count = this.world.runStats.killsByKind[id];
+      const discovered = codexVisibility(
+        count,
+        CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK,
+        this.world.loreOriginsUnlocked.has(id),
+      );
+      const y = 31 + index * 8;
+      if (index === this.codexIndex) {
+        o.fillStyle = "#26384d";
+        o.fillRect(10, y, 95, 8);
+      }
+      o.fillStyle = index === this.codexIndex ? "#ffffff" : "#b4c4d9";
+      o.font = `${index === this.codexIndex ? "bold " : ""}5.5px ui-monospace, monospace`;
+      o.fillText(discovered ? CODEX_ENTRIES[id].name : `Mẫu chưa rõ ${index + 1}`, 13, y + 1, 90);
+    });
+
+    o.fillStyle = "#ffffff";
+    o.font = "bold 9px sans-serif";
+    o.fillText(
+      visibility.sinhHoc || visibility.nguonGoc ? entry.name : `Mẫu chưa nhận diện ${this.codexIndex + 1}`,
+      122,
+      33,
+      180,
+    );
+    o.fillStyle = "#9db0cc";
+    o.font = "6px sans-serif";
+    o.fillText(`Dấu vết: ${kills}/${CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK}`, 122, 46);
+
+    const section = (title: string, text: string, y: number): void => {
+      o.fillStyle = "#7fd1ff";
+      o.font = "bold 6px sans-serif";
+      o.fillText(title, 122, y);
+      o.fillStyle = "#c5d0e3";
+      o.font = "6px sans-serif";
+      wrapCardLines(o, text, 180).slice(0, 2).forEach((line, index) => o.fillText(line, 122, y + 8 + index * 7));
+    };
+
+    const lockedText = `Cần hạ thêm ${Math.max(0, CONFIG.LAWS.CODEX_KILLS_TO_UNLOCK - kills)} lần để mở ghi chép.`;
+    section("SINH HỌC", visibility.sinhHoc ? entry.sinhHoc : lockedText, 57);
+    section("GHI CHÉP THỰC ĐỊA", visibility.ghiChepThucDia ? entry.ghiChepThucDia : lockedText, 84);
+    section("NGUỒN GỐC", visibility.nguonGoc ? entry.nguonGoc : "Chưa tìm được Mảnh Ký Ức.", 111);
+
+    const button = (x: number, width: number, text: string): void => {
+      o.fillStyle = "#172334";
+      o.fillRect(x, 160, width, 16);
+      o.strokeStyle = "#54708f";
+      o.strokeRect(x + 0.5, 160.5, width - 1, 15);
+      o.fillStyle = "#e4ebf7";
+      o.font = "bold 6px sans-serif";
+      o.textAlign = "center";
+      o.fillText(text, x + width / 2, 165);
+      o.textAlign = "left";
+    };
+    button(112, 46, "◀ TRƯỚC");
+    button(162, 46, "SAU ▶");
+    button(238, 74, "ESC  ĐÓNG");
+    o.restore();
   }
 
   /** the run-start build choice: impressive character selection stage with pedestals, animated preview models and glowing runes */
@@ -298,6 +481,28 @@ export class Hud implements Clickable {
     if (!node) return;
     o.save();
     o.scale(scale, scale);
+    if (!dialogue.blocking) {
+      o.fillStyle = "rgba(7, 10, 16, 0.88)";
+      o.fillRect(16, 128, 288, 44);
+      o.strokeStyle = "rgba(127, 209, 255, 0.7)";
+      o.strokeRect(16.5, 128.5, 287, 43);
+      o.fillStyle = "#e4ebf7";
+      o.textAlign = "left";
+      o.textBaseline = "top";
+      o.font = "bold 8px sans-serif";
+      o.fillText(node.speaker, 24, 132);
+      o.fillStyle = "#7a8aa5";
+      o.textAlign = "right";
+      o.font = "bold 7px sans-serif";
+      o.fillText("[E] ĐÓNG", 296, 133);
+      o.fillStyle = "#c5d0e3";
+      o.textAlign = "left";
+      o.font = "7px sans-serif";
+      const shown = node.text.slice(0, Math.floor(dialogue.charIndex));
+      wrapCardLines(o, shown, 270).slice(0, 3).forEach((line, index) => o.fillText(line, 24, 143 + index * 8));
+      o.restore();
+      return;
+    }
     o.fillStyle = "rgba(7, 10, 16, 0.94)";
     o.fillRect(24, 28, 272, 124);
     o.strokeStyle = "#7fd1ff";
@@ -336,9 +541,13 @@ export class Hud implements Clickable {
   }
 
   drawArtifacts(o: CanvasRenderingContext2D, scale: number): void {
+    if (this.codexOpen) {
+      this.drawCodex(o, scale);
+      return;
+    }
     if (this.world.dialogue !== null) {
       this.drawDialogue(o, scale);
-      return;
+      if (this.world.dialogue.blocking) return;
     }
     if (this.world.roomChoices !== null) {
       this.drawRoomChoices(o, scale);
@@ -671,6 +880,8 @@ export class Hud implements Clickable {
     o.textAlign = "center";
     o.fillText("E", gx, gy + radius + Math.round(2 * scale));
     o.textAlign = "left";
+
+    if (w.mode === "town" && this.canOpenCodex()) this.drawCodexButton(o, scale);
 
     let boss: World["enemies"][number] | null = null;
     for (const e of w.enemies) if (e.def.HP_BAR && !e.dead) boss = e;

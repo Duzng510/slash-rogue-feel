@@ -1,5 +1,8 @@
 import { CONFIG, enemyDef } from "../config.ts";
 import { ARTIFACT_COLORS, ARTIFACTS } from "../systems/artifacts.ts";
+import { HOUSES } from "../world/town.ts";
+import { POSES } from "./art/index.ts";
+import type { Pose } from "./art/kit.ts";
 
 const P = CONFIG.PALETTE;
 const PIXEL_SCALE = CONFIG.WORLD.PIXEL_SCALE;
@@ -24,6 +27,19 @@ function bake(w: number, h: number, ax: number, ay: number, draw: (g: CanvasRend
 function rect(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
   g.fillStyle = color;
   g.fillRect(x, y, w, h);
+}
+
+/**
+ * Bakes an authored pose into the base sprite's own box and anchor, so a pose cannot drift the
+ * feet line the shadow and hitbox math depend on. The declared box is checked, not trusted.
+ */
+function bakePose(base: Sprite, box: { w: number; h: number }, pose: Pose): Sprite {
+  if (base.w !== box.w || base.h !== box.h) {
+    throw new Error(`pose box ${box.w}x${box.h} does not match ${base.w}x${base.h} base sprite`);
+  }
+  return bake(base.w, base.h, base.ax, base.ay, (g) => {
+    for (const o of pose) rect(g, o.x, o.y, o.w, o.h, o.c);
+  });
 }
 
 function bakeBiomeTiles(S: Record<string, Sprite>, T: number, id: string, floor: string, wall: string, accent: string): void {
@@ -197,6 +213,69 @@ function buildTownPropSprites(S: Record<string, Sprite>): void {
     rect(g, 3, 4, 2, 4, "#ffe66b");
     rect(g, 2, 1, 4, 1, "#2a1a0e");
     rect(g, 3, 10, 2, 2, "#8b5a2b");
+  });
+
+  // --- interior furniture: only visible once the house's roof has peeled off ---
+  S.prop_anvil = bake(14, 10, 7, 9, (g) => {
+    rect(g, 4, 8, 6, 1, "#2a2f38");
+    rect(g, 5, 5, 4, 3, "#3d405b");
+    rect(g, 2, 2, 10, 3, "#4d5566");
+    rect(g, 2, 2, 10, 1, "#7d8799");
+    rect(g, 11, 3, 2, 1, "#6d7688");
+  });
+
+  S.prop_hearth = bake(16, 12, 8, 11, (g) => {
+    rect(g, 1, 3, 14, 8, "#4a4a52");
+    rect(g, 1, 3, 14, 1, "#6d6d75");
+    rect(g, 4, 5, 8, 6, "#1a0f0a");
+    rect(g, 5, 7, 6, 4, "#ff5522");
+    rect(g, 6, 6, 4, 3, "#ff963f");
+    rect(g, 7, 5, 2, 2, "#ffe66b");
+  });
+
+  S.prop_barrel = bake(11, 13, 5, 12, (g) => {
+    rect(g, 1, 1, 9, 11, "#6b4a2a");
+    rect(g, 1, 1, 9, 1, "#8a6238");
+    rect(g, 0, 3, 11, 1, "#3a2817");
+    rect(g, 0, 9, 11, 1, "#3a2817");
+    rect(g, 2, 4, 2, 5, "#8a6238");
+  });
+
+  S.prop_altar = bake(16, 13, 8, 12, (g) => {
+    rect(g, 2, 6, 12, 6, "#5a5f6e");
+    rect(g, 2, 6, 12, 1, "#8a90a2");
+    rect(g, 4, 2, 8, 4, "#3d405b");
+    rect(g, 6, 0, 4, 3, "#c2182b");
+    rect(g, 7, 0, 2, 1, "#ff5f5f");
+    rect(g, 3, 10, 10, 2, "#3a3f4c");
+  });
+
+  S.prop_shelf = bake(16, 16, 8, 15, (g) => {
+    rect(g, 1, 0, 14, 15, "#5a3d28");
+    rect(g, 2, 1, 12, 4, "#3a2817");
+    rect(g, 2, 6, 12, 4, "#3a2817");
+    rect(g, 2, 11, 12, 3, "#3a2817");
+    rect(g, 3, 2, 2, 3, "#8fa8c8");
+    rect(g, 7, 2, 3, 3, "#ffd166");
+    rect(g, 11, 7, 2, 3, "#58d68d");
+    rect(g, 4, 7, 3, 3, "#a55ad6");
+    rect(g, 3, 12, 4, 2, "#d4a373");
+  });
+
+  S.prop_table = bake(16, 10, 8, 9, (g) => {
+    rect(g, 0, 2, 16, 4, "#8b5a2b");
+    rect(g, 0, 2, 16, 1, "#a6703d");
+    rect(g, 1, 6, 2, 4, "#5a3d28");
+    rect(g, 13, 6, 2, 4, "#5a3d28");
+    rect(g, 6, 0, 4, 2, "#d7dbe4");
+  });
+
+  S.prop_brazier = bake(10, 14, 5, 13, (g) => {
+    rect(g, 4, 8, 2, 5, "#3a2817");
+    rect(g, 1, 5, 8, 3, "#4d5566");
+    rect(g, 2, 2, 6, 3, "#ff5522");
+    rect(g, 3, 1, 4, 2, "#ff963f");
+    rect(g, 4, 0, 2, 1, "#ffe66b");
   });
 }
 
@@ -688,6 +767,130 @@ function buildTileSprites(S: Record<string, Sprite>, T: number): void {
   bakeBiomeTiles(S, T, "caverns", "#263a4d", "#3b6078", "#345772");
   bakeBiomeTiles(S, T, "forge", "#39251a", "#633322", "#523324");
   bakeBiomeTiles(S, T, "void", "#30213e", "#4a3264", "#3c2854");
+  buildTownSprites(S, T);
+}
+
+/**
+ * Town tiles are baked from the same palette the map data uses, so the market reads as a place in
+ * the same world as the dungeon rather than a recoloured room: warm cobbles, plaster and timber.
+ */
+function buildTownSprites(S: Record<string, Sprite>, T: number): void {
+  S.grass = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.GRASS_A);
+    for (let y = 0; y < T; y++) {
+      for (let x = 0; x < T; x++) {
+        const h = pixelHash(x, y, 7);
+        if (h < 0.34) rect(g, x, y, 1, 1, P.GRASS_B);
+        else if (h > 0.93) rect(g, x, y, 1, 1, P.GRASS_HI);
+      }
+    }
+    // a few blades so the field is not uniform noise
+    g.globalAlpha = 0.7;
+    rect(g, 3, 9, 1, 3, P.GRASS_HI);
+    rect(g, 11, 4, 1, 3, P.GRASS_HI);
+  });
+
+  S.road = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.ROAD_A);
+    // irregular setts with mortar gaps: even rows would read as a brick wall, not a street
+    const stones: readonly [number, number, number, number][] = [
+      [1, 1, 6, 4], [8, 1, 4, 3], [13, 1, 3, 4],
+      [1, 6, 3, 4], [5, 6, 5, 4], [11, 5, 5, 5],
+      [1, 11, 5, 4], [7, 11, 4, 4], [12, 11, 4, 4],
+    ];
+    for (const [x, y, w, h] of stones) {
+      rect(g, x, y, w, h, P.ROAD_B);
+      rect(g, x, y, w, 1, P.ROAD_HI);
+      rect(g, x, y, 1, h, P.ROAD_HI);
+      rect(g, x, y + h - 1, w, 1, "#4a3c28");
+      rect(g, x + w - 1, y, 1, h, "#4a3c28");
+    }
+    g.globalAlpha = 0.35;
+    rect(g, 3, 3, 2, 1, P.ROAD_HI);
+    rect(g, 12, 8, 2, 1, P.ROAD_HI);
+  });
+
+  S.floor_wood = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.FLOOR_WOOD);
+    for (let row = 0; row < 4; row++) {
+      const oy = row * 4;
+      rect(g, 0, oy, T, 1, "#3a2817");
+      rect(g, 0, oy + 1, T, 1, "#6d4c33");
+      rect(g, (row % 2 === 0 ? 5 : 11), oy + 2, 1, 2, "#3a2817");
+    }
+    g.globalAlpha = 0.35;
+    rect(g, 2, 6, 4, 1, "#8a6a45");
+    rect(g, 9, 13, 5, 1, "#8a6a45");
+  });
+
+  S.wall_town = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.WALL_TOWN);
+    rect(g, 0, 0, T, 3, P.WALL_TOWN_TOP);
+    rect(g, 0, 0, T, 1, "#e2cfa8");
+    rect(g, 0, 3, T, 1, "#5c4a33");
+    // timber framing: two posts and a sill
+    rect(g, 1, 4, 2, T - 4, P.FENCE_WOOD);
+    rect(g, 13, 4, 2, T - 4, P.FENCE_WOOD);
+    rect(g, 0, 10, T, 2, P.FENCE_WOOD);
+    g.globalAlpha = 0.5;
+    rect(g, 5, 5, 3, 2, "#a08b6b");
+    rect(g, 9, 13, 3, 2, "#a08b6b");
+    g.globalAlpha = 0.8;
+    rect(g, 0, T - 2, T, 2, "#3a2c1c");
+  });
+
+  S.door_wood = bake(T, T, 0, 0, (g) => {
+    rect(g, 0, 0, T, T, P.FENCE_WOOD);
+    rect(g, 2, 1, 12, T - 1, P.DOOR_WOOD);
+    for (let x = 3; x < 14; x += 3) rect(g, x, 1, 1, T - 1, "#5c3b1e");
+    rect(g, 2, 4, 12, 2, "#2a1a0e");
+    rect(g, 2, 11, 12, 2, "#2a1a0e");
+    rect(g, 12, 7, 1, 2, "#ffd166");
+    g.globalAlpha = 0.6;
+    rect(g, 2, 1, 12, 1, "#a97a4a");
+  });
+
+  S.fence = bake(T, T, 0, 0, (g) => {
+    // grass shows through the gaps, so the yard reads as ground rather than a wall of void
+    rect(g, 0, 0, T, T, P.GRASS_A);
+    rect(g, 0, 4, T, 3, P.FENCE_WOOD);
+    rect(g, 0, 4, T, 1, "#6b4d33");
+    rect(g, 0, 10, T, 3, P.FENCE_WOOD);
+    rect(g, 0, 10, T, 1, "#6b4d33");
+    rect(g, 2, 2, 2, 12, "#3a2817");
+    rect(g, 12, 2, 2, 12, "#3a2817");
+    rect(g, 2, 2, 1, 12, "#5c3f28");
+  });
+
+  /** one roof per house, sized to its footprint: the peel is a whole roof, not per-tile art */
+  for (const h of HOUSES) {
+    const W = h.w * T;
+    const H = h.h * T;
+    const ridge = Math.floor(H * 0.35);
+    S[`roof_${h.id}`] = bake(W, H, 0, 0, (g) => {
+      rect(g, 0, 0, W, H, P.ROOF_A);
+      // course lines every 4px, lit along the top of each course
+      for (let y = 2; y < H; y += 4) {
+        rect(g, 0, y, W, 2, P.ROOF_B);
+        rect(g, 0, y, W, 1, P.ROOF_HI);
+      }
+      rect(g, 0, ridge, W, 3, P.ROOF_B);
+      rect(g, 0, ridge, W, 1, "#f0a878");
+      rect(g, 0, ridge + 3, W, 1, "#5a2a20");
+      // hips: the roof falls away toward the gable ends
+      g.globalAlpha = 0.45;
+      for (let x = 0; x < 4; x++) rect(g, x, 0, 1, H, "#2a120c");
+      for (let x = W - 4; x < W; x++) rect(g, x, 0, 1, H, "#2a120c");
+      // eave shadow along the bottom, then the outline that separates roof from wall
+      g.globalAlpha = 0.6;
+      rect(g, 0, H - 3, W, 3, "#2a120c");
+      g.globalAlpha = 1;
+      rect(g, 0, 0, W, 1, "#3a1a12");
+      rect(g, 0, H - 1, W, 1, "#3a1a12");
+      rect(g, 0, 0, 1, H, "#3a1a12");
+      rect(g, W - 1, 0, 1, H, "#3a1a12");
+    });
+  }
 }
 
 function buildParallaxSprites(S: Record<string, Sprite>): void {
@@ -1129,9 +1332,18 @@ export function buildAnimSets(): Record<string, SpriteSet> {
     const key = enemyDef(kind).SPRITE_KEY;
     const base = S[key];
     if (!base) continue;
-    set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1)], 8);
-    // attack clip: telegraph windup → strike lunge → recovery
-    set(`${key}_attack`, [shiftX(base, 1), shiftX(base, -2), copyOfSprite(base)], 3);
+    const table = POSES[key];
+    if (table) {
+      const idleFrames = table.idle
+        ? table.idle.map((p) => bakePose(base, table.box, p))
+        : [footShift(base, -1), copyOfSprite(base), footShift(base, 1)];
+      set(key, idleFrames, table.tickDur ?? 8);
+      set(`${key}_attack`, [bakePose(base, table.box, table.windup), bakePose(base, table.box, table.strike), bakePose(base, table.box, table.recover)], 3);
+    } else {
+      set(key, [footShift(base, -1), copyOfSprite(base), footShift(base, 1)], 8);
+      // attack clip: telegraph windup → strike lunge → recovery
+      set(`${key}_attack`, [shiftX(base, 1), shiftX(base, -2), copyOfSprite(base)], 3);
+    }
     // spawn clip: materialize from a dither (3 frames)
     set(`${key}_spawn`, [
       materialize(base, 1, 0.3),

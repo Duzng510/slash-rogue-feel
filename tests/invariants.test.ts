@@ -30,7 +30,7 @@ const TRIALS = Number(process.env.INV_TRIALS ?? CONFIG.LAWS.FUZZ_TRIALS);
 const BUDGET = Number(process.env.INV_BUDGET ?? CONFIG.LAWS.FUZZ_BUDGET);
 
 /** the committed golden trace; regenerate the whole line with RECORD_GOLDEN=1 after an intended change */
-let GOLDEN_HASH = 3722045457;
+let GOLDEN_HASH = 1969708675;
 let GOLDEN_RAN = 480;
 
 const fin = (...ns: number[]): boolean => ns.every((n) => Number.isFinite(n));
@@ -52,6 +52,7 @@ function fingerprint(w: World): string {
   const a: string[] = [
     "P", num(p.x), num(p.y), num(p.vx), num(p.vy), num(p.hp), String(p.iframeTicks), p.dead ? "1" : "0", String(p.state),
     "S", String(w.tickCount), String(w.roomIndex), String(w.hitStopTicks), String(w.projectiles.length), String(w.enemies.length),
+    "H", num(w.humanity),
   ];
   for (const e of w.enemies) a.push("E", String(e.kind), num(e.x), num(e.y), num(e.vx), num(e.vy), num(e.hp), e.dead ? "1" : "0", String(e.state), String(e.telegraphTicksLeft));
   for (const q of w.projectiles) a.push("Q", num(q.x), num(q.y), num(q.vx), num(q.vy), String(q.ticksLeft), String(q.owner));
@@ -131,6 +132,9 @@ function check(w: World): string | null {
   const p = w.player;
   if (!fin(p.x, p.y, p.vx, p.vy, p.hp)) return `player non-finite x=${p.x} y=${p.y} hp=${p.hp}`;
   if (p.hp < 0 || p.hp > p.maxHp + 1e-9) return `player hp ${p.hp} out of [0,${p.maxHp}]`;
+  if (!Number.isInteger(w.humanity) || w.humanity < 0 || w.humanity > CONFIG.LAWS.HUMANITY_MAX) {
+    return `humanity ${w.humanity} out of [0,${CONFIG.LAWS.HUMANITY_MAX}]`;
+  }
   if (w.enemies.length < 0 || w.enemies.length > CONFIG.LAWS.MAX_ENEMIES) return `enemy count ${w.enemies.length} over ceiling`;
   if (w.projectiles.length > CONFIG.LAWS.MAX_PROJECTILES) return `projectile count ${w.projectiles.length} over ceiling`;
   for (const e of w.enemies) {
